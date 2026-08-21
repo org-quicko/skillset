@@ -1,19 +1,19 @@
 import {
-  RegistryStateSchema,
+  SetupStateSchema,
   UserSchema,
   type Login,
-  type RegistryInit,
-  type RegistryState,
+  type SetupInit,
+  type SetupState,
   type User,
 } from "@skill-registry/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "@/lib/api";
 import { discardSessionState, meQueryKey } from "@/lib/query-keys";
 
-export function useRegistryState() {
+export function useSetupState() {
   return useQuery({
-    queryKey: ["registry"],
-    queryFn: () => apiFetch("/registry", RegistryStateSchema),
+    queryKey: ["setup"],
+    queryFn: () => apiFetch("/setup", SetupStateSchema),
   });
 }
 
@@ -36,11 +36,11 @@ export function useCurrentUser(enabled: boolean) {
 export function useSignup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: RegistryInit) =>
-      apiFetch("/registry", UserSchema, { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: (body: SetupInit) =>
+      apiFetch("/setup", UserSchema, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: (user) => {
       queryClient.setQueryData(meQueryKey, user);
-      queryClient.setQueryData(["registry"], { initialized: true } satisfies RegistryState);
+      queryClient.setQueryData(["setup"], { initialized: true } satisfies SetupState);
     },
   });
 }

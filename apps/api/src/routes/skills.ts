@@ -96,7 +96,7 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
     return c.json(SkillSchema.parse(skill));
   });
 
-  app.put("/skills/:name", requireAuth(deps), requireRole("writer", "admin"), async (c) => {
+  app.put("/skills/:name", requireAuth(deps), requireRole("writer"), async (c) => {
     const publisher = c.get("user");
 
     let name: string;
