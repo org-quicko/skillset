@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type postgres from "postgres";
+import { advisoryLockKey } from "./advisory-lock.js";
 import type { Database } from "./client.js";
 
 const READY_CHECK_RETRIES = 30;
@@ -22,15 +22,6 @@ export async function waitForDatabase(sql: postgres.Sql): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, READY_CHECK_DELAY_MS));
     }
   }
-}
-
-/**
- * Postgres advisory locks share one keyspace across the whole cluster, so the
- * key is derived from a namespaced name rather than picked as an arbitrary
- * literal that could collide with another lock, app, or service.
- */
-function advisoryLockKey(name: string): number {
-  return createHash("sha256").update(name).digest().readInt32BE(0);
 }
 
 const MIGRATION_LOCK_KEY = advisoryLockKey("skill-registry:migrations");

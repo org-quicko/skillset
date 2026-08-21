@@ -5,10 +5,11 @@ declared in hand-written SQL because Drizzle has no native `tsvector`.
 
 Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token.
 
-Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) — the two
-line up deliberately. TypeScript is camelCase, and the single conversion between the two lives in
-the shared module at the API boundary. A column name appearing in a wire payload is therefore
-expected, not a leak.
+Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
+TypeScript type — there is no separate camelCase domain shape or conversion boundary. Types are
+`z.infer`red from the Zod schemas in `@skill-registry/shared`, so a Drizzle row, a wire payload,
+and a TypeScript type all agree on the same field names by construction. A column name appearing
+in a wire payload is therefore expected, not a leak.
 
 ## `users`
 

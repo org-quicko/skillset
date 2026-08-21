@@ -11,4 +11,11 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname, './src'),
     },
   },
+  server: {
+    // In production the API serves the built SPA from the same origin; in
+    // dev the two run on separate ports, so proxy to the API dev server.
+    proxy: {
+      '/api': 'http://localhost:3000',
+    },
+  },
 })

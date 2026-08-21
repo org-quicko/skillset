@@ -12,6 +12,9 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
-Because this repo tracks issues as local markdown, a label is applied by writing a `Status:` line near the top of the issue file — e.g. `Status: ready-for-agent`.
+This repo tracks issues on GitHub, so a label is a real GitHub label — apply it with
+`gh issue create --label` or `gh issue edit --add-label`. All five exist on
+`org-quicko/skill-registry`, alongside `ready-for-review` for work that is built and awaiting
+review.
 
 Edit the right-hand column to match whatever vocabulary you actually use.

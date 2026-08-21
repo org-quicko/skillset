@@ -4,20 +4,30 @@
 
 **Blocked by:** 01 — Walking skeleton.
 
-**Status:** ready-for-agent
+**Status:** ready-for-review
 
-- [ ] Signup succeeds only while no User exists, and the User it creates is an Admin.
-- [ ] Once any User exists, signup is unavailable to everyone, authenticated or not.
-- [ ] A User logs in with email and password and receives a session cookie that is http-only, secure, and strictly same-site.
-- [ ] A failed login does not reveal whether the email is known — same response either way, and the response time is padded to a floor so timing does not reveal it either.
-- [ ] The session carries only the User's identifier — never their role.
-- [ ] The role is read from the database on every request, so changing a User's role takes effect on their very next request with no re-login.
-- [ ] Logging out ends the session.
-- [ ] A route reports the authenticated User's identity, names, and role.
-- [ ] Passwords are stored with the runtime's built-in argon2id, and plaintext is never persisted or logged.
-- [ ] A User may exist with no password at all; nothing assumes that a User implies a password (ADR-0007).
-- [ ] Issuing a session takes an already-resolved User rather than a set of credentials, so adding a second way to log in later is a new route and nothing more.
-- [ ] Authentication resolves a request to a User without regard to which credential produced it; authorisation reads the role separately, on that request.
-- [ ] The closed-signup test asserts that the initialisation route is unavailable once a User exists — not that only an Admin can create Users, which OIDC will make false.
-- [ ] The web interface shows a bootstrap signup screen while the Registry has no Users, and a login screen once it does.
-- [ ] An unauthenticated response from any route returns the User to login and discards cached server state.
+- [x] Signup succeeds only while no User exists, and the User it creates is an Admin.
+- [x] Once any User exists, signup is unavailable to everyone, authenticated or not.
+- [x] A User logs in with email and password and receives a session cookie that is http-only, secure, and strictly same-site.
+- [x] A failed login does not reveal whether the email is known — same response either way, and the response time is padded to a floor so timing does not reveal it either.
+- [x] The session carries only the User's identifier — never their role.
+- [x] The role is read from the database on every request, so changing a User's role takes effect on their very next request with no re-login.
+- [x] Logging out ends the session.
+- [x] A route reports the authenticated User's identity, names, and role.
+- [x] Passwords are stored with the runtime's built-in argon2id, and plaintext is never persisted or logged.
+- [x] A User may exist with no password at all; nothing assumes that a User implies a password (ADR-0007).
+- [x] Issuing a session takes an already-resolved User rather than a set of credentials, so adding a second way to log in later is a new route and nothing more.
+- [x] Authentication resolves a request to a User without regard to which credential produced it; authorisation reads the role separately, on that request.
+- [x] The closed-signup test asserts that the initialisation route is unavailable once a User exists — not that only an Admin can create Users, which OIDC will make false.
+- [x] The web interface shows a bootstrap signup screen while the Registry has no Users, and a login screen once it does.
+- [x] An unauthenticated response from any route returns the User to login and discards cached server state.
+
+## Comments
+
+Added the `users` table (Drizzle migration, no `tokens`/`skills` yet — those are later tickets). API: `GET/POST /registry`, `POST /auth/login`, `POST /auth/logout`, `GET /users/me`, all against `docs/openapi.json`. Session is a `hono/jwt`-signed cookie carrying only `sub`; role is resolved from the `users` row on every request via `requireAuth` middleware. Passwords hashed with `Bun.password` (argon2id); `passwordHash` is nullable end-to-end per ADR-0007, and login tolerates a passwordless row without crashing. Failed logins (unknown email or wrong password) return an identical body and are padded to a 200ms floor. Registry bootstrap runs inside a transaction with `pg_advisory_xact_lock` (not session-level `pg_advisory_lock`, which isn't safe over a pooled `postgres.js` client — see `registry.test.ts`, added after `/code-review` caught this as a real race).
+
+Web: `App.tsx` switches between a bootstrap form, a login form, and a minimal authenticated view based on `GET /registry` + `GET /users/me`. A single `apiFetch` funnel treats any 401 as an expired session; `discardSessionState` (in `lib/query-keys.ts`) is the one safe way to react to that in TanStack Query — `queryClient.clear()` alone was tried first and turned out to orphan the mounted `me` observer from a freshly rebuilt cache entry, so the UI never re-rendered on logout. Verified end-to-end via `docker compose` and the browser: signup, reload-preserves-session, login, and logout all behave correctly.
+
+`/code-review` (Standards + Spec axes) ran clean on Standards; Spec caught the advisory-lock race above (fixed) and a stale code comment (fixed). A pre-existing instance of the same session-level-lock pattern in `migrate.ts` (ticket 01) was flagged as a separate follow-up rather than fixed here, since it's out of this ticket's scope and lower-risk (single-process startup, not live request traffic).
+
+**Follow-up refactor**, after reviewing a sibling project's (`silo`) conventions: introduced `packages/shared` (`@skill-registry/shared`), a new Bun workspace member holding Zod schemas — `RoleSchema`, `UserSchema`, `RegistryInitSchema`, `RegistryStateSchema`, `LoginSchema`, `ErrorResponseSchema` — consumed by both `apps/api` and `apps/web`. This replaced the hand-rolled `http/validation.ts` helpers and the `http/serialize.ts` mapping function: `schema.parse(row)` is now the one shaping step everywhere a response leaves a route (Zod's default unknown-key-stripping does the job `serializeUser` used to do by hand), and `schema.safeParse(body)` replaces the hand-written field checks on the way in. The `users` table's Drizzle schema was renamed from camelCase to snake_case TS keys (`first_name`, `password_hash`, …) to match the SQL columns and the wire 1:1 — no migration was needed, since only the TS property names changed, not the underlying SQL. The web app dropped its parallel camelCase `User` type and `toUser()` converter for the same reason. Routes were also restructured to mirror `silo`'s pattern: one shared `Hono` app (`apps/api/src/app.ts`) that each resource's `registerXRoutes(app, deps)` function mutates in place, replacing the previous per-resource `Hono` sub-app + `.route()` composition. `Dockerfile` was updated to build/copy the new workspace member. Full test suite, typecheck, and a browser walkthrough (signup/login/logout) re-verified after the refactor.

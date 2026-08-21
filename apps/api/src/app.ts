@@ -1,10 +1,17 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import type postgres from "postgres";
+import type { AuthVariables } from "./auth/middleware.js";
+import type { Database } from "./db/client.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+import { registerRegistryRoutes } from "./routes/registry.js";
+import { registerUsersRoutes } from "./routes/users.js";
 import type { StorageAdapter } from "./storage/types.js";
 
 export interface AppDependencies {
   sql: postgres.Sql;
+  db: Database;
+  jwtSecret: string;
   storage: StorageAdapter;
   /** Absolute path to the built web interface's static assets, if any. */
   webRoot?: string;
@@ -13,11 +20,19 @@ export interface AppDependencies {
 export function createApp(deps: AppDependencies): Hono {
   const app = new Hono();
 
-  const api = new Hono();
+  // One shared app that each resource's register function mutates in place
+  // — routes aren't split across per-resource sub-apps composed with
+  // `.route()`, so there's a single place a request for a given path is
+  // ever matched.
+  const api = new Hono<{ Variables: AuthVariables }>();
   api.get("/health", async (c) => {
     await deps.sql`SELECT 1`;
     return c.json({ status: "ok" });
   });
+
+  registerRegistryRoutes(api, deps);
+  registerAuthRoutes(api, deps);
+  registerUsersRoutes(api, deps);
 
   app.route("/api", api);
 

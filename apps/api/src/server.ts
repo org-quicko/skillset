@@ -18,7 +18,7 @@ async function main() {
   const webDist = join(import.meta.dir, "../../web/dist");
   const webRoot = (await Bun.file(join(webDist, "index.html")).exists()) ? webDist : undefined;
 
-  const app = createApp({ sql, storage, webRoot });
+  const app = createApp({ sql, db, storage, webRoot, jwtSecret: config.jwtSecret });
 
   Bun.serve({ fetch: app.fetch, port: config.port });
   console.log(`Skill Registry listening on port ${config.port}`);
