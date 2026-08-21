@@ -1,0 +1,735 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Skill Registry API",
+    "version": "0.1.0",
+    "description": "A self-hosted Registry for Agent Skills. This is the contract the CLI depends on; the web interface uses the same routes and has no private data path of its own.\n\n**Conventions.** Every JSON key on the wire is snake_case, which means wire keys line up with Postgres column names. TypeScript types, interfaces, and classes are camelCase, so conversion happens once at the boundary in the shared module rather than ad hoc per call site.\n\n**Artifact bytes never pass through this API.** Publishing returns a presigned upload target that the caller writes to directly, and reading an Artifact redirects to a short-lived presigned location. The API therefore validates the metadata a caller claims about a Skill, never the Artifact itself (ADR-0001)."
+  },
+  "servers": [{ "url": "/api" }],
+  "security": [{ "cookieAuth": [] }, { "bearerAuth": [] }],
+  "tags": [
+    { "name": "registry", "description": "The Registry itself, and its one-time initialisation" },
+    { "name": "auth", "description": "Logging in and out" },
+    { "name": "users", "description": "Users, their own details, and their Tokens" },
+    { "name": "skills", "description": "Publishing, reading, searching, and retrieving Skills" }
+  ],
+  "paths": {
+    "/registry": {
+      "get": {
+        "tags": ["registry"],
+        "summary": "Read the Registry's state",
+        "description": "Tells the web interface whether to show the initialisation screen or the login screen. The only unauthenticated read in the API.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The Registry's state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["initialized"],
+                  "properties": {
+                    "initialized": {
+                      "type": "boolean",
+                      "description": "False only while the Registry has no Users at all."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["registry"],
+        "summary": "Initialise the Registry",
+        "description": "Creates the first User, who is an Admin and chooses their own password. Available only while the Registry has no Users; afterwards this returns 409 forever and new Users come from `POST /users` instead.\n\nModelled as its own resource rather than as an unauthenticated `POST /users`, because the two differ in authentication, in who picks the password, and in whether a role may be supplied — one endpoint with two request shapes would be a trap for both callers.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["first_name", "last_name", "email", "password"],
+                "properties": {
+                  "first_name": { "type": "string", "minLength": 1 },
+                  "last_name": { "type": "string", "minLength": 1 },
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string", "minLength": 12 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The Registry is initialised and the first Admin is logged in",
+            "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "409": {
+            "description": "The Registry already has a User, so initialisation is closed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Log in",
+        "description": "Issues a session and sets its cookie. Nothing is persisted — the session is a signed token carrying only the User's id (ADR-0005), so there is no session record anywhere to read or delete.\n\nIf the returned User has `must_change_password` set, every route except reading and replacing their own password will be refused until it is done.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in",
+            "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "401": {
+            "description": "Unknown email or wrong password. Deliberately does not distinguish the two.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Log out",
+        "description": "Clears the session cookie. Because the session is a signed token rather than a stored record, the token itself remains valid until it expires (ADR-0005) — clearing the cookie is what ends the session for this browser. Tokens are the credential that can actually be revoked.",
+        "responses": {
+          "204": { "description": "Session ended" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["users"],
+        "summary": "List Users",
+        "description": "Admins only.",
+        "parameters": [{ "$ref": "#/components/parameters/Page" }],
+        "responses": {
+          "200": {
+            "description": "A page of Users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "page", "page_size", "total"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/User" } },
+                    "page": { "type": "integer" },
+                    "page_size": { "type": "integer" },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      },
+      "post": {
+        "tags": ["users"],
+        "summary": "Create a User",
+        "description": "Admins only. The Registry generates the initial password and returns it once — there is no email delivery. The new User must change it before they can do anything else.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["first_name", "last_name", "email", "role"],
+                "properties": {
+                  "first_name": { "type": "string", "minLength": 1 },
+                  "last_name": { "type": "string", "minLength": 1 },
+                  "email": { "type": "string", "format": "email" },
+                  "role": { "$ref": "#/components/schemas/Role" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. `initial_password` is shown once and is not recoverable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["user", "initial_password"],
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" },
+                    "initial_password": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "409": {
+            "description": "A User with that email already exists",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/users/me": {
+      "get": {
+        "tags": ["users"],
+        "summary": "Read the authenticated User",
+        "description": "Also the CLI's identity command: it distinguishes a wrong Registry location from a rejected Token. The role is resolved on this request, not read from the credential.",
+        "responses": {
+          "200": {
+            "description": "The authenticated User",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      },
+      "patch": {
+        "tags": ["users"],
+        "summary": "Correct your own names",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "first_name": { "type": "string", "minLength": 1 },
+                  "last_name": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users/me/password": {
+      "put": {
+        "tags": ["users"],
+        "summary": "Replace your own password",
+        "description": "Clears `must_change_password`. Permitted while that flag is set — this is the route that resolves it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["current_password", "new_password"],
+                "properties": {
+                  "current_password": { "type": "string" },
+                  "new_password": { "type": "string", "minLength": 12 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Password replaced" },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users/me/tokens": {
+      "get": {
+        "tags": ["users"],
+        "summary": "List your own Tokens",
+        "description": "Secrets are never included. `last_used_at` is how a dead Token is identified. Nested under the owner because a User may only ever manage their own.",
+        "responses": {
+          "200": {
+            "description": "Your Tokens",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Token" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      },
+      "post": {
+        "tags": ["users"],
+        "summary": "Mint a Token",
+        "description": "The secret is returned exactly once and stored only as a hash. Tokens do not expire; revoke by deleting. A Token carries no role of its own — its owner's current role is resolved on every request, so a demotion applies to existing Tokens immediately.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A display name, so a Token can be recognised later."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Minted. `secret` will never be shown again.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TokenCreated" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users/me/tokens/{token_id}": {
+      "parameters": [
+        {
+          "name": "token_id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "delete": {
+        "tags": ["users"],
+        "summary": "Revoke a Token",
+        "description": "The next request bearing it fails.",
+        "responses": {
+          "204": { "description": "Revoked" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": {
+            "description": "No such Token belonging to you",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/users/{user_id}": {
+      "parameters": [
+        {
+          "name": "user_id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "patch": {
+        "tags": ["users"],
+        "summary": "Change a User's role",
+        "description": "Admins only. Takes effect on that User's next request, including requests bearing their existing Tokens.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["role"],
+                "properties": { "role": { "$ref": "#/components/schemas/Role" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": { "$ref": "#/components/responses/UserNotFound" },
+          "409": { "$ref": "#/components/responses/LastAdmin" }
+        }
+      },
+      "delete": {
+        "tags": ["users"],
+        "summary": "Remove a User",
+        "description": "Admins only. Ends their access and deletes their Tokens. Skills they published remain, and attribution survives through the publisher email snapshot.",
+        "responses": {
+          "204": { "description": "Removed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": { "$ref": "#/components/responses/UserNotFound" },
+          "409": { "$ref": "#/components/responses/LastAdmin" }
+        }
+      }
+    },
+    "/skills": {
+      "get": {
+        "tags": ["skills"],
+        "summary": "List or search Skills",
+        "description": "Most recently published first. With `q`, results are full-text matched over name and description. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Full-text search phrase. Supports quoted phrases and `-exclusions`. Omitted or empty returns the ordinary list.",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/Page" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Skills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "page", "page_size", "total"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/SkillSummary" }
+                    },
+                    "page": { "type": "integer" },
+                    "page_size": { "type": "integer", "const": 50 },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/skills/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
+      "get": {
+        "tags": ["skills"],
+        "summary": "Read a Skill",
+        "description": "An exact-name read. Does not go through full-text search.",
+        "responses": {
+          "200": {
+            "description": "The Skill",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/SkillNotFound" }
+        }
+      },
+      "put": {
+        "tags": ["skills"],
+        "summary": "Publish a Skill",
+        "description": "Create or replace, idempotent by name: publishing an existing Skill replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002).\n\nThe row is written first and an upload target returned. The caller then writes the Artifact to that target directly. Until it does, the Skill lists and reads but its Artifact cannot be retrieved.\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["description", "body"],
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "description": "From the `SKILL.md` frontmatter."
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The `SKILL.md` content below the frontmatter. Rendered through an allowlist sanitiser, never trusted as markup."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Skill row was created or replaced. Write the Artifact to `upload` next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["skill", "upload"],
+                  "properties": {
+                    "skill": { "$ref": "#/components/schemas/Skill" },
+                    "upload": { "$ref": "#/components/schemas/UploadTarget" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Readers cannot publish",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["skills"],
+        "summary": "Delete a Skill",
+        "description": "Admins only. Removes the row and the Artifact permanently — there is no version history and no soft delete. Recovery is bucket versioning in object storage (ADR-0002). Succeeds even when the Artifact was never uploaded.",
+        "responses": {
+          "204": { "description": "Deleted. The name is immediately available to publish again." },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Readers and writers cannot delete a Skill",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/SkillNotFound" }
+        }
+      }
+    },
+    "/skills/{name}/artifact": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
+      "get": {
+        "tags": ["skills"],
+        "summary": "Retrieve a Skill's Artifact",
+        "description": "Authorises the request, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Any authenticated User may retrieve an Artifact. The response body is the zip, named after the Skill.",
+        "responses": {
+          "302": {
+            "description": "Redirect to the presigned location",
+            "headers": {
+              "Location": {
+                "description": "Short-lived presigned read URL for the Artifact",
+                "schema": { "type": "string", "format": "uri" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": {
+            "description": "No such Skill, or its Artifact was never uploaded",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session",
+        "description": "Signed session cookie, http-only, secure, strictly same-site. Carries only the User's id; the role is resolved from the database on every request (ADR-0005). Cannot be revoked before expiry."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A Token, used by the CLI. Looked up by hash on every request; revocable immediately."
+      }
+    },
+    "headers": {
+      "SessionCookie": {
+        "description": "Sets the session cookie",
+        "schema": { "type": "string" }
+      }
+    },
+    "parameters": {
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "integer", "minimum": 1, "default": 1 }
+      },
+      "SkillName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "The Skill's name, from its `SKILL.md` frontmatter.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        }
+      }
+    },
+    "responses": {
+      "Unauthenticated": {
+        "description": "No valid session or Token. The web interface treats this as an expired session, discards cached state, and returns to login.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "AdminOnly": {
+        "description": "Requires the admin role",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "SkillNotFound": {
+        "description": "No Skill by that name",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "UserNotFound": {
+        "description": "No such User",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ValidationFailed": {
+        "description": "The request failed a validation rule. `code` names the rule and `field` names what broke it, so the CLI and the web interface can report the same specific reason.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "LastAdmin": {
+        "description": "Refused: this is the last Admin, and the Registry must never be left without one",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "schemas": {
+      "Role": {
+        "type": "string",
+        "enum": ["reader", "writer", "admin"],
+        "description": "reader: browse, search, read, retrieve Artifacts. writer: also publish, including replacing any Skill. admin: also delete Skills and manage Users."
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "first_name",
+          "last_name",
+          "role",
+          "must_change_password",
+          "created_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "role": { "$ref": "#/components/schemas/Role" },
+          "must_change_password": {
+            "type": "boolean",
+            "description": "True only for a User holding a password that was generated for them and not yet replaced. Meaningful only where a password exists — a User who authenticates through an identity provider has none (ADR-0007)."
+          },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Publisher": {
+        "type": "object",
+        "description": "Who last published a Skill. `email` is a snapshot taken at publish time and is always present; `user_id` and the names are null once that User has been removed.",
+        "required": ["user_id", "email", "first_name", "last_name"],
+        "properties": {
+          "user_id": { "type": ["string", "null"], "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "first_name": { "type": ["string", "null"] },
+          "last_name": { "type": ["string", "null"] }
+        }
+      },
+      "SkillSummary": {
+        "type": "object",
+        "required": ["name", "description", "published_by", "published_at"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "description": { "type": "string", "maxLength": 1024 },
+          "published_by": { "$ref": "#/components/schemas/Publisher" },
+          "published_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Skill": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SkillSummary" },
+          {
+            "type": "object",
+            "required": ["body"],
+            "properties": {
+              "body": {
+                "type": "string",
+                "description": "The `SKILL.md` content below the frontmatter, as supplied by the publisher. Sanitise before rendering."
+              }
+            }
+          }
+        ]
+      },
+      "UploadTarget": {
+        "type": "object",
+        "description": "Where to write the Artifact. A presigned location on object storage — the bytes do not pass through this API.",
+        "required": ["url", "method", "headers", "expires_in_seconds"],
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "method": { "type": "string", "const": "PUT" },
+          "headers": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Headers that must be sent verbatim for the presigned signature to verify."
+          },
+          "expires_in_seconds": { "type": "integer" }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "required": ["id", "name", "created_at", "last_used_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_used_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "TokenCreated": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Token" },
+          {
+            "type": "object",
+            "required": ["secret"],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "Shown once. Never cached by the web interface, and stored only as a hash by the Registry."
+              }
+            }
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "A stable machine-readable identifier for what went wrong — for validation failures, the specific rule that failed."
+              },
+              "message": { "type": "string" },
+              "field": {
+                "type": "string",
+                "description": "The field or file that broke the rule, when there is one."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
