@@ -27,7 +27,11 @@ A User of the Registry.
 | `created_at`           | `timestamptz` | not null, default `now()`                         |
 | `updated_at`           | `timestamptz` | not null, default `now()`                         |
 
-`user_role` is an enum: `reader`, `writer`, `admin`.
+`user_role` is an enum: `reader`, `writer`, `admin`, `superadmin`. A partial unique index
+(`users_role_superadmin_index`, on `role` where `role = 'superadmin'`) enforces that at most one
+row ever holds it — the one thing about the Superadmin invariant the schema *can* express.
+That the role is never reassigned once set, or removed from the User holding it, is an
+application rule; see "Rules the schema cannot express" below.
 
 Email is the identifier. It is normalised to lowercase on write so that the unique
 constraint means what a person expects it to mean.
@@ -148,11 +152,13 @@ authentication is the path that *is* revocable.
 These are enforced in the application and each needs a test, because the database will not
 catch them:
 
-- **The last Admin cannot be demoted or removed.** Requires counting Admins within the
-  transaction; no constraint can express it.
-- **The initialisation route is unavailable once any User exists**, and the User it creates is an
-  Admin. Phrase the test that way rather than as "only an Admin can create Users" — OIDC will add a
-  third way for a User to come into existence (ADR-0007).
+- **The Superadmin's role is permanent.** No route may ever set `role` to `superadmin` for
+  anyone other than the User `/setup` created, change it away from `superadmin`, or remove
+  that User. The partial unique index stops two Users holding it at once; it does not stop
+  either of those.
+- **The `/setup` route is unavailable once any User exists**, and the User it creates is the
+  Superadmin. Phrase the test that way rather than as "only the Superadmin can create Users" —
+  OIDC will add a third way for a User to come into existence (ADR-0007).
 - **Role permissions** — readers cannot publish, writers cannot delete a Skill or manage
   Users.
 - **Write ordering.** The row is created before the Artifact is uploaded, and the Skill list
