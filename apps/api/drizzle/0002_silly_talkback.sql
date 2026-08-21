@@ -1,3 +1,4 @@
+ALTER TYPE "public"."user_role" ADD VALUE 'superadmin';--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "skills" (
 	"name" text PRIMARY KEY NOT NULL,
 	"description" text NOT NULL,
@@ -16,4 +17,5 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "skills_search_idx" ON "skills" USING gin ("search");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "skills_published_at_idx" ON "skills" USING btree ("published_at" DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS "skills_published_at_idx" ON "skills" USING btree ("published_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "users_role_superadmin_index" ON "users" USING btree ("role") WHERE "users"."role" = 'superadmin';

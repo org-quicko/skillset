@@ -3,9 +3,10 @@ import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Database } from "../db/client.js";
-import { users, type UserRow } from "../db/schema.js";
+import { tokens, users, type UserRow } from "../db/schema.js";
 import { forbidden, unauthenticated } from "../http/errors.js";
 import { SESSION_COOKIE_NAME, verifySession } from "./session.js";
+import { digestsMatch, hashTokenSecret } from "./token.js";
 
 export interface AuthDependencies {
   db: Database;
@@ -14,32 +15,54 @@ export interface AuthDependencies {
 
 export type AuthVariables = { user: UserRow };
 
+const BEARER_PREFIX = "Bearer ";
+
 /**
  * Authentication resolves a request to a User without regard to which
- * credential produced it (spec, "Access control"); today that's only the
- * session cookie, and Token authentication (ticket 05) is a second resolver
- * added here, not a rewrite of this middleware. Authorisation reads the
- * User's role separately, from the row this attaches to context — resolved
- * fresh on every request, never from the token (ADR-0005).
+ * credential produced it (spec, "Access control"): a session cookie or a
+ * Token's `Authorization: Bearer` header, tried in that order. Authorisation
+ * reads the User's role separately, from the row this attaches to context —
+ * resolved fresh on every request from the database, never from the session
+ * or the Token itself (ADR-0005), so a Token grants no more than its owner's
+ * *current* role and a demotion or revocation takes effect on the next
+ * request.
  */
 export function requireAuth(deps: AuthDependencies): MiddlewareHandler<{ Variables: AuthVariables }> {
   return async (c, next) => {
-    const user = await resolveUser(c, deps);
+    const user = (await resolveSessionUser(c, deps)) ?? (await resolveTokenUser(c, deps));
     if (!user) return unauthenticated(c);
     c.set("user", user);
     await next();
   };
 }
 
-async function resolveUser(c: Context, deps: AuthDependencies): Promise<UserRow | null> {
-  const token = getCookie(c, SESSION_COOKIE_NAME);
-  if (!token) return null;
+async function resolveSessionUser(c: Context, deps: AuthDependencies): Promise<UserRow | null> {
+  const cookie = getCookie(c, SESSION_COOKIE_NAME);
+  if (!cookie) return null;
 
-  const userId = await verifySession(token, deps.jwtSecret);
+  const userId = await verifySession(cookie, deps.jwtSecret);
   if (!userId) return null;
 
   const [user] = await deps.db.select().from(users).where(eq(users.id, userId)).limit(1);
   return user ?? null;
+}
+
+async function resolveTokenUser(c: Context, deps: AuthDependencies): Promise<UserRow | null> {
+  const header = c.req.header("authorization");
+  if (!header?.startsWith(BEARER_PREFIX)) return null;
+
+  const secret = header.slice(BEARER_PREFIX.length).trim();
+  if (!secret) return null;
+
+  const digest = hashTokenSecret(secret);
+  const [token] = await deps.db.select().from(tokens).where(eq(tokens.token_hash, digest)).limit(1);
+  if (!token || !digestsMatch(token.token_hash, digest)) return null;
+
+  const [user] = await deps.db.select().from(users).where(eq(users.id, token.user_id)).limit(1);
+  if (!user) return null;
+
+  await deps.db.update(tokens).set({ last_used_at: new Date() }).where(eq(tokens.id, token.id));
+  return user;
 }
 
 // Roles are cumulative (spec, "Access control"): writer can do everything a
