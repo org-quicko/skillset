@@ -116,7 +116,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     container = started.container;
     context = started.context;
 
-    const signUp = await context.app.request("/api/registry", {
+    const signUp = await context.app.request("/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -336,7 +336,7 @@ describe("Listing Skills (ticket 03)", () => {
     container = started.container;
     context = started.context;
 
-    await context.app.request("/api/registry", {
+    await context.app.request("/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

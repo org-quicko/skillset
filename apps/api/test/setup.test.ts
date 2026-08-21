@@ -6,9 +6,9 @@ import { startTestContext, stopTestContext, type TestContext } from "./setup.js"
 /**
  * Isolated from auth.test.ts's story so a real race — several bootstrap
  * attempts in flight together — can be exercised without disturbing the
- * fixed admin identity the rest of that suite depends on.
+ * fixed superadmin identity the rest of that suite depends on.
  */
-describe("Registry initialisation under concurrency", () => {
+describe("Setup initialisation under concurrency", () => {
   let container: StartedPostgreSqlContainer;
   let context: TestContext;
 
@@ -24,7 +24,7 @@ describe("Registry initialisation under concurrency", () => {
 
   it("lets exactly one of several concurrent signups through", async () => {
     const attempts = Array.from({ length: 5 }, (_, i) =>
-      context.app.request("/api/registry", {
+      context.app.request("/api/setup", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

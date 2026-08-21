@@ -30,7 +30,7 @@ function setCookieValue(res: Response, name: string): string {
 describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   let container: StartedPostgreSqlContainer;
   let context: TestContext;
-  let adminCookie: string;
+  let superadminCookie: string;
 
   beforeAll(async () => {
     const started = await startTestContext();
@@ -42,14 +42,14 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     await stopTestContext(context, container);
   });
 
-  it("reports the Registry as uninitialised before any User exists", async () => {
-    const res = await context.app.request("/api/registry");
+  it("reports setup as uninitialised before any User exists", async () => {
+    const res = await context.app.request("/api/setup");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ initialized: false });
   });
 
   it("rejects a signup password shorter than 12 characters", async () => {
-    const res = await context.app.request("/api/registry", {
+    const res = await context.app.request("/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -64,8 +64,8 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     expect(body.error.field).toBe("password");
   });
 
-  it("signs up the first User as an Admin and starts a session", async () => {
-    const res = await context.app.request("/api/registry", {
+  it("signs up the first User as a Superadmin and starts a session", async () => {
+    const res = await context.app.request("/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -77,11 +77,11 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as ApiUser;
-    expect(body.role).toBe("admin");
+    expect(body.role).toBe("superadmin");
     expect(body.email).toBe("ada@example.com"); // normalised to lowercase
     expect(body).not.toHaveProperty("password_hash");
 
-    adminCookie = setCookieValue(res, "session");
+    superadminCookie = setCookieValue(res, "session");
   });
 
   it("stores the password hashed with argon2id, never in plaintext", async () => {
@@ -91,18 +91,18 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   });
 
   it("carries only the User's id in the session — never the role", async () => {
-    const token = adminCookie.split("=")[1]!;
+    const token = superadminCookie.split("=")[1]!;
     const { payload } = decode(token);
     expect(Object.keys(payload).sort()).toEqual(["exp", "sub"]);
   });
 
-  it("reports the Registry as initialised once a User exists", async () => {
-    const res = await context.app.request("/api/registry");
+  it("reports setup as initialised once a User exists", async () => {
+    const res = await context.app.request("/api/setup");
     expect(await res.json()).toEqual({ initialized: true });
   });
 
   it("closes signup once a User exists — regardless of who is asking", async () => {
-    const res = await context.app.request("/api/registry", {
+    const res = await context.app.request("/api/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -120,14 +120,14 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
 
   it("reports identity, names, and role for the authenticated User", async () => {
     const res = await context.app.request("/api/users/me", {
-      headers: { cookie: adminCookie },
+      headers: { cookie: superadminCookie },
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       email: "ada@example.com",
       first_name: "Ada",
       last_name: "Lovelace",
-      role: "admin",
+      role: "superadmin",
       must_change_password: false,
     });
   });
@@ -144,7 +144,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
       body: JSON.stringify({ email: "ada@example.com", password: "correct-horse-battery" }),
     });
     expect(res.status).toBe(200);
-    adminCookie = setCookieValue(res, "session");
+    superadminCookie = setCookieValue(res, "session");
   });
 
   it("refuses a wrong password and an unknown email identically, both padded to the same floor", async () => {
@@ -191,22 +191,22 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   });
 
   it("resolves the role from the database on every request, taking effect without re-login", async () => {
-    let res = await context.app.request("/api/users/me", { headers: { cookie: adminCookie } });
-    expect(((await res.json()) as ApiUser).role).toBe("admin");
+    let res = await context.app.request("/api/users/me", { headers: { cookie: superadminCookie } });
+    expect(((await res.json()) as ApiUser).role).toBe("superadmin");
 
     await context.db.update(users).set({ role: "writer" }).where(eq(users.email, "ada@example.com"));
 
-    res = await context.app.request("/api/users/me", { headers: { cookie: adminCookie } });
+    res = await context.app.request("/api/users/me", { headers: { cookie: superadminCookie } });
     expect(((await res.json()) as ApiUser).role).toBe("writer");
 
-    // Restore, so later tests keep seeing an Admin.
-    await context.db.update(users).set({ role: "admin" }).where(eq(users.email, "ada@example.com"));
+    // Restore, so later tests keep seeing a Superadmin.
+    await context.db.update(users).set({ role: "superadmin" }).where(eq(users.email, "ada@example.com"));
   });
 
   it("ends the session on logout", async () => {
     const res = await context.app.request("/api/auth/logout", {
       method: "POST",
-      headers: { cookie: adminCookie },
+      headers: { cookie: superadminCookie },
     });
     expect(res.status).toBe(204);
     const setCookie = res.headers.get("set-cookie");

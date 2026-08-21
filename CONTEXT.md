@@ -21,9 +21,14 @@ a first and last name.
 _Avoid_: Account, member, person
 
 **Admin**:
-A User who can create and manage other Users. The first User to sign up is an Admin, and
-there may be many.
-_Avoid_: Owner, superuser, root
+A User who can create and manage readers and writers, and delete Skills.
+_Avoid_: Owner, root
+
+**Superadmin**:
+A User who can do everything an Admin can, and additionally create and manage Admins.
+There is exactly one Superadmin: the first User to sign up. The role is permanent — never
+transferred, reassigned, or removed.
+_Avoid_: Owner, root, superuser
 
 **Registry**:
 The self-hosted service that holds Skills and the Users who may reach them. There is one
