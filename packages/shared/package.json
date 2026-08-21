@@ -7,12 +7,16 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/bun": "^1.4.0",
     "typescript": "^5.7.2"
   }
 }

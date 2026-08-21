@@ -1,9 +1,10 @@
+import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Database } from "../db/client.js";
 import { users, type UserRow } from "../db/schema.js";
-import { unauthenticated } from "../http/errors.js";
+import { forbidden, unauthenticated } from "../http/errors.js";
 import { SESSION_COOKIE_NAME, verifySession } from "./session.js";
 
 export interface AuthDependencies {
@@ -39,4 +40,21 @@ async function resolveUser(c: Context, deps: AuthDependencies): Promise<UserRow 
 
   const [user] = await deps.db.select().from(users).where(eq(users.id, userId)).limit(1);
   return user ?? null;
+}
+
+/**
+ * Authorisation, kept separate from authentication: this reads the role off
+ * the User row `requireAuth` resolved for *this* request, so a demotion — or
+ * a credential belonging to a demoted User — is refused on the next request
+ * rather than whenever a credential expires (ADR-0005). Always mounted after
+ * `requireAuth`, which is what puts the row on the context.
+ */
+export function requireRole(...roles: Role[]): MiddlewareHandler<{ Variables: AuthVariables }> {
+  return async (c, next) => {
+    const user = c.get("user");
+    if (!roles.includes(user.role)) {
+      return forbidden(c, `Your role (${user.role}) does not allow this.`);
+    }
+    await next();
+  };
 }

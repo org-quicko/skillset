@@ -4,9 +4,9 @@ export interface PresignOptions {
 }
 
 /**
- * Standard object-storage contract. Only S3 is implemented, arriving in
- * ticket 03; the fake in fake.ts backs the API test harness (seam 1) until
- * then. See ADR-0001: publishing uploads directly to storage, so
+ * Standard object-storage contract. Only S3 is implemented (s3.ts); the
+ * fake in fake.ts backs the API test harness (seam 1). See ADR-0001:
+ * publishing uploads directly to storage, so
  * presignUpload/presignDownload are the two operations request flows
  * actually exercise today, but the full contract is declared per the spec.
  */
