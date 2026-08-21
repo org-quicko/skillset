@@ -5,6 +5,7 @@ import type { AuthVariables } from "./auth/middleware.js";
 import type { Database } from "./db/client.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerRegistryRoutes } from "./routes/registry.js";
+import { registerSkillsRoutes } from "./routes/skills.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import type { StorageAdapter } from "./storage/types.js";
 
@@ -33,6 +34,7 @@ export function createApp(deps: AppDependencies): Hono {
   registerRegistryRoutes(api, deps);
   registerAuthRoutes(api, deps);
   registerUsersRoutes(api, deps);
+  registerSkillsRoutes(api, deps);
 
   app.route("/api", api);
 

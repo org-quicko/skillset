@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations, waitForDatabase } from "./db/migrate.js";
-import { FakeStorageAdapter } from "./storage/fake.js";
+import { S3StorageAdapter } from "./storage/s3.js";
 import { createApp } from "./app.js";
 
 async function main() {
@@ -12,8 +12,13 @@ async function main() {
   await waitForDatabase(sql);
   await runMigrations(sql, db);
 
-  // TODO(ticket 03): swap for the S3 adapter once storage credentials are wired up.
-  const storage = new FakeStorageAdapter();
+  const storage = new S3StorageAdapter({
+    bucket: config.storage.bucket,
+    region: config.storage.region,
+    accessKeyId: config.storage.accessKeyId,
+    secretAccessKey: config.storage.secretAccessKey,
+    endpoint: config.storage.endpoint,
+  });
 
   const webDist = join(import.meta.dir, "../../web/dist");
   const webRoot = (await Bun.file(join(webDist, "index.html")).exists()) ? webDist : undefined;

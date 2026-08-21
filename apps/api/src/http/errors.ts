@@ -15,3 +15,7 @@ export function errorResponse(
 export function unauthenticated(c: Context) {
   return errorResponse(c, 401, "unauthenticated", "No valid session or Token.");
 }
+
+export function forbidden(c: Context, message: string) {
+  return errorResponse(c, 403, "forbidden", message);
+}
