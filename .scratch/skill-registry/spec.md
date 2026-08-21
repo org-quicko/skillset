@@ -12,7 +12,7 @@ The public alternatives do not fit. They index public GitHub repositories, so pu
 
 A self-hosted Registry the team runs itself. Writers publish a Skill from the CLI or by dropping its folder into the web interface. Anyone on the team can browse, search full text, read a Skill's `SKILL.md` rendered in the browser, and download it. `skillreg add` installs a Skill straight into the directory a coding Agent reads from, asking which Agent and which Scope.
 
-Access is closed by default. The first person to sign up becomes an Admin; after that, the public signup route stops existing and Admins create Users directly. Users are readers, writers, or Admins. The CLI authenticates with a Token the User mints for themselves.
+Access is closed by default. The first person to sign up becomes the Registry's one Superadmin, permanently; after that, the public signup route stops existing and Admins and the Superadmin create Users directly. Users are readers, writers, Admins, or the Superadmin — only the Superadmin can create or manage an Admin. The CLI authenticates with a Token the User mints for themselves.
 
 ## User Stories
 
@@ -62,8 +62,8 @@ Access is closed by default. The first person to sign up becomes an Admin; after
 
 ### Authentication and Tokens
 
-33. As the first person to reach a fresh Registry, I want to sign up and become an Admin, so that the Registry can be set up without a manual database step.
-34. As an Admin, I want the public signup route to stop working once I exist, so that nobody who can reach the Registry can give themselves an account.
+33. As the first person to reach a fresh Registry, I want to sign up and become its Superadmin, so that the Registry can be set up without a manual database step.
+34. As the Superadmin, I want the public signup route to stop working once I exist, so that nobody who can reach the Registry can give themselves an account.
 35. As a User, I want to log in with my email and password, so that I can use the web interface.
 36. As a User, I want to be made to change my password the first time I log in, so that the credentials my Admin generated stop being valid immediately.
 37. As a User, I want to change my password whenever I like, so that I am not dependent on an Admin to rotate it.
@@ -83,7 +83,7 @@ Access is closed by default. The first person to sign up becomes an Admin; after
 48. As an Admin, I want to generate that User's initial password, so that onboarding does not depend on email delivery.
 49. As an Admin, I want to change a User's role, so that access can follow what someone actually does.
 50. As an Admin, I want to remove a User, so that access ends when someone leaves.
-51. As an Admin, I want to be prevented from removing or demoting the last Admin, so that the Registry cannot be locked out of its own administration.
+51. As the Superadmin, I want my own role and account protected from ever being changed or removed, by anyone including myself, so that the Registry always has exactly one person who can administer Admins.
 52. As an Admin, I want to delete a Skill, so that a mistake or an obsolete Skill can be cleared out.
 53. As an Admin, I want to confirm a deletion by typing the Skill's name, so that an irreversible action cannot happen on a stray click.
 54. As a writer, I want deletion withheld from me, so that a fumbled name is a cleanup request rather than lost work.
@@ -105,7 +105,7 @@ Access is closed by default. The first person to sign up becomes an Admin; after
 - The shared module (`packages/shared`, `@skill-registry/shared`) owns everything the CLI and the web interface must agree on with the API: the `SKILL.md` frontmatter parser, the validation schema and its limits, the Agent table, and the request and response shapes — defined as Zod schemas, with `z.infer` giving every consumer its TypeScript type from the same definition rather than a hand-written one. This is what makes local pre-flight checks, the API's own request validation, and response shaping the same rule rather than two or three drifting copies — a route shapes its response with `schema.parse(row)`, not a hand-written mapping function.
 - The CLI is published to npm as a scoped package with the binary name `skillreg`, built from this workspace against the shared module.
 - One naming convention, not two. Every JSON key on the wire is snake_case, which lines wire keys up with Postgres column names — and TypeScript uses the same snake_case keys throughout, including Drizzle's column definitions and every domain type, because they are `z.infer`red from the same shared schema the wire uses. There is no camelCase domain shape and no conversion boundary to keep in sync; a Drizzle row already matches the wire shape it will become.
-- The API follows REST conventions: resources rather than actions. Initialising the Registry and reading whether it has been initialised are two methods on the Registry itself; a Token is nested under the User who owns it, because a User may only ever manage their own; an Artifact is a sub-resource of its Skill rather than a download verb; and publishing is an idempotent replace of a Skill addressed by name, which is exactly the semantics ADR-0002 chose. Logging in and out are the deliberate exception, kept as named routes under authentication — there is no session resource to create or delete, because the session is a signed token and nothing is stored (ADR-0005).
+- The API follows REST conventions: resources rather than actions. Creating the first User and reading whether one exists yet are two methods on a `setup` resource of its own — not on the Registry, which is the deployment itself and is never a resource with a create-or-initialise lifecycle. A Token is nested under the User who owns it, because a User may only ever manage their own; an Artifact is a sub-resource of its Skill rather than a download verb; and publishing is an idempotent replace of a Skill addressed by name, which is exactly the semantics ADR-0002 chose. Logging in and out are the deliberate exception, kept as named routes under authentication — there is no session resource to create or delete, because the session is a signed token and nothing is stored (ADR-0005).
 
 ### Domain model and schema
 
@@ -146,12 +146,12 @@ Access is closed by default. The first person to sign up becomes an Admin; after
 
 ### Access control
 
-- Reader: browse, search, view, download. Writer: additionally publish, including replacing any existing Skill. Admin: additionally delete Skills and manage Users.
+- Reader: browse, search, view, download. Writer: additionally publish, including replacing any existing Skill. Admin: additionally delete Skills and manage readers and writers. Superadmin: additionally create and manage Admins.
 - Ownership of a Skill is deliberately not modelled — any writer may replace any Skill. Publisher and published-at exist so that change is attributable. See ADR-0002.
-- The last Admin cannot be demoted or removed.
+- There is exactly one Superadmin, set once at `/setup`. The role is permanent: no route ever assigns it to anyone else, changes it, or removes the User holding it — there is no transfer, and no "last Admin" rule to speak of, because the Superadmin who can create a new Admin always exists.
 - Web sessions are a signed token in a strictly same-site, http-only, secure cookie, carrying only the User id. The role is resolved from the database on every request, so a demotion takes effect immediately. See ADR-0005.
 - Token authentication looks up the presented secret by hash on every request and resolves the owner's current role the same way.
-- The initialisation route is available only while no Users exist, and the User it creates is an Admin.
+- The `/setup` route is available only while no Users exist, and the User it creates is the Superadmin.
 - The auth layer is shaped so that OIDC — Google Workspace first — is additive rather than a rewrite (ADR-0007). Authentication resolves a request to a User; issuing a session takes that resolved User rather than a set of credentials, so a second way to log in is a new route and nothing more. A password is optional on a User, and `must_change_password` is meaningful only where one exists. Tokens are untouched, which is why they were chosen over password-based CLI login in the first place. Deliberately not built: an identity table, a provider abstraction with no providers, and any domain allowlist.
 
 ### Installing

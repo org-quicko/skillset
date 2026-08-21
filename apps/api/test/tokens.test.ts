@@ -36,12 +36,12 @@ function sessionCookie(res: Response): string {
   return `session=${match[1]}`;
 }
 
-/** The bootstrap route only ever creates the first User, and makes them an Admin. */
+/** The bootstrap route only ever creates the first User, and makes them the Superadmin. */
 async function bootstrapAdmin(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string },
 ): Promise<{ cookie: string; user: ApiUser }> {
-  const res = await context.app.request("/api/registry", {
+  const res = await context.app.request("/api/setup", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -198,7 +198,7 @@ describe("Tokens (ticket 05)", () => {
     expect(meRes.status).toBe(200);
     const me = (await meRes.json()) as ApiUser;
     expect(me.id).toBe(admin.id);
-    expect(me.role).toBe("admin");
+    expect(me.role).toBe("superadmin");
   });
 
   it("updates a Token's last-used time as it is used", async () => {

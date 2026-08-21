@@ -4,7 +4,7 @@ import type postgres from "postgres";
 import type { AuthVariables } from "./auth/middleware.js";
 import type { Database } from "./db/client.js";
 import { registerAuthRoutes } from "./routes/auth.js";
-import { registerRegistryRoutes } from "./routes/registry.js";
+import { registerSetupRoutes } from "./routes/setup.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import type { StorageAdapter } from "./storage/types.js";
 
@@ -30,7 +30,7 @@ export function createApp(deps: AppDependencies): Hono {
     return c.json({ status: "ok" });
   });
 
-  registerRegistryRoutes(api, deps);
+  registerSetupRoutes(api, deps);
   registerAuthRoutes(api, deps);
   registerUsersRoutes(api, deps);
 

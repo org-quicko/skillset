@@ -8,21 +8,21 @@
   "servers": [{ "url": "/api" }],
   "security": [{ "cookieAuth": [] }, { "bearerAuth": [] }],
   "tags": [
-    { "name": "registry", "description": "The Registry itself, and its one-time initialisation" },
+    { "name": "setup", "description": "First-run setup: whether any User exists yet, and creating the first one" },
     { "name": "auth", "description": "Logging in and out" },
     { "name": "users", "description": "Users, their own details, and their Tokens" },
     { "name": "skills", "description": "Publishing, reading, searching, and retrieving Skills" }
   ],
   "paths": {
-    "/registry": {
+    "/setup": {
       "get": {
-        "tags": ["registry"],
-        "summary": "Read the Registry's state",
-        "description": "Tells the web interface whether to show the initialisation screen or the login screen. The only unauthenticated read in the API.",
+        "tags": ["setup"],
+        "summary": "Read first-run setup state",
+        "description": "Tells the web interface whether to show the bootstrap screen or the login screen. The only unauthenticated read in the API.",
         "security": [],
         "responses": {
           "200": {
-            "description": "The Registry's state",
+            "description": "Setup state",
             "content": {
               "application/json": {
                 "schema": {
@@ -31,7 +31,7 @@
                   "properties": {
                     "initialized": {
                       "type": "boolean",
-                      "description": "False only while the Registry has no Users at all."
+                      "description": "False only while no User exists at all."
                     }
                   }
                 }
@@ -41,9 +41,9 @@
         }
       },
       "post": {
-        "tags": ["registry"],
-        "summary": "Initialise the Registry",
-        "description": "Creates the first User, who is an Admin and chooses their own password. Available only while the Registry has no Users; afterwards this returns 409 forever and new Users come from `POST /users` instead.\n\nModelled as its own resource rather than as an unauthenticated `POST /users`, because the two differ in authentication, in who picks the password, and in whether a role may be supplied — one endpoint with two request shapes would be a trap for both callers.",
+        "tags": ["setup"],
+        "summary": "Create the first User",
+        "description": "Creates the first User, who is a Superadmin and chooses their own password. Available only while no User exists; afterwards this returns 409 forever and new Users come from `POST /users` instead.\n\nModelled as its own resource rather than as an unauthenticated `POST /users`, because the two differ in authentication, in who picks the password, and in whether a role may be supplied — one endpoint with two request shapes would be a trap for both callers. This is deliberately not a `Registry` resource: the Registry is the deployment itself, not something with a create-or-initialise lifecycle — this route is about the first User existing, nothing else.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -64,13 +64,13 @@
         },
         "responses": {
           "201": {
-            "description": "The Registry is initialised and the first Admin is logged in",
+            "description": "The first User was created as a Superadmin and is logged in",
             "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } },
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
           },
           "400": { "$ref": "#/components/responses/ValidationFailed" },
           "409": {
-            "description": "The Registry already has a User, so initialisation is closed",
+            "description": "A User already exists, so setup is closed",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -125,7 +125,7 @@
       "get": {
         "tags": ["users"],
         "summary": "List Users",
-        "description": "Admins only.",
+        "description": "Requires at least the admin role.",
         "parameters": [{ "$ref": "#/components/parameters/Page" }],
         "responses": {
           "200": {
@@ -152,7 +152,7 @@
       "post": {
         "tags": ["users"],
         "summary": "Create a User",
-        "description": "Admins only. The Registry generates the initial password and returns it once — there is no email delivery. The new User must change it before they can do anything else.",
+        "description": "Requires at least the admin role. The Registry generates the initial password and returns it once — there is no email delivery. The new User must change it before they can do anything else.\n\n`role` accepts `reader`, `writer`, or `admin` only — never `superadmin`, which exists on exactly one User and is set only by `/setup`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -164,7 +164,7 @@
                   "first_name": { "type": "string", "minLength": 1 },
                   "last_name": { "type": "string", "minLength": 1 },
                   "email": { "type": "string", "format": "email" },
-                  "role": { "$ref": "#/components/schemas/Role" }
+                  "role": { "$ref": "#/components/schemas/AssignableRole" }
                 }
               }
             }
@@ -348,7 +348,7 @@
       "patch": {
         "tags": ["users"],
         "summary": "Change a User's role",
-        "description": "Admins only. Takes effect on that User's next request, including requests bearing their existing Tokens.",
+        "description": "Requires at least the admin role. Refused on the Superadmin's own User (see 409). Takes effect on that User's next request, including requests bearing their existing Tokens.",
         "requestBody": {
           "required": true,
           "content": {
@@ -356,7 +356,7 @@
               "schema": {
                 "type": "object",
                 "required": ["role"],
-                "properties": { "role": { "$ref": "#/components/schemas/Role" } }
+                "properties": { "role": { "$ref": "#/components/schemas/AssignableRole" } }
               }
             }
           }
@@ -370,19 +370,19 @@
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": { "$ref": "#/components/responses/AdminOnly" },
           "404": { "$ref": "#/components/responses/UserNotFound" },
-          "409": { "$ref": "#/components/responses/LastAdmin" }
+          "409": { "$ref": "#/components/responses/SuperadminProtected" }
         }
       },
       "delete": {
         "tags": ["users"],
         "summary": "Remove a User",
-        "description": "Admins only. Ends their access and deletes their Tokens. Skills they published remain, and attribution survives through the publisher email snapshot.",
+        "description": "Requires at least the admin role. Refused on the Superadmin's own User (see 409). Ends their access and deletes their Tokens. Skills they published remain, and attribution survives through the publisher email snapshot.",
         "responses": {
           "204": { "description": "Removed" },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": { "$ref": "#/components/responses/AdminOnly" },
           "404": { "$ref": "#/components/responses/UserNotFound" },
-          "409": { "$ref": "#/components/responses/LastAdmin" }
+          "409": { "$ref": "#/components/responses/SuperadminProtected" }
         }
       }
     },
@@ -496,7 +496,7 @@
       "delete": {
         "tags": ["skills"],
         "summary": "Delete a Skill",
-        "description": "Admins only. Removes the row and the Artifact permanently — there is no version history and no soft delete. Recovery is bucket versioning in object storage (ADR-0002). Succeeds even when the Artifact was never uploaded.",
+        "description": "Requires at least the admin role. Removes the row and the Artifact permanently — there is no version history and no soft delete. Recovery is bucket versioning in object storage (ADR-0002). Succeeds even when the Artifact was never uploaded.",
         "responses": {
           "204": { "description": "Deleted. The name is immediately available to publish again." },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
@@ -579,7 +579,7 @@
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "AdminOnly": {
-        "description": "Requires the admin role",
+        "description": "Requires at least the admin role (admin or the superadmin)",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "SkillNotFound": {
@@ -594,16 +594,21 @@
         "description": "The request failed a validation rule. `code` names the rule and `field` names what broke it, so the CLI and the web interface can report the same specific reason.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
-      "LastAdmin": {
-        "description": "Refused: this is the last Admin, and the Registry must never be left without one",
+      "SuperadminProtected": {
+        "description": "Refused: this is the Superadmin. Their role is permanent and their account can never be changed or removed.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       }
     },
     "schemas": {
       "Role": {
         "type": "string",
+        "enum": ["reader", "writer", "admin", "superadmin"],
+        "description": "reader: browse, search, read, retrieve Artifacts. writer: also publish, including replacing any Skill. admin: also delete Skills and manage readers and writers. superadmin: also create and manage Admins. There is exactly one superadmin — set once at `/setup` and never reassigned — so it is never a valid value in a request body; see AssignableRole."
+      },
+      "AssignableRole": {
+        "type": "string",
         "enum": ["reader", "writer", "admin"],
-        "description": "reader: browse, search, read, retrieve Artifacts. writer: also publish, including replacing any Skill. admin: also delete Skills and manage Users."
+        "description": "The roles a request body may assign to a User. `superadmin` is excluded on purpose: it is set exactly once, by `/setup`, and no route ever grants, changes, or removes it afterwards."
       },
       "User": {
         "type": "object",
