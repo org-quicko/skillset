@@ -1,5 +1,16 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  customType,
+  index,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 // Users, Tokens, and Skills land across tickets 02, 03, and 05 — only what the
 // current ticket needs is declared here (see docs/data-model.md).
@@ -60,3 +71,43 @@ export const tokens = pgTable(
 
 export type TokenRow = typeof tokens.$inferSelect;
 export type NewTokenRow = typeof tokens.$inferInsert;
+
+/** Postgres `tsvector` has no native representation in Drizzle (docs/data-model.md). */
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => "tsvector",
+});
+
+export const skills = pgTable(
+  "skills",
+  {
+    // The Skill's name is its sole identity — flat, no namespacing, no
+    // version history. Publishing replaces the row (ADR-0002).
+    name: text("name").primaryKey(),
+    description: text("description").notNull(),
+    // The SKILL.md body as supplied by the publisher. The API never reads the
+    // Artifact (ADR-0001), so this is not parsed out of it.
+    body: text("body").notNull(),
+    // Attribution is stored twice on purpose: the reference gives a current
+    // name while the User exists, and the email snapshot outlives them being
+    // removed. Removing a User must not erase who changed a shared Skill.
+    published_by: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
+    published_by_email: text("published_by_email").notNull(),
+    published_at: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+    search: tsvector("search").generatedAlwaysAs(
+      sql`to_tsvector('english', name || ' ' || coalesce(description, ''))`,
+    ),
+  },
+  (table) => ({
+    // The same rule the shared validation module applies, enforced where the
+    // row is written rather than trusted from the caller.
+    nameFormat: check(
+      "skills_name_format",
+      sql`${table.name} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(${table.name}) <= 64`,
+    ),
+    searchIdx: index("skills_search_idx").using("gin", table.search),
+    publishedAtIdx: index("skills_published_at_idx").on(table.published_at.desc()),
+  }),
+);
+
+export type SkillRow = typeof skills.$inferSelect;
+export type NewSkillRow = typeof skills.$inferInsert;

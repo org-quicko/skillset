@@ -1,9 +1,10 @@
+import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Database } from "../db/client.js";
 import { tokens, users, type UserRow } from "../db/schema.js";
-import { unauthenticated } from "../http/errors.js";
+import { forbidden, unauthenticated } from "../http/errors.js";
 import { SESSION_COOKIE_NAME, verifySession } from "./session.js";
 import { digestsMatch, hashTokenSecret } from "./token.js";
 
@@ -62,4 +63,27 @@ async function resolveTokenUser(c: Context, deps: AuthDependencies): Promise<Use
 
   await deps.db.update(tokens).set({ last_used_at: new Date() }).where(eq(tokens.id, token.id));
   return user;
+}
+
+// Roles are cumulative (spec, "Access control"): writer can do everything a
+// reader can, admin everything a writer can, and so on. Rank order, not an
+// allowlist, so a new top role (superadmin) is automatically included by
+// every existing `requireRole` call without having to be added to each one.
+const ROLE_RANK: Record<Role, number> = { reader: 0, writer: 1, admin: 2, superadmin: 3 };
+
+/**
+ * Authorisation, kept separate from authentication: this reads the role off
+ * the User row `requireAuth` resolved for *this* request, so a demotion — or
+ * a credential belonging to a demoted User — is refused on the next request
+ * rather than whenever a credential expires (ADR-0005). Always mounted after
+ * `requireAuth`, which is what puts the row on the context.
+ */
+export function requireRole(minimum: Role): MiddlewareHandler<{ Variables: AuthVariables }> {
+  return async (c, next) => {
+    const user = c.get("user");
+    if (ROLE_RANK[user.role] < ROLE_RANK[minimum]) {
+      return forbidden(c, `Your role (${user.role}) does not allow this.`);
+    }
+    await next();
+  };
 }

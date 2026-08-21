@@ -1,2 +1,0 @@
-ALTER TYPE "public"."user_role" ADD VALUE 'superadmin';--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "users_role_superadmin_index" ON "users" USING btree ("role") WHERE "users"."role" = 'superadmin';

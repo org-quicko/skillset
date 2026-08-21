@@ -1,7 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    // Shared code runs in the browser as well as in Bun, so it is checked
+    // against the platform-neutral web APIs both provide — TextDecoder here.
+    "lib": ["ES2022", "DOM"]
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }
