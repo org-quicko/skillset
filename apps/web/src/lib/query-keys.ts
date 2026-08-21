@@ -3,6 +3,9 @@ import type { QueryClient } from "@tanstack/react-query";
 /** The identity query every "am I logged in" check and auth transition reads and writes. */
 export const meQueryKey = ["me"] as const;
 
+/** A User's own Tokens. Discarded with the rest of the cache when a session ends. */
+export const tokensQueryKey = ["tokens"] as const;
+
 /**
  * Ends a session in the query cache: every other cached resource is
  * discarded, and the identity query is set to `null` directly rather than

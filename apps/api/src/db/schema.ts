@@ -1,4 +1,4 @@
-import { boolean, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Users, Tokens, and Skills land across tickets 02, 03, and 05 — only what the
 // current ticket needs is declared here (see docs/data-model.md).
@@ -25,3 +25,28 @@ export const users = pgTable("users", {
 
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
+
+export const tokens = pgTable(
+  "tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Cascade: removing a User must end their CLI access, not orphan it
+    // (docs/data-model.md).
+    user_id: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // SHA-256 hex digest of the secret — never the secret itself. See
+    // apps/api/src/auth/token.ts for why this is SHA-256, not argon2id.
+    token_hash: text("token_hash").notNull(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    last_used_at: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => ({
+    tokenHashIdx: uniqueIndex("tokens_token_hash_idx").on(table.token_hash),
+    userIdIdx: index("tokens_user_id_idx").on(table.user_id),
+  }),
+);
+
+export type TokenRow = typeof tokens.$inferSelect;
+export type NewTokenRow = typeof tokens.$inferInsert;
