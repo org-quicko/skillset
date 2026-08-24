@@ -406,3 +406,107 @@ describe("Listing Skills (ticket 03)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+/**
+ * Seam 1 again: the redirect target itself is a presigned URL from the fake
+ * storage adapter, not something a request test asserts the shape of — what
+ * is under test is who gets redirected at all, and what happens when the
+ * Artifact behind the row was never written.
+ */
+describe("Downloading a Skill's Artifact (ticket 08)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let writer: Session;
+  let reader: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        email: "ada@example.com",
+        password: PASSWORD,
+      }),
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("redirects a reader to a short-lived presigned location named after the Skill", async () => {
+    await publish(context, writer, "downloadable-skill", {
+      description: "Has an Artifact.",
+      body: "Body.\n",
+    });
+    await context.storage.put("skills/downloadable-skill.zip", new Uint8Array([1, 2, 3]));
+
+    const res = await context.app.request("/api/skills/downloadable-skill/artifact", {
+      headers: { cookie: reader.cookie },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(302);
+
+    const location = res.headers.get("location");
+    expect(location).not.toBeNull();
+    expect(decodeURIComponent(location ?? "")).toContain("skills/downloadable-skill.zip");
+  });
+
+  it("refuses an unauthenticated request", async () => {
+    await publish(context, writer, "another-downloadable-skill", {
+      description: "Has an Artifact too.",
+      body: "Body.\n",
+    });
+    await context.storage.put("skills/another-downloadable-skill.zip", new Uint8Array([1]));
+
+    const res = await context.app.request("/api/skills/another-downloadable-skill/artifact", {
+      redirect: "manual",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 for a Skill that does not exist", async () => {
+    const res = await context.app.request("/api/skills/no-such-skill/artifact", {
+      headers: { cookie: reader.cookie },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as ApiError;
+    expect(body.error.code).toBe("not_found");
+  });
+
+  it("fails comprehensibly when the Skill's row exists but its Artifact was never uploaded", async () => {
+    await publish(context, writer, "abandoned-skill", {
+      description: "The upload after this never happened.",
+      body: "Body.\n",
+    });
+
+    const res = await context.app.request("/api/skills/abandoned-skill/artifact", {
+      headers: { cookie: reader.cookie },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as ApiError;
+    expect(body.error.code).toBe("artifact_missing");
+  });
+});

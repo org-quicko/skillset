@@ -12,8 +12,12 @@ services:
       STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-}
       STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-}
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
 
   postgres:
     image: postgres:18-alpine
@@ -24,5 +28,50 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql
 
+  # Local S3-compatible storage for development, so `docker compose up` works
+  # with no external account (spec, "Storage": only S3 is implemented, but
+  # any S3-compatible endpoint is fine). Not used when STORAGE_ENDPOINT points
+  # elsewhere in production.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_ACCESS_KEY:-minioadmin123}
+      # This deployment's S3 bucket-CORS API (`mc cors set`) returns
+      # NotImplemented, so CORS is opened at the server level instead — the
+      # browser upload needs this to PUT with a Content-Type header.
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      retries: 30
+
+  # Creates the bucket and enables versioning (the only recovery path from a
+  # replaced or deleted Artifact — spec, "Storage"). CORS is handled by
+  # `minio`'s own MINIO_API_CORS_ALLOW_ORIGIN above, not per-bucket, because
+  # this deployment's bucket-CORS S3 API isn't implemented. Runs once and
+  # exits; `app` waits on it rather than on `minio` directly so the bucket
+  # always exists before the API's first presign.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "${STORAGE_ACCESS_KEY_ID:-minioadmin}" "${STORAGE_SECRET_ACCESS_KEY:-minioadmin123}"
+        mc mb --ignore-existing "local/${STORAGE_BUCKET:-skill-registry}"
+        mc version enable "local/${STORAGE_BUCKET:-skill-registry}"
+
 volumes:
   postgres-data:
+  minio-data:

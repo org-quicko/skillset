@@ -1,4 +1,4 @@
-import type { Role } from "@skill-registry/shared";
+import { roleMeets, type Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
@@ -65,23 +65,19 @@ async function resolveTokenUser(c: Context, deps: AuthDependencies): Promise<Use
   return user;
 }
 
-// Roles are cumulative (spec, "Access control"): writer can do everything a
-// reader can, admin everything a writer can, and so on. Rank order, not an
-// allowlist, so a new top role (superadmin) is automatically included by
-// every existing `requireRole` call without having to be added to each one.
-const ROLE_RANK: Record<Role, number> = { reader: 0, writer: 1, admin: 2, superadmin: 3 };
-
 /**
  * Authorisation, kept separate from authentication: this reads the role off
  * the User row `requireAuth` resolved for *this* request, so a demotion — or
  * a credential belonging to a demoted User — is refused on the next request
  * rather than whenever a credential expires (ADR-0005). Always mounted after
- * `requireAuth`, which is what puts the row on the context.
+ * `requireAuth`, which is what puts the row on the context. `roleMeets`
+ * (shared) is the same rank check the web interface uses to decide what to
+ * offer a User, so the two never drift.
  */
 export function requireRole(minimum: Role): MiddlewareHandler<{ Variables: AuthVariables }> {
   return async (c, next) => {
     const user = c.get("user");
-    if (ROLE_RANK[user.role] < ROLE_RANK[minimum]) {
+    if (!roleMeets(user.role, minimum)) {
       return forbidden(c, `Your role (${user.role}) does not allow this.`);
     }
     await next();

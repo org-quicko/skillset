@@ -15,6 +15,7 @@ import { skills, users } from "../db/schema.js";
 import { errorResponse } from "../http/errors.js";
 import {
   ARTIFACT_CONTENT_TYPE,
+  ARTIFACT_DOWNLOAD_EXPIRY_SECONDS,
   ARTIFACT_UPLOAD_EXPIRY_SECONDS,
   artifactKey,
 } from "../storage/keys.js";
@@ -56,6 +57,12 @@ function validationFailed(c: Context, error: SkillValidationError) {
 
 function skillNotFound(c: Context) {
   return errorResponse(c, 404, "not_found", "No Skill by that name.");
+}
+
+// The row exists but nothing was ever written to its Artifact's key — an
+// abandoned publish (spec, "Further Notes"), not a missing Skill.
+function artifactMissing(c: Context) {
+  return errorResponse(c, 404, "artifact_missing", "This Skill's Artifact was never uploaded.");
 }
 
 export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: SkillRouteDependencies): void {
@@ -173,5 +180,25 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
         },
       }),
     );
+  });
+
+  // Any authenticated User may retrieve an Artifact — reader is the base
+  // role, so requireAuth alone is the whole authorisation check. The key is
+  // named after the Skill (storage/keys.ts), so the presigned location's own
+  // path already ends in the filename a download should have; nothing else
+  // names it.
+  app.get("/skills/:name/artifact", requireAuth(deps), async (c) => {
+    const name = c.req.param("name");
+
+    const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.name, name)).limit(1);
+    if (!skill) return skillNotFound(c);
+
+    const key = artifactKey(name);
+    if (!(await deps.storage.exists(key))) return artifactMissing(c);
+
+    const url = await deps.storage.presignDownload(key, {
+      expiresInSeconds: ARTIFACT_DOWNLOAD_EXPIRY_SECONDS,
+    });
+    return c.redirect(url, 302);
   });
 }

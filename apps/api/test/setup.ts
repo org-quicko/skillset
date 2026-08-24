@@ -11,6 +11,7 @@ export interface TestContext {
   app: Hono;
   sql: ReturnType<typeof createDatabase>["sql"];
   db: ReturnType<typeof createDatabase>["db"];
+  storage: FakeStorageAdapter;
 }
 
 /**
@@ -30,9 +31,10 @@ export async function startTestContext(): Promise<{
   // Migrations must be idempotent across restarts.
   await runMigrations(sql, db);
 
-  const app = createApp({ sql, db, storage: new FakeStorageAdapter(), jwtSecret: TEST_JWT_SECRET });
+  const storage = new FakeStorageAdapter();
+  const app = createApp({ sql, db, storage, jwtSecret: TEST_JWT_SECRET });
 
-  return { context: { app, sql, db }, container };
+  return { context: { app, sql, db, storage }, container };
 }
 
 export async function stopTestContext(

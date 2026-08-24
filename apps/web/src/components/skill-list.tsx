@@ -1,5 +1,4 @@
 import type { Publisher } from "@skill-registry/shared";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,14 +13,17 @@ function formatPublisher(publisher: Publisher): string {
 
 export function SkillList({
   canPublish,
+  page,
+  onPageChange,
   onSelect,
   onPublish,
 }: {
   canPublish: boolean;
+  page: number;
+  onPageChange: (page: number) => void;
   onSelect: (name: string) => void;
   onPublish: () => void;
 }) {
-  const [page, setPage] = useState(1);
   const skills = useSkills(page);
   const totalPages = skills.data ? Math.max(1, Math.ceil(skills.data.total / skills.data.page_size)) : 1;
 
@@ -63,14 +65,9 @@ export function SkillList({
             </TableBody>
           </Table>
         )}
-        {skills.data && skills.data.total > skills.data.page_size && (
+        {totalPages > 1 && (
           <div className="flex items-center justify-between">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
               Previous
             </Button>
             <span className="text-sm text-muted-foreground">
@@ -80,7 +77,7 @@ export function SkillList({
               variant="outline"
               size="sm"
               disabled={page >= totalPages}
-              onClick={() => setPage((current) => current + 1)}
+              onClick={() => onPageChange(page + 1)}
             >
               Next
             </Button>

@@ -35,9 +35,9 @@ export async function readDroppedFiles(items: DataTransferItemList): Promise<Ski
 }
 
 /** A folder chosen from a file dialog (`<input type="file" webkitdirectory>`). */
-export async function readPickedFiles(fileList: FileList): Promise<SkillFile[]> {
+export async function readPickedFiles(fileList: File[]): Promise<SkillFile[]> {
   const files = await Promise.all(
-    Array.from(fileList).map(async (file) => ({
+    fileList.map(async (file) => ({
       path: file.webkitRelativePath || file.name,
       bytes: new Uint8Array(await file.arrayBuffer()),
     })),

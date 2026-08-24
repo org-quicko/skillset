@@ -6,6 +6,16 @@ export interface S3Settings {
   accessKeyId?: string;
   secretAccessKey?: string;
   endpoint?: string;
+  /**
+   * The endpoint embedded in presigned URLs, if different from `endpoint`.
+   * Presigning is a local signature computation with no network call, so it
+   * can target a host `endpoint` itself can't reach — the split a dev
+   * docker-compose setup needs, where the API reaches storage over the
+   * Docker network but a presigned URL is followed by the browser, which
+   * can't resolve that network's hostnames (see .env.example). Defaults to
+   * `endpoint` for the common case of one publicly-reachable S3 endpoint.
+   */
+  publicEndpoint?: string;
 }
 
 const DEFAULT_EXPIRY_SECONDS = 60;
@@ -18,6 +28,7 @@ const DEFAULT_EXPIRY_SECONDS = 60;
  */
 export class S3StorageAdapter implements StorageAdapter {
   private readonly client: Bun.S3Client;
+  private readonly publicEndpoint: string | undefined;
 
   constructor(settings: S3Settings) {
     this.client = new Bun.S3Client({
@@ -27,6 +38,7 @@ export class S3StorageAdapter implements StorageAdapter {
       secretAccessKey: settings.secretAccessKey,
       endpoint: settings.endpoint,
     });
+    this.publicEndpoint = settings.publicEndpoint ?? settings.endpoint;
   }
 
   async put(key: string, body: Uint8Array, contentType?: string): Promise<void> {
@@ -69,6 +81,7 @@ export class S3StorageAdapter implements StorageAdapter {
       method: "PUT",
       expiresIn: options?.expiresInSeconds ?? DEFAULT_EXPIRY_SECONDS,
       type: options?.contentType,
+      endpoint: this.publicEndpoint,
     });
   }
 
@@ -76,6 +89,7 @@ export class S3StorageAdapter implements StorageAdapter {
     return this.client.presign(key, {
       method: "GET",
       expiresIn: options?.expiresInSeconds ?? DEFAULT_EXPIRY_SECONDS,
+      endpoint: this.publicEndpoint,
     });
   }
 }

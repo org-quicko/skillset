@@ -8,6 +8,7 @@ export interface Config {
     accessKeyId: string | undefined;
     secretAccessKey: string | undefined;
     endpoint: string | undefined;
+    publicEndpoint: string | undefined;
   };
 }
 
@@ -48,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       accessKeyId: env.STORAGE_ACCESS_KEY_ID,
       secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY,
       endpoint: env.STORAGE_ENDPOINT,
+      publicEndpoint: env.STORAGE_PUBLIC_ENDPOINT,
     },
   };
 }

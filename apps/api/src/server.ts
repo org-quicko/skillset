@@ -18,6 +18,7 @@ async function main() {
     accessKeyId: config.storage.accessKeyId,
     secretAccessKey: config.storage.secretAccessKey,
     endpoint: config.storage.endpoint,
+    publicEndpoint: config.storage.publicEndpoint,
   });
 
   const webDist = join(import.meta.dir, "../../web/dist");

@@ -22,6 +22,10 @@ export function useSkill(name: string) {
   return useQuery({
     queryKey: skillQueryKey(name),
     queryFn: () => apiFetch(`/skills/${encodeURIComponent(name)}`, SkillSchema),
+    // A publish already writes this exact response into the cache
+    // (usePublishSkill's onSuccess) — avoid an immediate, redundant refetch
+    // of what was just returned when the reader lands straight on it.
+    staleTime: 30_000,
   });
 }
 
@@ -54,6 +58,9 @@ export function usePublishSkill() {
       const upload = await fetch(published.upload.url, {
         method: published.upload.method,
         headers: published.upload.headers,
+        // `zipSync` types its result as backed by `ArrayBufferLike`, which
+        // `BlobPart` doesn't accept directly — re-wrapping narrows it to a
+        // concrete `ArrayBuffer`-backed view.
         body: new Blob([new Uint8Array(bundle.artifact)]),
       });
       if (!upload.ok) throw new SkillUploadError();

@@ -16,7 +16,17 @@ export class ApiError extends Error {
 
 /** What every "did this mutation fail" message shows: the server's own reason, or a generic fallback. */
 export function apiErrorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.message : "Something went wrong.";
+  if (!(error instanceof ApiError)) return "Something went wrong.";
+  return error.field ? `${error.message} (${error.field})` : error.message;
+}
+
+/**
+ * Not fetched through `apiFetch`: the API responds with a redirect to a
+ * presigned storage location, and following that is exactly what a plain
+ * navigation (a clicked link) does on its own.
+ */
+export function skillArtifactUrl(name: string): string {
+  return `/api/skills/${encodeURIComponent(name)}/artifact`;
 }
 
 export interface ApiFetchOptions extends RequestInit {

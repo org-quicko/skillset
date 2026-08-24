@@ -1,8 +1,9 @@
 import { useMemo } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSkill } from "@/hooks/use-skills";
-import { apiErrorMessage } from "@/lib/api";
+import { apiErrorMessage, skillArtifactUrl } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { renderSkillBody } from "@/lib/render-skill-body";
 
 export function SkillDetail({ name, onBack }: { name: string; onBack: () => void }) {
@@ -17,10 +18,18 @@ export function SkillDetail({ name, onBack }: { name: string; onBack: () => void
           ← Back to Skills
         </Button>
         {skill.isSuccess && (
-          <>
-            <CardTitle>{skill.data.name}</CardTitle>
-            <CardDescription>{skill.data.description}</CardDescription>
-          </>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>{skill.data.name}</CardTitle>
+              <CardDescription>{skill.data.description}</CardDescription>
+            </div>
+            <a
+              href={skillArtifactUrl(skill.data.name)}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "shrink-0")}
+            >
+              Download
+            </a>
+          </div>
         )}
       </CardHeader>
       <CardContent>
