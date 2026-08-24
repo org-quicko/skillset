@@ -510,3 +510,129 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     expect(body.error.code).toBe("artifact_missing");
   });
 });
+
+/**
+ * Seam 1 again: an Admin-only, irreversible action (spec, ticket 12).
+ */
+describe("Deleting a Skill (ticket 12)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let admin: Session;
+  let writer: Session;
+  let reader: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    const signUp = await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        email: "ada@example.com",
+        password: PASSWORD,
+      }),
+    });
+    admin = { cookie: sessionCookie(signUp), email: "ada@example.com", id: ((await signUp.json()) as { id: string }).id };
+
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("removes the row and the Artifact, and frees the name for publishing again", async () => {
+    await publish(context, writer, "doomed-skill", {
+      description: "About to go.",
+      body: "Body.\n",
+    });
+    await context.storage.put("skills/doomed-skill.zip", new Uint8Array([1, 2, 3]));
+
+    const res = await context.app.request("/api/skills/doomed-skill", {
+      method: "DELETE",
+      headers: { cookie: admin.cookie },
+    });
+    expect(res.status).toBe(204);
+
+    const rows = await context.db.select().from(skills).where(eq(skills.name, "doomed-skill"));
+    expect(rows.length).toBe(0);
+    expect(await context.storage.exists("skills/doomed-skill.zip")).toBe(false);
+
+    const missing = await context.app.request("/api/skills/doomed-skill", { headers: { cookie: reader.cookie } });
+    expect(missing.status).toBe(404);
+
+    const republished = await publish(context, writer, "doomed-skill", {
+      description: "Back again.",
+      body: "New body.\n",
+    });
+    expect(republished.status).toBe(200);
+  });
+
+  it("succeeds even when the Artifact behind the row was never uploaded", async () => {
+    await publish(context, writer, "never-uploaded-skill", {
+      description: "The upload never happened.",
+      body: "Body.\n",
+    });
+
+    const res = await context.app.request("/api/skills/never-uploaded-skill", {
+      method: "DELETE",
+      headers: { cookie: admin.cookie },
+    });
+    expect(res.status).toBe(204);
+
+    const rows = await context.db.select().from(skills).where(eq(skills.name, "never-uploaded-skill"));
+    expect(rows.length).toBe(0);
+  });
+
+  it("refuses readers and writers, allowing only Admins", async () => {
+    await publish(context, writer, "protected-skill", {
+      description: "Not going anywhere yet.",
+      body: "Body.\n",
+    });
+
+    const byReader = await context.app.request("/api/skills/protected-skill", {
+      method: "DELETE",
+      headers: { cookie: reader.cookie },
+    });
+    expect(byReader.status).toBe(403);
+
+    const byWriter = await context.app.request("/api/skills/protected-skill", {
+      method: "DELETE",
+      headers: { cookie: writer.cookie },
+    });
+    expect(byWriter.status).toBe(403);
+
+    const anonymous = await context.app.request("/api/skills/protected-skill", { method: "DELETE" });
+    expect(anonymous.status).toBe(401);
+
+    const rows = await context.db.select().from(skills).where(eq(skills.name, "protected-skill"));
+    expect(rows.length).toBe(1);
+  });
+
+  it("returns 404 for a Skill that does not exist", async () => {
+    const res = await context.app.request("/api/skills/no-such-skill", {
+      method: "DELETE",
+      headers: { cookie: admin.cookie },
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as ApiError;
+    expect(body.error.code).toBe("not_found");
+  });
+});

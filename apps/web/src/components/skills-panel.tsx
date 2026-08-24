@@ -4,18 +4,31 @@ import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillList } from "@/components/skill-list";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useRouter } from "@/lib/router";
 
-type SkillsView = { type: "list" } | { type: "detail"; name: string };
+const SKILL_PATH_PREFIX = "/skills/";
+
+function skillPath(name: string): string {
+  return `${SKILL_PATH_PREFIX}${encodeURIComponent(name)}`;
+}
 
 export function SkillsPanel({ role }: { role: Role }) {
-  const [view, setView] = useState<SkillsView>({ type: "list" });
+  const { pathname, navigate } = useRouter();
   // Lifted above SkillList so switching to detail and back doesn't reset the
   // reader to page 1 of the list.
   const [page, setPage] = useState(1);
   const [publishOpen, setPublishOpen] = useState(false);
 
-  if (view.type === "detail") {
-    return <SkillDetail name={view.name} onBack={() => setView({ type: "list" })} />;
+  if (pathname.startsWith(SKILL_PATH_PREFIX)) {
+    const name = decodeURIComponent(pathname.slice(SKILL_PATH_PREFIX.length));
+    return (
+      <SkillDetail
+        name={name}
+        canDelete={roleMeets(role, "admin")}
+        onBack={() => navigate("/")}
+        onDeleted={() => navigate("/")}
+      />
+    );
   }
 
   return (
@@ -24,7 +37,7 @@ export function SkillsPanel({ role }: { role: Role }) {
         canPublish={roleMeets(role, "writer")}
         page={page}
         onPageChange={setPage}
-        onSelect={(name) => setView({ type: "detail", name })}
+        onSelect={(name) => navigate(skillPath(name))}
         onPublish={() => setPublishOpen(true)}
       />
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
@@ -36,7 +49,7 @@ export function SkillsPanel({ role }: { role: Role }) {
           <PublishSkillForm
             onPublished={(name) => {
               setPublishOpen(false);
-              setView({ type: "detail", name });
+              navigate(skillPath(name));
             }}
             onCancel={() => setPublishOpen(false)}
           />

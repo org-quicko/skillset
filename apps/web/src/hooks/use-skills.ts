@@ -73,3 +73,15 @@ export function usePublishSkill() {
     },
   });
 }
+
+/** Irreversible (spec, ticket 12) — Admin-only, and the API refuses everyone else. */
+export function useDeleteSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiFetch(`/skills/${encodeURIComponent(name)}`, null, { method: "DELETE" }),
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: skillsListQueryKey });
+      queryClient.removeQueries({ queryKey: skillQueryKey(name) });
+    },
+  });
+}

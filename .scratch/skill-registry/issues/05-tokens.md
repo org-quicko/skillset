@@ -4,7 +4,10 @@
 
 **Blocked by:** 02 — First Admin and sessions.
 
-**Status:** ready-for-review
+**Status:** closed
+
+Tokens UI relocated from the home page into a new `/settings` view, reachable from
+the header avatar's dropdown menu.
 
 - [x] A User mints a Token with a display name and is shown the secret exactly once, with no way to retrieve it afterwards.
 - [x] The secret is generated from a cryptographically secure source with at least 256 bits of entropy.

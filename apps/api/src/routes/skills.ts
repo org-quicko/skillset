@@ -182,6 +182,30 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
     );
   });
 
+  // Irreversible (spec: the one action withheld from writers) — no version
+  // history, no soft delete (ADR-0002). Existence is checked up front so a
+  // missing Skill 404s before either delete runs; the storage delete happens
+  // first because a dangling row with no Artifact is a state the API already
+  // tolerates (a Skill whose Artifact was never uploaded), while a dangling
+  // Artifact for a row that no longer exists is not. Either delete failing
+  // for a reason other than a missing key is reported generically rather
+  // than distinguished, since the caller cannot act differently either way.
+  app.delete("/skills/:name", requireAuth(deps), requireRole("admin"), async (c) => {
+    const name = c.req.param("name");
+
+    const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.name, name)).limit(1);
+    if (!skill) return skillNotFound(c);
+
+    try {
+      await deps.storage.delete(artifactKey(name));
+      await deps.db.delete(skills).where(eq(skills.name, name));
+    } catch {
+      return errorResponse(c, 500, "delete_failed", "Something went wrong.");
+    }
+
+    return c.body(null, 204);
+  });
+
   // Any authenticated User may retrieve an Artifact — reader is the base
   // role, so requireAuth alone is the whole authorisation check. The key is
   // named after the Skill (storage/keys.ts), so the presigned location's own
