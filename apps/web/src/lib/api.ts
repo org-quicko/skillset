@@ -14,6 +14,11 @@ export class ApiError extends Error {
   }
 }
 
+/** What every "did this mutation fail" message shows: the server's own reason, or a generic fallback. */
+export function apiErrorMessage(error: unknown): string {
+  return error instanceof ApiError ? error.message : "Something went wrong.";
+}
+
 export interface ApiFetchOptions extends RequestInit {
   /**
    * Set by callers for whom a 401 is an expected, meaningful result rather

@@ -1,4 +1,5 @@
 import type { User } from "@skill-registry/shared";
+import { SkillsPanel } from "@/components/skills-panel";
 import { TokensCard } from "@/components/tokens-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +9,7 @@ export function AuthenticatedHome({ user }: { user: User }) {
   const logout = useLogout();
 
   return (
-    <div className="flex w-full max-w-sm flex-col gap-4">
+    <div className="flex w-full max-w-4xl flex-col gap-4">
       <Card className="w-full">
         <CardHeader>
           <CardTitle>
@@ -24,6 +25,7 @@ export function AuthenticatedHome({ user }: { user: User }) {
           </Button>
         </CardContent>
       </Card>
+      <SkillsPanel role={user.role} />
       <TokensCard />
     </div>
   );

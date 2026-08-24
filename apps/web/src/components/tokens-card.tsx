@@ -5,16 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useMintToken, useRevokeToken, useTokens } from "@/hooks/use-tokens";
-import { ApiError } from "@/lib/api";
-
-function formatMoment(value: string | null): string {
-  if (value === null) return "never";
-  return new Date(value).toLocaleString();
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.message : "Something went wrong.";
-}
+import { apiErrorMessage } from "@/lib/api";
+import { formatMoment } from "@/lib/utils";
 
 export function TokensCard() {
   const [name, setName] = useState("");
@@ -49,7 +41,7 @@ export function TokensCard() {
               required
             />
           </div>
-          {mint.isError && <p className="text-sm text-destructive">{errorMessage(mint.error)}</p>}
+          {mint.isError && <p className="text-sm text-destructive">{apiErrorMessage(mint.error)}</p>}
           <Button type="submit" disabled={mint.isPending}>
             {mint.isPending ? "Minting…" : "Mint Token"}
           </Button>
@@ -70,7 +62,7 @@ export function TokensCard() {
 
         <div className="flex flex-col gap-2">
           {tokens.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {tokens.isError && <p className="text-sm text-destructive">{errorMessage(tokens.error)}</p>}
+          {tokens.isError && <p className="text-sm text-destructive">{apiErrorMessage(tokens.error)}</p>}
           {tokens.isSuccess && tokens.data.length === 0 && (
             <p className="text-sm text-muted-foreground">No Tokens yet.</p>
           )}
@@ -92,7 +84,7 @@ export function TokensCard() {
               </Button>
             </div>
           ))}
-          {revoke.isError && <p className="text-sm text-destructive">{errorMessage(revoke.error)}</p>}
+          {revoke.isError && <p className="text-sm text-destructive">{apiErrorMessage(revoke.error)}</p>}
         </div>
       </CardContent>
     </Card>

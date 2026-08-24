@@ -6,6 +6,17 @@ export const meQueryKey = ["me"] as const;
 /** A User's own Tokens. Discarded with the rest of the cache when a session ends. */
 export const tokensQueryKey = ["tokens"] as const;
 
+/** One page of the Skill list. A shared prefix so publishing can invalidate every page at once. */
+export const skillsListQueryKey = ["skills", "list"] as const;
+export function skillsQueryKey(page: number) {
+  return [...skillsListQueryKey, page] as const;
+}
+
+/** A single Skill, with its `SKILL.md` body. */
+export function skillQueryKey(name: string) {
+  return ["skills", "detail", name] as const;
+}
+
 /**
  * Ends a session in the query cache: every other cached resource is
  * discarded, and the identity query is set to `null` directly rather than
