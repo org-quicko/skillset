@@ -8,6 +8,17 @@ import { z } from "zod";
 export const RoleSchema = z.enum(["reader", "writer", "admin", "superadmin"]);
 export type Role = z.infer<typeof RoleSchema>;
 
+/**
+ * The roles a request body may assign to a User. `superadmin` is excluded on
+ * purpose: it is set exactly once, by `/setup`, and no route ever grants,
+ * changes, or removes it afterwards.
+ */
+export const AssignableRoleSchema = RoleSchema.exclude(["superadmin"]);
+export type AssignableRole = z.infer<typeof AssignableRoleSchema>;
+
+/** The roles a role picker offers, in the order they should list — the single source both the create-User and role-change UI iterate. */
+export const ASSIGNABLE_ROLES = AssignableRoleSchema.options;
+
 // Roles are cumulative: writer can do everything a reader can, admin
 // everything a writer can, and so on. Rank order, not an allowlist, so a new
 // top role is automatically included by every check against a minimum

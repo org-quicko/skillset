@@ -111,6 +111,49 @@ export class TokenNotFoundError extends AppError {
   }
 }
 
+/** No User exists by the requested id. */
+export class UserNotFoundError extends AppError {
+  /** Builds the 404 `not_found` error. */
+  constructor() {
+    super(404, "not_found", "No such User.");
+  }
+}
+
+/** A User was created, or renamed via email, to an email another User already holds. */
+export class EmailTakenError extends AppError {
+  /** Builds the 409 `email_taken` error. */
+  constructor() {
+    super(409, "email_taken", "A User with that email already exists.", { field: "email" });
+  }
+}
+
+/**
+ * A role change or removal targeted the Superadmin — set once at `/setup`
+ * and never reassigned, changed, or removed afterwards (docs/data-model.md).
+ */
+export class SuperadminProtectedError extends AppError {
+  /** Builds the 409 `superadmin_protected` error. */
+  constructor() {
+    super(
+      409,
+      "superadmin_protected",
+      "Refused: this is the Superadmin. Their role is permanent and their account can never be changed or removed.",
+    );
+  }
+}
+
+/**
+ * A generated password was never replaced (docs/data-model.md's
+ * `must_change_password`), and the request was for anything other than
+ * reading the caller's own record or replacing their own password.
+ */
+export class PasswordChangeRequiredError extends AppError {
+  /** Builds the 403 `password_change_required` error. */
+  constructor() {
+    super(403, "password_change_required", "You must replace your generated password before doing anything else.");
+  }
+}
+
 /**
  * A Skill's delete failed for a reason other than a missing key. Reported
  * generically rather than distinguished, since the caller cannot act

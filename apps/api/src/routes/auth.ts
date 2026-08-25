@@ -24,8 +24,17 @@ export function registerAuthRoutes(app: Hono<{ Variables: AuthVariables }>, deps
     return c.json(UserSchema.parse(user), 200);
   });
 
-  app.post("/auth/logout", requireAuth(deps), async (c) => {
-    clearSessionCookie(c);
-    return c.body(null, 204);
-  });
+  app.post(
+    "/auth/logout",
+    // Ending a session is never blocked by a pending password change — the
+    // must-change-password gate stops a User from doing anything else with
+    // the session, not from giving it up (docs/data-model.md doesn't list
+    // this among the routes it refuses, and refusing it would leave no way
+    // to abandon a session started with a mistyped generated password).
+    requireAuth(deps, { allowPendingPasswordChange: true }),
+    async (c) => {
+      clearSessionCookie(c);
+      return c.body(null, 204);
+    },
+  );
 }

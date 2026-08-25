@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PASSWORD_MIN_LENGTH } from "./user.js";
 
 /** GET /setup — whether the bootstrap screen or the login screen should show. */
 export const SetupStateSchema = z.object({
@@ -11,6 +12,6 @@ export const SetupInitSchema = z.object({
   first_name: z.string().trim().min(1),
   last_name: z.string().trim().min(1),
   email: z.email().toLowerCase(),
-  password: z.string().min(12),
+  password: z.string().min(PASSWORD_MIN_LENGTH),
 });
 export type SetupInit = z.infer<typeof SetupInitSchema>;

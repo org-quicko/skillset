@@ -11,9 +11,16 @@ supporting files it needs.
 _Avoid_: Prompt, template, doc, package
 
 **SKILL.md**:
-The mandatory file at the root of a Skill. Its frontmatter is the sole source of truth
-for the Skill's name and description.
+The mandatory file at the root of a Skill. Its frontmatter is the source of truth for the
+Skill's `name` and `description`, plus the four optional fields the Agent Skills spec
+defines (`license`, `compatibility`, `metadata`, `allowed-tools`); anything else in the
+file is ignored.
 _Avoid_: Manifest, metadata file
+
+**Tag**:
+A short label attached to a Skill for browsing and filtering, stored on the Skill's row in
+the Registry and never written into its SKILL.md.
+_Avoid_: Label, category, topic
 
 **User**:
 A person with access to the Registry, identified by their email address and described by

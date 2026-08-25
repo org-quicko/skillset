@@ -34,6 +34,19 @@ export function skillQueryKey(name: string) {
   return ["skills", "detail", name] as const;
 }
 
+/** One page of the User list. A shared prefix so any mutation can invalidate every page at once. */
+export const usersListQueryKey = ["users", "list"] as const;
+
+/**
+ * Keys one page of the User list.
+ *
+ * @param page - The 1-indexed page number.
+ * @returns A query key rooted at {@link usersListQueryKey}.
+ */
+export function usersQueryKey(page: number) {
+  return [...usersListQueryKey, page] as const;
+}
+
 /**
  * Ends a session in the query cache: every other cached resource is
  * discarded, and the identity query is set to `null` directly rather than

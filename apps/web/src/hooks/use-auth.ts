@@ -9,6 +9,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "@/lib/api";
 import { discardSessionState, meQueryKey } from "@/lib/query-keys";
+import { LOGIN_PATH } from "@/lib/routes";
+import { useRouter } from "@/lib/use-router";
 
 export function useSetupState() {
   return useQuery({
@@ -58,10 +60,12 @@ export function useLogin() {
 
 export function useLogout() {
   const queryClient = useQueryClient();
+  const { navigate } = useRouter();
   return useMutation({
     mutationFn: () => apiFetch("/auth/logout", null, { method: "POST" }),
     onSuccess: () => {
       discardSessionState(queryClient);
+      navigate(LOGIN_PATH);
     },
   });
 }

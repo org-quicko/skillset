@@ -15,5 +15,10 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     setPathname(path);
   }
 
-  return <RouterContext.Provider value={{ pathname, navigate }}>{children}</RouterContext.Provider>;
+  function replace(path: string) {
+    window.history.replaceState(null, "", path);
+    setPathname(path);
+  }
+
+  return <RouterContext.Provider value={{ pathname, navigate, replace }}>{children}</RouterContext.Provider>;
 }

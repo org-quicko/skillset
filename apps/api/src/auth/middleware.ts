@@ -4,7 +4,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Database } from "../db/client.js";
 import { tokens, users, type UserRow } from "../db/schema.js";
-import { ForbiddenError, UnauthenticatedError } from "../http/errors.js";
+import { ForbiddenError, PasswordChangeRequiredError, UnauthenticatedError } from "../http/errors.js";
 import { SESSION_COOKIE_NAME, verifySession } from "./session.js";
 import { digestsMatch, hashTokenSecret } from "./token.js";
 
@@ -26,11 +26,34 @@ const BEARER_PREFIX = "Bearer ";
  * or the Token itself (ADR-0005), so a Token grants no more than its owner's
  * *current* role and a demotion or revocation takes effect on the next
  * request.
+ *
+ * @param deps - The database and JWT secret needed to resolve a credential.
+ * @param options - `allowPendingPasswordChange`: lets the request through
+ * even while the resolved User's `must_change_password` is set. Reserved
+ * for the two routes that resolve it (docs/data-model.md): reading and
+ * replacing their own password. Every other route refuses such a User with
+ * a `PasswordChangeRequiredError`.
+ * @returns A Hono middleware handler that sets `user` in context on success.
+ * @throws UnauthenticatedError if neither a session cookie nor a Bearer
+ * Token resolves to a User.
+ * @throws PasswordChangeRequiredError if the resolved User's
+ * `must_change_password` is set and `options.allowPendingPasswordChange`
+ * was not passed.
+ * @example
+ * ```ts
+ * app.get("/users/me", requireAuth(deps, { allowPendingPasswordChange: true }), (c) => c.json(c.get("user")));
+ * ```
  */
-export function requireAuth(deps: AuthDependencies): MiddlewareHandler<{ Variables: AuthVariables }> {
+export function requireAuth(
+  deps: AuthDependencies,
+  options?: { allowPendingPasswordChange?: boolean },
+): MiddlewareHandler<{ Variables: AuthVariables }> {
   return async (c, next) => {
     const user = (await resolveSessionUser(c, deps)) ?? (await resolveTokenUser(c, deps));
     if (!user) throw new UnauthenticatedError();
+    if (user.must_change_password && !options?.allowPendingPasswordChange) {
+      throw new PasswordChangeRequiredError();
+    }
     c.set("user", user);
     await next();
   };
