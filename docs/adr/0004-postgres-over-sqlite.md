@@ -18,3 +18,10 @@ raw migration.
 Full-text stemming does not substring-match: `postgres` will not find `postgresql`, and
 hyphenated identifiers tokenise per word. `pg_trgm` complements `tsvector` if that becomes a
 problem. Exact-name lookup deliberately bypasses search entirely and hits the primary key.
+
+The substring-matching limitation above only holds once a word is finished. The `/skills` list
+endpoint prefix-matches the search term's last token (`buildSearchCondition` in
+`apps/api/src/services/skills.ts`) so a reader typing into a search box gets results before
+finishing the word — `postgre` finds `postgresql` — using Postgres's `:*` prefix flag rather than
+`pg_trgm`, since the flag composes with the existing generated column and index instead of adding
+a second index and extension.

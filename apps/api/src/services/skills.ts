@@ -108,6 +108,68 @@ function parseQuery(raw: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/**
+ * Turns a term's last token into a `tsquery` prefix-match flag, unless
+ * that token is a quoted phrase or a `-exclusion`.
+ *
+ * @remarks
+ * Stripped down to letters, digits, underscores, and hyphens first —
+ * `to_tsquery` syntax breaks on anything else a reader might have typed
+ * (a stray quote, `&`, `:`). The hyphen is kept rather than stripped
+ * because Postgres's own parser uses it to decompose a compound token
+ * into several lexemes, and carries a `:*` flag across all of them —
+ * the same rule that makes `to_tsquery('async-await')` implicitly become
+ * `async & await` also makes `to_tsquery('async-await:*')` become
+ * `async:* & await:*`, so this doesn't need to reimplement that
+ * decomposition itself.
+ *
+ * @param lastToken - The term's final whitespace-delimited token, or
+ * `undefined` if the term was empty.
+ * @returns The token with a trailing `:*`, or `undefined` if it was a
+ * phrase, an exclusion, or sanitised down to nothing.
+ */
+function prefixToken(lastToken: string | undefined): string | undefined {
+  if (!lastToken || lastToken.startsWith("-") || lastToken.startsWith('"')) return undefined;
+  const cleaned = lastToken.replace(/[^a-zA-Z0-9_-]/g, "");
+  return cleaned ? `${cleaned}:*` : undefined;
+}
+
+/**
+ * Builds the `search @@ …` condition for a non-blank search term.
+ *
+ * @remarks
+ * Every finished word, `"quoted phrase"`, and `-exclusion` is parsed
+ * exactly as `websearch_to_tsquery` always has — this only changes
+ * behaviour for the term's last token, which doubles as the word a
+ * reader is still typing. That token is prefix-matched instead
+ * (`prefixToken`), so a partial word matches immediately rather than
+ * only once it's fully typed — the type-ahead behaviour
+ * `websearch_to_tsquery` has no mode for
+ * (docs/adr/0004-postgres-over-sqlite.md). A term that ends in a phrase
+ * or exclusion instead falls back to the unmodified
+ * `websearch_to_tsquery` call, since prefix-matching a fragment of an
+ * already-closed phrase or exclusion doesn't make sense.
+ *
+ * @param query - A trimmed, non-empty search term.
+ * @returns A boolean SQL expression for a `where` clause.
+ * @example
+ * buildSearchCondition("postgre") // matches "postgresql-migrations"
+ */
+function buildSearchCondition(query: string) {
+  const tokens = query.match(/-?"[^"]*"|-?\S+/g) ?? [];
+  const prefix = prefixToken(tokens[tokens.length - 1]);
+  if (!prefix) return sql`${skills.search} @@ websearch_to_tsquery('english', ${query})`;
+
+  const headTerm = tokens.slice(0, -1).join(" ");
+  // Parenthesised explicitly: `@@` and `&&` sit at the same precedence tier
+  // and associate left-to-right, so an unparenthesised
+  // `search @@ a && b` parses as `(search @@ a) && b` — a boolean `&&`
+  // tsquery, which Postgres rejects.
+  return headTerm
+    ? sql`${skills.search} @@ (websearch_to_tsquery('english', ${headTerm}) && to_tsquery('english', ${prefix}))`
+    : sql`${skills.search} @@ to_tsquery('english', ${prefix})`;
+}
+
 async function assertSkillExists(deps: SkillsServiceDependencies, name: string): Promise<void> {
   const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.name, name)).limit(1);
   if (!skill) throw new SkillNotFoundError();
@@ -121,12 +183,16 @@ async function assertSkillExists(deps: SkillsServiceDependencies, name: string):
  * A search term is matched against the generated `search` column with
  * Postgres's web-search query parser (`websearch_to_tsquery`), which accepts
  * a plain phrase, `"quoted phrases"`, and `-exclusions`
- * (docs/adr/0004-postgres-over-sqlite.md). It stems rather than
- * substring-matches — `postgres` will not find `postgresql` — and hyphenated
- * identifiers tokenise per word, so an unquoted hyphenated term matches any
- * Skill containing all of its words, not just the one it names. A blank or
- * missing term is treated as no search at all, so this doubles as the
- * ordinary list endpoint.
+ * (docs/adr/0004-postgres-over-sqlite.md), except for the term's last token:
+ * that one is prefix-matched instead (`buildSearchCondition`), so a search
+ * box wired straight to this endpoint gets type-ahead results rather than
+ * needing a full word before anything matches. It still stems rather than
+ * substring-matches once a word is finished — `postgre` will find
+ * "postgresql" as a prefix, but a later, unrelated word like `sql` still
+ * will not — and hyphenated identifiers tokenise per word, so an unquoted
+ * hyphenated term matches any Skill containing all of its words, not just
+ * the one it names. A blank or missing term is treated as no search at all,
+ * so this doubles as the ordinary list endpoint.
  *
  * @param deps - The database this reads from.
  * @param rawPage - The requested page number, as a string straight from a
@@ -150,7 +216,7 @@ export async function listSkills(
 ): Promise<{ items: SkillSummary[]; page: number; page_size: number; total: number }> {
   const page = parsePage(rawPage);
   const query = parseQuery(rawQuery);
-  const matches = query ? sql`${skills.search} @@ websearch_to_tsquery('english', ${query})` : undefined;
+  const matches = query ? buildSearchCondition(query) : undefined;
 
   const rows = await deps.db
     .select({

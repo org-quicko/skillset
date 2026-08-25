@@ -510,10 +510,12 @@ describe("Listing Skills (ticket 03)", () => {
 /**
  * Seam 1 again: full-text search rides the same `/skills` route as the
  * unfiltered list, so what's under test is the `q` parameter's behaviour —
- * plain phrases, quoted phrases, exclusions, pagination, and the empty-query
- * fallback — plus the two limitations ADR-0004 accepts rather than treats as
- * defects: stemming isn't substring matching, and a hyphenated query term
- * tokenises into separate words rather than staying one unit.
+ * plain phrases, quoted phrases, exclusions, pagination, the empty-query
+ * fallback, and the term's last word being prefix-matched for type-ahead
+ * (docs/adr/0004-postgres-over-sqlite.md) — plus the limitation that remains
+ * once a word is finished and prefix-matching moves on to the next one:
+ * stemming still isn't substring matching, so an earlier, already-typed word
+ * has to be whole to match.
  */
 describe("Searching Skills (ticket 10)", () => {
   let container: StartedPostgreSqlContainer;
@@ -625,6 +627,19 @@ describe("Searching Skills (ticket 10)", () => {
     expect(page.items.map((s) => s.name)).toEqual(["changelog-writer"]);
   });
 
+  it("matches a still-partial last word, so results appear before it's fully typed", async () => {
+    const page = await search("chang");
+    expect(page.items.map((s) => s.name)).toEqual(["changelog-writer"]);
+  });
+
+  it("prefix-matches only the last word of a multi-word term, treating earlier ones as finished", async () => {
+    // Both Skills carry "code" and a word starting with "revi": "code review"
+    // itself, and "quality-metrics-tracker"'s description ("Tracks code
+    // quality and review turnaround over time.").
+    const page = await search("code revi");
+    expect(page.items.map((s) => s.name)).toEqual(["quality-metrics-tracker", "code-review-bot"]);
+  });
+
   it("matches a quoted phrase only where the words are adjacent", async () => {
     const page = await search('"code review"');
     expect(page.items.map((s) => s.name)).toEqual(["code-review-bot"]);
@@ -657,18 +672,20 @@ describe("Searching Skills (ticket 10)", () => {
     expect(page2.items[0]?.name).toBe("widget-000");
   });
 
-  it("known limit: stemming does not substring-match, so \"postgres\" misses \"postgresql\"", async () => {
+  it("prefix-matches the term's last word, so a partial word finds it before it's fully typed", async () => {
+    // "postgres" is a prefix of "postgresql", not a whole word by itself —
+    // exact stemming alone would miss it, but the last token is
+    // prefix-matched, so it's found while still mid-word.
     const page = await search("postgres");
-    expect(page.items).toEqual([]);
+    expect(page.items.map((s) => s.name)).toEqual(["postgresql-migrations"]);
   });
 
-  it("known limit: a hyphenated name tokenises per word, so it is not a substring of a longer one", async () => {
-    // "async-await-helper" reads like it contains "async-await", but the
-    // hyphen decomposes each name into its own word sequence rather than a
-    // substring-matchable identifier — searching the shorter name finds only
-    // the exact one, never the Skill it looks like a prefix of.
+  it("prefix-matching the last word also broadens an already-whole word to what it's a prefix of", async () => {
+    // "async-await" decomposes into "async" and "await", each prefix-matched
+    // — so it now also finds "async-await-helper", which contains both as a
+    // prefix, alongside the exact "async-await" it used to match alone.
     const page = await search("async-await");
-    expect(page.items.map((s) => s.name)).toEqual(["async-await"]);
+    expect(page.items.map((s) => s.name)).toEqual(["async-await-helper", "async-await"]);
   });
 
   it("reads a Skill by exact name without going through search", async () => {
