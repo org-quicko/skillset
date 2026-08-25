@@ -18,6 +18,11 @@ interface ApiSkill {
   name: string;
   description: string;
   body: string;
+  license: string | null;
+  compatibility: string | null;
+  metadata: Record<string, string> | null;
+  allowed_tools: string | null;
+  tags: string[];
   published_by: ApiPublisher;
   published_at: string;
 }
@@ -250,6 +255,41 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       code: "body_required",
       field: "body",
     },
+    {
+      label: "an empty license",
+      name: "bad-license",
+      payload: { description: "Reviews code.", body: "Body.\n", license: "" },
+      code: "license_invalid",
+      field: "license",
+    },
+    {
+      label: "a compatibility note that is not a string",
+      name: "bad-compatibility-type",
+      payload: { description: "Reviews code.", body: "Body.\n", compatibility: 42 },
+      code: "compatibility_invalid",
+      field: "compatibility",
+    },
+    {
+      label: "a compatibility note over 500 characters",
+      name: "bad-compatibility",
+      payload: { description: "Reviews code.", body: "Body.\n", compatibility: "c".repeat(501) },
+      code: "compatibility_too_long",
+      field: "compatibility",
+    },
+    {
+      label: "metadata with a non-string value",
+      name: "bad-metadata",
+      payload: { description: "Reviews code.", body: "Body.\n", metadata: { version: 1 } },
+      code: "metadata_invalid",
+      field: "metadata",
+    },
+    {
+      label: "allowed-tools that is not a string",
+      name: "bad-allowed-tools",
+      payload: { description: "Reviews code.", body: "Body.\n", allowed_tools: ["Read"] },
+      code: "allowed_tools_invalid",
+      field: "allowed_tools",
+    },
   ];
 
   for (const { label, name, payload, code, field } of rejections) {
@@ -287,6 +327,65 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       last_name: "Hopper",
     });
     expect(Number.isNaN(new Date(skill.published_at).getTime())).toBe(false);
+  });
+
+  it("leaves license, compatibility, metadata, and allowed-tools null, and tags empty, when a publish never sets them", async () => {
+    await publish(context, writer, "bare-skill", { description: "No extras.", body: "Body.\n" });
+
+    const res = await context.app.request("/api/skills/bare-skill", { headers: { cookie: reader.cookie } });
+    const skill = (await res.json()) as ApiSkill;
+    expect(skill.license).toBeNull();
+    expect(skill.compatibility).toBeNull();
+    expect(skill.metadata).toBeNull();
+    expect(skill.allowed_tools).toBeNull();
+    expect(skill.tags).toEqual([]);
+  });
+
+  it("round-trips license, compatibility, metadata, and allowed-tools when a publish sets all four", async () => {
+    await publish(context, writer, "full-frontmatter-skill", {
+      description: "Has every optional field.",
+      body: "Body.\n",
+      license: "Apache-2.0",
+      compatibility: "Requires git and jq.",
+      metadata: { author: "quicko", version: "1.0" },
+      allowed_tools: "Bash(git:*) Read",
+    });
+
+    const res = await context.app.request("/api/skills/full-frontmatter-skill", { headers: { cookie: reader.cookie } });
+    const skill = (await res.json()) as ApiSkill;
+    expect(skill.license).toBe("Apache-2.0");
+    expect(skill.compatibility).toBe("Requires git and jq.");
+    expect(skill.metadata).toEqual({ author: "quicko", version: "1.0" });
+    expect(skill.allowed_tools).toBe("Bash(git:*) Read");
+
+    const [row] = await context.db.select().from(skills).where(eq(skills.name, "full-frontmatter-skill"));
+    expect(row?.license).toBe("Apache-2.0");
+    expect(row?.metadata).toEqual({ author: "quicko", version: "1.0" });
+  });
+
+  it("clears an optional field on republish when the new payload no longer sets it", async () => {
+    await publish(context, writer, "shrinking-skill", {
+      description: "Had a license once.",
+      body: "Body.\n",
+      license: "MIT",
+    });
+
+    await publish(context, writer, "shrinking-skill", { description: "Lost its license.", body: "Body.\n" });
+
+    const res = await context.app.request("/api/skills/shrinking-skill", { headers: { cookie: reader.cookie } });
+    expect(((await res.json()) as ApiSkill).license).toBeNull();
+  });
+
+  it("leaves tags untouched when republishing, since no publish path ever writes them", async () => {
+    await publish(context, writer, "tagged-skill", { description: "Has tags already.", body: "Body.\n" });
+    await context.db.update(skills).set({ tags: ["testing", "example"] }).where(eq(skills.name, "tagged-skill"));
+
+    await publish(context, admin, "tagged-skill", { description: "Republished by someone else.", body: "New body.\n" });
+
+    const res = await context.app.request("/api/skills/tagged-skill", { headers: { cookie: reader.cookie } });
+    const skill = (await res.json()) as ApiSkill;
+    expect(skill.description).toBe("Republished by someone else.");
+    expect(skill.tags).toEqual(["testing", "example"]);
   });
 
   it("returns 404 for a Skill that does not exist, and refuses reads without a session", async () => {

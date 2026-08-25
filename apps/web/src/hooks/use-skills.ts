@@ -72,7 +72,17 @@ export function usePublishSkill() {
 
       const published = await apiFetch(`/skills/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
         method: "PUT",
-        body: JSON.stringify({ description: bundle.description, body: bundle.body }),
+        // The optional fields are `undefined` on `bundle` when the SKILL.md
+        // never set them, and JSON.stringify drops undefined-valued keys —
+        // so only the ones the frontmatter actually set are sent.
+        body: JSON.stringify({
+          description: bundle.description,
+          body: bundle.body,
+          license: bundle.license,
+          compatibility: bundle.compatibility,
+          metadata: bundle.metadata,
+          allowed_tools: bundle.allowed_tools,
+        }),
       });
 
       const upload = await fetch(published.upload.url, {

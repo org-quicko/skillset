@@ -87,6 +87,11 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 | `name`               | `text`        | primary key                                            |
 | `description`        | `text`        | not null, length ≤ 1024                                |
 | `body`               | `text`        | not null                                               |
+| `license`            | `text`        | null                                                    |
+| `compatibility`      | `text`        | null, length ≤ 500                                     |
+| `metadata`           | `jsonb`       | null — a mapping of string keys to string values       |
+| `allowed_tools`      | `text`        | null                                                    |
+| `tags`               | `text[]`      | null — never written by publish, see below              |
 | `published_by`       | `uuid`        | null, references `users(id)` on delete set null         |
 | `published_by_email` | `text`        | not null                                               |
 | `published_at`       | `timestamptz` | not null, default `now()`                              |
@@ -100,6 +105,18 @@ trailing hyphen, no doubled hyphen.
 `body` is the `SKILL.md` content, supplied by the CLI or the web interface rather than parsed
 from the Artifact — the API never reads the Artifact (ADR-0001). It is rendered through an
 allowlist sanitiser, never trusted as markup.
+
+**`license`, `compatibility`, `metadata`, and `allowed_tools`** are the four optional fields
+the Agent Skills specification defines beyond `name` and `description`. Each is `null` until
+a publish sets it, validated by the same shared rules as `name` and `description` — a value
+that fails validation rejects the whole publish rather than being stored or dropped silently
+(ADR-0009). Publishing always writes all four (a validated value, or `null` when the payload
+doesn't set it), so republishing a Skill without a field it previously had clears it, the same
+full-replace semantics `description` and `body` already have.
+
+**`tags`** is registry-owned metadata, never parsed out of or written into a `SKILL.md` file
+(ADR-0008). No publish path — a fresh publish or a replace of an existing Skill — ever writes
+this column; it is `null` for every Skill until something outside publishing sets it.
 
 **Publisher attribution is stored twice, on purpose.** `published_by` joins to the User for a
 current name while that User exists; `published_by_email` is a snapshot taken at publish time

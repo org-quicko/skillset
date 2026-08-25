@@ -22,6 +22,13 @@
       "when": 1787320841030,
       "tag": "0002_silly_talkback",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787656580445,
+      "tag": "0003_cloudy_iron_patriot",
+      "breakpoints": true
     }
   ]
 }

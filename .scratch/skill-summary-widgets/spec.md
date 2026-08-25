@@ -52,7 +52,7 @@ The Skill's page becomes several distinct widgets instead of one card: a small b
 ### Wire contract and storage
 
 - The publish request payload gains four new optional keys alongside the existing `description` and `body`, one per new field.
-- A Skill's read shape (both the single-Skill and the list-summary shapes) gains the same four fields, each present only when the Skill has a valid value for it, plus a fifth: `tags`, an array of strings.
+- A Skill's read shape (both the single-Skill and the list-summary shapes) gains the same four fields, plus a fifth: `tags`, an array of strings. Each of the four is always present on the wire but is `null` when the Skill has no valid value for it — the same nullable-not-omitted convention `published_by`'s own fields already use — rather than being left out of the response entirely. "Present only when valid" governs what the frontmatter widget *renders* (a null field never shows, with no "not set" placeholder), not the shape of the JSON itself.
 - The Skills table gains five new nullable columns: one per frontmatter field, plus `tags`. None of the four frontmatter columns carry a default; a Skill published before this change, or published since without setting a given field, simply has it absent.
 - Publishing writes the four frontmatter columns (whatever validated, or absent) every time, exactly as it already does for description and body. Publishing never touches the `tags` column in either direction — not on insert, not on the conflict-update path that replaces an existing Skill — because nothing in this effort creates a way to set a tag. This is ADR-0008.
 - Tags are never parsed out of, or written into, a `SKILL.md` file. They are the one Skill attribute that exists solely as registry-owned data.

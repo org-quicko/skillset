@@ -4,6 +4,7 @@ import {
   check,
   customType,
   index,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -87,6 +88,18 @@ export const skills = pgTable(
     // The SKILL.md body as supplied by the publisher. The API never reads the
     // Artifact (ADR-0001), so this is not parsed out of it.
     body: text("body").notNull(),
+    // The four optional Agent Skills spec fields (docs/data-model.md). Each
+    // is null until a publish sets it, and publishing never partially
+    // clears one — either the whole frontmatter validates or the publish is
+    // refused (ADR-0009).
+    license: text("license"),
+    compatibility: text("compatibility"),
+    metadata: jsonb("metadata").$type<Record<string, string>>(),
+    allowed_tools: text("allowed_tools"),
+    // Registry-owned, never parsed from or written into SKILL.md
+    // (ADR-0008). No publish path — including replacing an existing
+    // Skill — ever writes this column.
+    tags: text("tags").array(),
     // Attribution is stored twice on purpose: the reference gives a current
     // name while the User exists, and the email snapshot outlives them being
     // removed. Removing a User must not erase who changed a shared Skill.

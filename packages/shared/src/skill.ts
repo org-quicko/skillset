@@ -20,12 +20,30 @@ export const PublisherSchema = z.object({
 });
 export type Publisher = z.infer<typeof PublisherSchema>;
 
-export const SkillSummarySchema = z.object({
-  name: SkillNameSchema,
-  description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
-  published_by: PublisherSchema,
-  published_at: timestamp,
+/**
+ * The four optional Agent Skills spec fields the Registry keeps, plus
+ * `tags` (registry metadata, never written into `SKILL.md` itself — see
+ * docs/adr/0008-tags-are-registry-metadata-not-frontmatter.md). Each of the
+ * four is `null` when the Skill's frontmatter never set it, or set it to
+ * something that failed validation and was therefore rejected at publish
+ * time rather than stored.
+ */
+export const SkillFrontmatterExtrasSchema = z.object({
+  license: z.string().nullable(),
+  compatibility: z.string().nullable(),
+  metadata: z.record(z.string(), z.string()).nullable(),
+  allowed_tools: z.string().nullable(),
+  tags: z.array(z.string()),
 });
+
+export const SkillSummarySchema = z
+  .object({
+    name: SkillNameSchema,
+    description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
+    published_by: PublisherSchema,
+    published_at: timestamp,
+  })
+  .extend(SkillFrontmatterExtrasSchema.shape);
 export type SkillSummary = z.infer<typeof SkillSummarySchema>;
 
 /** A single Skill, with the `SKILL.md` body. Sanitise the body before rendering it. */
@@ -42,10 +60,21 @@ export const SkillPageSchema = z.object({
 });
 export type SkillPage = z.infer<typeof SkillPageSchema>;
 
-/** PUT /skills/\{name\} request body. The name comes from the path. */
+/**
+ * PUT /skills/\{name\} request body. The name comes from the path. The four
+ * frontmatter extras are optional and unvalidated at this layer — the
+ * shared validation rules (`validateSkillLicense` and friends) are what
+ * actually enforce the specification, the same way `description` and
+ * `body` are not length-checked here either. `tags` is deliberately absent:
+ * publishing never sets it (docs/adr/0008).
+ */
 export const SkillPublishSchema = z.object({
   description: z.string(),
   body: z.string(),
+  license: z.string().optional(),
+  compatibility: z.string().optional(),
+  metadata: z.record(z.string(), z.string()).optional(),
+  allowed_tools: z.string().optional(),
 });
 export type SkillPublish = z.infer<typeof SkillPublishSchema>;
 

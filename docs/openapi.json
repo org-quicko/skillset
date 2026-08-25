@@ -444,7 +444,7 @@
       "put": {
         "tags": ["skills"],
         "summary": "Publish a Skill",
-        "description": "Create or replace, idempotent by name: publishing an existing Skill replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002).\n\nThe row is written first and an upload target returned. The caller then writes the Artifact to that target directly. Until it does, the Skill lists and reads but its Artifact cannot be retrieved.\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.",
+        "description": "Create or replace, idempotent by name: publishing an existing Skill replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002).\n\nThe row is written first and an upload target returned. The caller then writes the Artifact to that target directly. Until it does, the Skill lists and reads but its Artifact cannot be retrieved.\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.\n\n`license`, `compatibility`, `metadata`, and `allowed_tools` are optional, but are validated exactly as strictly as `description` and `body` when present — any one of them failing rejects the whole publish, naming the specific field and rule (ADR-0009). Publishing always writes all four (a validated value, or null when absent), so a republish that no longer sets a field clears it. `tags` cannot be set through this endpoint at all — see the Skill schema.",
         "requestBody": {
           "required": true,
           "content": {
@@ -463,6 +463,21 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "The `SKILL.md` content below the frontmatter. Rendered through an allowlist sanitiser, never trusted as markup."
+                  },
+                  "license": { "type": "string", "description": "From the SKILL.md frontmatter. Optional." },
+                  "compatibility": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "From the SKILL.md frontmatter. Optional."
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "From the SKILL.md frontmatter, a mapping of string keys to string values. Optional."
+                  },
+                  "allowed_tools": {
+                    "type": "string",
+                    "description": "From the SKILL.md frontmatter. Optional; internal grammar unvalidated (experimental in the specification)."
                   }
                 }
               }
@@ -647,7 +662,17 @@
       },
       "SkillSummary": {
         "type": "object",
-        "required": ["name", "description", "published_by", "published_at"],
+        "required": [
+          "name",
+          "description",
+          "license",
+          "compatibility",
+          "metadata",
+          "allowed_tools",
+          "tags",
+          "published_by",
+          "published_at"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -655,6 +680,29 @@
             "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
           },
           "description": { "type": "string", "maxLength": 1024 },
+          "license": {
+            "type": ["string", "null"],
+            "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "compatibility": {
+            "type": ["string", "null"],
+            "maxLength": 500,
+            "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "metadata": {
+            "type": ["object", "null"],
+            "additionalProperties": { "type": "string" },
+            "description": "From the SKILL.md frontmatter, a mapping of string keys to string values. Null when the Skill never set it."
+          },
+          "allowed_tools": {
+            "type": ["string", "null"],
+            "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Registry-owned metadata, never parsed from or written into SKILL.md (ADR-0008). Empty until something outside publishing sets it — publishing never writes this field."
+          },
           "published_by": { "$ref": "#/components/schemas/Publisher" },
           "published_at": { "type": "string", "format": "date-time" }
         }

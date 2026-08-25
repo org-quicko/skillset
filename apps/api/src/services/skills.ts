@@ -1,7 +1,11 @@
 import {
   SKILL_PAGE_SIZE,
+  validateSkillAllowedTools,
   validateSkillBody,
+  validateSkillCompatibility,
   validateSkillDescription,
+  validateSkillLicense,
+  validateSkillMetadata,
   validateSkillName,
 } from "@skill-registry/shared";
 import { count, desc, eq, sql } from "drizzle-orm";
@@ -34,6 +38,11 @@ const skillSelection = {
   name: skills.name,
   description: skills.description,
   body: skills.body,
+  license: skills.license,
+  compatibility: skills.compatibility,
+  metadata: skills.metadata,
+  allowed_tools: skills.allowed_tools,
+  tags: skills.tags,
   published_at: skills.published_at,
   published_by: {
     user_id: users.id,
@@ -42,6 +51,11 @@ const skillSelection = {
     last_name: users.last_name,
   },
 };
+
+/** The wire's `tags` is never null — a Skill with none simply has an empty list. */
+function normalizeTags(tags: string[] | null): string[] {
+  return tags ?? [];
+}
 
 // The Publisher is null-per-field, not null-as-a-whole: `leftJoin` nulls out
 // only the columns that come from `users`, while `email` — snapshotted onto
@@ -56,6 +70,11 @@ interface SkillPublisher {
 interface SkillSummary {
   name: string;
   description: string;
+  license: string | null;
+  compatibility: string | null;
+  metadata: Record<string, string> | null;
+  allowed_tools: string | null;
+  tags: string[];
   published_at: Date;
   published_by: SkillPublisher;
 }
@@ -133,10 +152,15 @@ export async function listSkills(
   const query = parseQuery(rawQuery);
   const matches = query ? sql`${skills.search} @@ websearch_to_tsquery('english', ${query})` : undefined;
 
-  const items = await deps.db
+  const rows = await deps.db
     .select({
       name: skillSelection.name,
       description: skillSelection.description,
+      license: skillSelection.license,
+      compatibility: skillSelection.compatibility,
+      metadata: skillSelection.metadata,
+      allowed_tools: skillSelection.allowed_tools,
+      tags: skillSelection.tags,
       published_at: skillSelection.published_at,
       published_by: skillSelection.published_by,
     })
@@ -146,6 +170,8 @@ export async function listSkills(
     .orderBy(desc(skills.published_at))
     .limit(SKILL_PAGE_SIZE)
     .offset((page - 1) * SKILL_PAGE_SIZE);
+
+  const items = rows.map((row) => ({ ...row, tags: normalizeTags(row.tags) }));
 
   const [totals] = await deps.db.select({ total: count() }).from(skills).where(matches);
 
@@ -173,7 +199,7 @@ export async function getSkill(deps: SkillsServiceDependencies, name: string): P
     .limit(1);
 
   if (!skill) throw new SkillNotFoundError();
-  return skill;
+  return { ...skill, tags: normalizeTags(skill.tags) };
 }
 
 /**
@@ -192,10 +218,13 @@ export async function getSkill(deps: SkillsServiceDependencies, name: string): P
  * @param rawName - The Skill's name, taken from the request path and not
  * yet validated.
  * @param payload - The request body, expected to carry `description` and
- * `body`; not yet known to have either.
+ * `body`, and optionally `license`, `compatibility`, `metadata`, and
+ * `allowed_tools`; not yet known to have any of them.
  * @returns `{ skill: PublishedSkill; upload: SkillUpload }`
- * @throws SkillValidationError if `rawName`, `payload.description`, or
- * `payload.body` fails validation.
+ * @throws SkillValidationError if `rawName`, `payload.description`,
+ * `payload.body`, or any present optional field fails validation. A
+ * failing optional field rejects the publish exactly like a failing
+ * required one (ADR-0009) — nothing about the Skill changes.
  * @example
  * ```ts
  * const { skill, upload } = await publishSkill(deps, publisher, "my-skill", {
@@ -218,10 +247,22 @@ export async function publishSkill(
   const name = validateSkillName(rawName);
   const description = validateSkillDescription(payload?.description);
   const body = validateSkillBody(payload?.body);
+  // Optional, validated as strictly as when set, whether required or
+  // optional — any one of them failing rejects the whole publish
+  // (ADR-0009). Coerced to `null` rather than left `undefined`: a republish
+  // fully replaces the frontmatter (ADR-0002), so a field the payload no
+  // longer sets must clear whatever an earlier publish stored, not leave it
+  // lingering.
+  const license = validateSkillLicense(payload?.license) ?? null;
+  const compatibility = validateSkillCompatibility(payload?.compatibility) ?? null;
+  const metadata = validateSkillMetadata(payload?.metadata) ?? null;
+  const allowed_tools = validateSkillAllowedTools(payload?.allowed_tools) ?? null;
 
   // Idempotent by name: publishing an existing Skill replaces it whoever
   // published it first, and the publisher and published-at become whoever
-  // published it last (ADR-0002).
+  // published it last (ADR-0002). `tags` is deliberately absent from both
+  // the insert and the conflict update — no publish path ever writes it
+  // (ADR-0008), so a replace leaves it exactly as it was.
   const published_at = new Date();
   const [row] = await deps.db
     .insert(skills)
@@ -229,6 +270,10 @@ export async function publishSkill(
       name,
       description,
       body,
+      license,
+      compatibility,
+      metadata,
+      allowed_tools,
       published_by: publisher.id,
       published_by_email: publisher.email,
       published_at,
@@ -238,6 +283,10 @@ export async function publishSkill(
       set: {
         description,
         body,
+        license,
+        compatibility,
+        metadata,
+        allowed_tools,
         published_by: publisher.id,
         published_by_email: publisher.email,
         published_at,
@@ -261,6 +310,11 @@ export async function publishSkill(
       name: row.name,
       description: row.description,
       body: row.body,
+      license: row.license,
+      compatibility: row.compatibility,
+      metadata: row.metadata,
+      allowed_tools: row.allowed_tools,
+      tags: normalizeTags(row.tags),
       published_at: row.published_at,
       published_by: {
         user_id: publisher.id,

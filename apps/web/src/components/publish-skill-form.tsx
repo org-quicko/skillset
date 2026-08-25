@@ -1,9 +1,11 @@
 import { SkillValidationError, type SkillFile } from "@skill-registry/shared";
 import { useRef, useState, type DragEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { SkillUploadError, usePublishSkill } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { fetchGitHubSkillFiles } from "@/lib/read-github-files";
 import { readDroppedFiles, readPickedFiles } from "@/lib/read-skill-files";
 
 function describeFailure(error: unknown): string {
@@ -22,9 +24,12 @@ export function PublishSkillForm({
   onCancel: () => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
-  // A read failure (a file vanishes mid-drag, a permission error) happens
-  // before the mutation is ever invoked, so it can't live on `publish`.
+  // A read failure (a file vanishes mid-drag, a permission error, a GitHub
+  // fetch that 404s) happens before the mutation is ever invoked, so it
+  // can't live on `publish`.
   const [readError, setReadError] = useState<string | null>(null);
+  const [githubUrl, setGithubUrl] = useState("");
+  const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const publish = usePublishSkill();
 
@@ -33,10 +38,24 @@ export function PublishSkillForm({
     publish.mutate(files, { onSuccess: (skill) => onPublished(skill.name) });
   }
 
+  async function handleGithubSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isFetchingGithub || publish.isPending) return;
+    setIsFetchingGithub(true);
+    setReadError(null);
+    try {
+      handleFiles(await fetchGitHubSkillFiles(githubUrl));
+    } catch (error) {
+      setReadError(error instanceof Error ? error.message : "Could not fetch that GitHub URL. Try again.");
+    } finally {
+      setIsFetchingGithub(false);
+    }
+  }
+
   async function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
-    if (publish.isPending) return;
+    if (publish.isPending || isFetchingGithub) return;
     try {
       handleFiles(await readDroppedFiles(event.dataTransfer.items));
     } catch {
@@ -51,7 +70,7 @@ export function PublishSkillForm({
     // a reference held past this point instead of swapping in a new one.
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (files.length === 0 || publish.isPending) return;
+    if (files.length === 0 || publish.isPending || isFetchingGithub) return;
     try {
       handleFiles(await readPickedFiles(files));
     } catch {
@@ -83,7 +102,7 @@ export function PublishSkillForm({
         <Button
           type="button"
           variant="outline"
-          disabled={publish.isPending}
+          disabled={publish.isPending || isFetchingGithub}
           onClick={() => inputRef.current?.click()}
         >
           Choose folder…
@@ -100,11 +119,32 @@ export function PublishSkillForm({
         />
       </div>
 
+      <div className="flex flex-col gap-2">
+        <p className="text-center text-xs text-muted-foreground">or publish from a GitHub URL</p>
+        <form onSubmit={handleGithubSubmit} className="flex gap-2">
+          <Input
+            type="url"
+            placeholder="https://github.com/owner/repo"
+            value={githubUrl}
+            onChange={(event) => setGithubUrl(event.target.value)}
+            disabled={publish.isPending || isFetchingGithub}
+          />
+          <Button
+            type="submit"
+            variant="outline"
+            disabled={githubUrl.trim().length === 0 || publish.isPending || isFetchingGithub}
+          >
+            Publish
+          </Button>
+        </form>
+      </div>
+
       {publish.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
+      {isFetchingGithub && <p className="text-sm text-muted-foreground">Fetching from GitHub…</p>}
       {readError && <p className="text-sm text-destructive">{readError}</p>}
       {publish.isError && <p className="text-sm text-destructive">{describeFailure(publish.error)}</p>}
 
-      <Button type="button" variant="ghost" disabled={publish.isPending} onClick={onCancel}>
+      <Button type="button" variant="ghost" disabled={publish.isPending || isFetchingGithub} onClick={onCancel}>
         Cancel
       </Button>
     </div>
