@@ -2,8 +2,11 @@ import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations, waitForDatabase } from "./db/migrate.js";
+import { createLogger } from "./logger.js";
 import { S3StorageAdapter } from "./storage/s3.js";
 import { createApp } from "./app.js";
+
+const logger = createLogger();
 
 async function main() {
   const config = loadConfig();
@@ -24,13 +27,13 @@ async function main() {
   const webDist = join(import.meta.dir, "../../web/dist");
   const webRoot = (await Bun.file(join(webDist, "index.html")).exists()) ? webDist : undefined;
 
-  const app = createApp({ sql, db, storage, webRoot, jwtSecret: config.jwtSecret });
+  const app = createApp({ sql, db, storage, webRoot, jwtSecret: config.jwtSecret, logger });
 
   Bun.serve({ fetch: app.fetch, port: config.port });
-  console.log(`Skill Registry listening on port ${config.port}`);
+  logger.info({ port: config.port }, "Skill Registry listening");
 }
 
 main().catch((error) => {
-  console.error(error);
+  logger.fatal({ err: error }, "Skill Registry failed to start");
   process.exit(1);
 });

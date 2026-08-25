@@ -3,6 +3,7 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import { hashPassword } from "../src/auth/password.js";
+import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
 import { skills, users } from "../src/db/schema.js";
 import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
 
@@ -46,9 +47,9 @@ interface Session {
 function sessionCookie(res: Response): string {
   const setCookie = res.headers.get("set-cookie");
   if (!setCookie) throw new Error("Response did not set a session cookie.");
-  const match = /session=([^;]*)/.exec(setCookie);
-  if (!match) throw new Error(`Set-Cookie header missing "session": ${setCookie}`);
-  return `session=${match[1]}`;
+  const match = new RegExp(`${SESSION_COOKIE_NAME}=([^;]*)`).exec(setCookie);
+  if (!match) throw new Error(`Set-Cookie header missing "${SESSION_COOKIE_NAME}": ${setCookie}`);
+  return `${SESSION_COOKIE_NAME}=${match[1]}`;
 }
 
 /**

@@ -7,6 +7,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/skill_registry}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-}
       STORAGE_REGION: ${STORAGE_REGION:-}
       STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-}

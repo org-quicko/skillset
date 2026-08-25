@@ -17,3 +17,9 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 Don't perform `git add`, `git commit` or `git push`
 Don't add unneceesaary comments. Add comments wherever it is required to state a beahviour
+
+All the public method should have jsdoc comments which describes all the arguments, a summary of what method does and an example. Do these for all new methods and any existing method you update.
+
+Always use claude in chrome for verification and debugging
+
+Use router instead of useState for navigating between pages

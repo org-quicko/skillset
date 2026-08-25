@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { sign, verify } from "hono/jwt";
 
-export const SESSION_COOKIE_NAME = "session";
+export const SESSION_COOKIE_NAME = "SESSIONID";
 
 // Cannot be revoked before expiry (ADR-0005), so kept short rather than
 // matching how long a User might like to stay logged in.

@@ -4,7 +4,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Database } from "../db/client.js";
 import { tokens, users, type UserRow } from "../db/schema.js";
-import { forbidden, unauthenticated } from "../http/errors.js";
+import { ForbiddenError, UnauthenticatedError } from "../http/errors.js";
 import { SESSION_COOKIE_NAME, verifySession } from "./session.js";
 import { digestsMatch, hashTokenSecret } from "./token.js";
 
@@ -30,7 +30,7 @@ const BEARER_PREFIX = "Bearer ";
 export function requireAuth(deps: AuthDependencies): MiddlewareHandler<{ Variables: AuthVariables }> {
   return async (c, next) => {
     const user = (await resolveSessionUser(c, deps)) ?? (await resolveTokenUser(c, deps));
-    if (!user) return unauthenticated(c);
+    if (!user) throw new UnauthenticatedError();
     c.set("user", user);
     await next();
   };
@@ -78,7 +78,7 @@ export function requireRole(minimum: Role): MiddlewareHandler<{ Variables: AuthV
   return async (c, next) => {
     const user = c.get("user");
     if (!roleMeets(user.role, minimum)) {
-      return forbidden(c, `Your role (${user.role}) does not allow this.`);
+      throw new ForbiddenError(`Your role (${user.role}) does not allow this.`);
     }
     await next();
   };

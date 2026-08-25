@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Role as UserRole } from "@skill-registry/shared";
 import { hashPassword } from "../src/auth/password.js";
+import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
 import { tokens, users } from "../src/db/schema.js";
 import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
 
@@ -31,9 +32,9 @@ function sha256Hex(value: string): string {
 function sessionCookie(res: Response): string {
   const setCookie = res.headers.get("set-cookie");
   if (!setCookie) throw new Error("Response did not set a session cookie.");
-  const match = /session=([^;]*)/.exec(setCookie);
-  if (!match) throw new Error(`Set-Cookie missing "session": ${setCookie}`);
-  return `session=${match[1]}`;
+  const match = new RegExp(`${SESSION_COOKIE_NAME}=([^;]*)`).exec(setCookie);
+  if (!match) throw new Error(`Set-Cookie missing "${SESSION_COOKIE_NAME}": ${setCookie}`);
+  return `${SESSION_COOKIE_NAME}=${match[1]}`;
 }
 
 /** The bootstrap route only ever creates the first User, and makes them the Superadmin. */

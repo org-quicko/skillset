@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { decode } from "hono/jwt";
+import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
 import { users } from "../src/db/schema.js";
 import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
 
@@ -81,7 +82,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     expect(body.email).toBe("ada@example.com"); // normalised to lowercase
     expect(body).not.toHaveProperty("password_hash");
 
-    superadminCookie = setCookieValue(res, "session");
+    superadminCookie = setCookieValue(res, SESSION_COOKIE_NAME);
   });
 
   it("stores the password hashed with argon2id, never in plaintext", async () => {
@@ -144,7 +145,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
       body: JSON.stringify({ email: "ada@example.com", password: "correct-horse-battery" }),
     });
     expect(res.status).toBe(200);
-    superadminCookie = setCookieValue(res, "session");
+    superadminCookie = setCookieValue(res, SESSION_COOKIE_NAME);
   });
 
   it("refuses a wrong password and an unknown email identically, both padded to the same floor", async () => {

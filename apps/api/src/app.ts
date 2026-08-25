@@ -3,6 +3,8 @@ import { serveStatic } from "hono/bun";
 import type postgres from "postgres";
 import type { AuthVariables } from "./auth/middleware.js";
 import type { Database } from "./db/client.js";
+import { registerErrorHandler } from "./http/errors.js";
+import type { Logger } from "./logger.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerSetupRoutes } from "./routes/setup.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
@@ -14,6 +16,7 @@ export interface AppDependencies {
   db: Database;
   jwtSecret: string;
   storage: StorageAdapter;
+  logger: Logger;
   /** Absolute path to the built web interface's static assets, if any. */
   webRoot?: string;
 }
@@ -26,6 +29,8 @@ export function createApp(deps: AppDependencies): Hono {
   // `.route()`, so there's a single place a request for a given path is
   // ever matched.
   const api = new Hono<{ Variables: AuthVariables }>();
+  registerErrorHandler(api, deps.logger);
+
   api.get("/health", async (c) => {
     await deps.sql`SELECT 1`;
     return c.json({ status: "ok" });

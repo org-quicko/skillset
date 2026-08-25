@@ -2,6 +2,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import type { Hono } from "hono";
 import { createDatabase } from "../src/db/client.js";
 import { runMigrations, waitForDatabase } from "../src/db/migrate.js";
+import { createLogger } from "../src/logger.js";
 import { FakeStorageAdapter } from "../src/storage/fake.js";
 import { createApp } from "../src/app.js";
 
@@ -32,7 +33,7 @@ export async function startTestContext(): Promise<{
   await runMigrations(sql, db);
 
   const storage = new FakeStorageAdapter();
-  const app = createApp({ sql, db, storage, jwtSecret: TEST_JWT_SECRET });
+  const app = createApp({ sql, db, storage, jwtSecret: TEST_JWT_SECRET, logger: createLogger("silent") });
 
   return { context: { app, sql, db, storage }, container };
 }
