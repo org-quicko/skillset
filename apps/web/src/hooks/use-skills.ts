@@ -10,10 +10,30 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { apiFetch } from "@/lib/api";
 import { skillQueryKey, skillsListQueryKey, skillsQueryKey } from "@/lib/query-keys";
 
-export function useSkills(page: number) {
+/**
+ * Fetches one page of the Skill list, optionally narrowed by a full-text
+ * search term.
+ *
+ * `q` rides the query key (`skillsQueryKey`), so a new term gets its own
+ * cache entry rather than overwriting the previous one; `keepPreviousData`
+ * keeps rendering that previous entry's results while the new term's request
+ * is in flight, instead of the list emptying out mid-search.
+ *
+ * @param page - The 1-indexed page number to fetch.
+ * @param q - The search term, or `""` for the ordinary most-recent-first
+ * list. Supports quoted phrases and `-exclusions` (docs/adr/0004).
+ * @returns The TanStack Query result for that page's `SkillPage`.
+ * @example
+ * const skills = useSkills(1, '"code review" -legacy');
+ */
+export function useSkills(page: number, q: string) {
   return useQuery({
-    queryKey: skillsQueryKey(page),
-    queryFn: () => apiFetch(`/skills?page=${page}`, SkillPageSchema),
+    queryKey: skillsQueryKey(page, q),
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page) });
+      if (q) params.set("q", q);
+      return apiFetch(`/skills?${params.toString()}`, SkillPageSchema);
+    },
     placeholderData: keepPreviousData,
   });
 }

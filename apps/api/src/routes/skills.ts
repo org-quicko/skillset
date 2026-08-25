@@ -14,7 +14,7 @@ export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceD
 
 export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: SkillRouteDependencies): void {
   app.get("/skills", requireAuth(deps), async (c) => {
-    return c.json(SkillPageSchema.parse(await listSkills(deps, c.req.query("page"))));
+    return c.json(SkillPageSchema.parse(await listSkills(deps, c.req.query("page"), c.req.query("q"))));
   });
 
   app.get("/skills/:name", requireAuth(deps), async (c) => {
