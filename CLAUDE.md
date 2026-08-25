@@ -18,7 +18,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 Don't perform `git add`, `git commit` or `git push`
 Don't add unneceesaary comments. Add comments wherever it is required to state a beahviour
 
-All the public method should have jsdoc comments which describes all the arguments, all the exceptions thrown by the method, a one line summary of what method does, any remarks if needed and an example. Do these for all new methods and any existing method you update.
+All the public method should have tsdoc comments which describes all the arguments, all the exceptions thrown by the method, a one line summary of what method does, any remarks if needed and an example. Do these for all new methods and any existing method you update.
 
 Always use claude in chrome for verification and debugging
 

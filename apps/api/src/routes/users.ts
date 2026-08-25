@@ -6,6 +6,13 @@ import { deleteToken, listTokens, mintToken, type UsersServiceDependencies } fro
 
 export interface UsersRouteDependencies extends AuthDependencies, UsersServiceDependencies {}
 
+/**
+ * Registers the `/users/me` routes: the caller's own profile and their
+ * Tokens (list, mint, delete).
+ *
+ * @param app - The Hono app to register the routes on.
+ * @param deps - The auth and Users-service dependencies the routes need.
+ */
 export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, deps: UsersRouteDependencies): void {
   app.get("/users/me", requireAuth(deps), async (c) => {
     // The role on this row was resolved fresh for this request by

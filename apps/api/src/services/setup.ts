@@ -19,11 +19,31 @@ export interface SetupServiceDependencies {
 // lock/unlock pair isn't guaranteed to run on the same backend session.
 const INIT_LOCK_KEY = advisoryLockKey("skill-registry:setup-init");
 
+/**
+ * Whether the instance already has its first User.
+ *
+ * @param deps - The database this reads from.
+ * @returns `{ initialized: boolean }`
+ */
 export async function getSetupState(deps: SetupServiceDependencies): Promise<{ initialized: boolean }> {
   const [row] = await deps.db.select({ count: count() }).from(users);
   return { initialized: (row?.count ?? 0) > 0 };
 }
 
+/**
+ * Creates the instance's first User as a superadmin, and issues a session
+ * for them.
+ *
+ * @remarks
+ * Serialised against concurrent initialisation attempts with a
+ * transaction-scoped Postgres advisory lock, so two simultaneous setup
+ * requests can't both succeed.
+ *
+ * @param deps - The database, JWT secret, and logger this needs.
+ * @param input - The first superadmin's name, email, and password.
+ * @returns `{ user: UserRow; token: string }`
+ * @throws AlreadyInitializedError if a User already exists.
+ */
 export async function initializeSuperadmin(
   deps: SetupServiceDependencies,
   input: { first_name: string; last_name: string; email: string; password: string },

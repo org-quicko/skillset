@@ -21,6 +21,17 @@ export interface SkillDocument {
 // frontmatter that does not parse.
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n([\s\S]*))?$/;
 
+/**
+ * Parses a SKILL.md's YAML frontmatter and body.
+ *
+ * @param source - The raw contents of a SKILL.md file.
+ * @returns `SkillDocument`
+ * @throws SkillValidationError with rule `frontmatter_missing` if the file
+ * has no `---`-fenced frontmatter, `frontmatter_invalid` if the fenced
+ * block isn't valid YAML or isn't a mapping, or one of
+ * `validateSkillName`'s or `validateSkillDescription`'s rules if a field
+ * fails validation.
+ */
 export function parseSkillDocument(source: string): SkillDocument {
   const match = FRONTMATTER_PATTERN.exec(source.replace(/^\uFEFF/, ""));
   if (!match) {

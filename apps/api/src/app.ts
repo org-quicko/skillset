@@ -21,6 +21,19 @@ export interface AppDependencies {
   webRoot?: string;
 }
 
+/**
+ * Builds the fully wired Hono app: mounts every resource's routes under
+ * `/api`, registers the central error handler, and — when a built web
+ * interface is available — serves it with an SPA fallback.
+ *
+ * @param deps - The database, storage adapter, JWT secret, logger, and
+ * optional web interface root every route and service needs.
+ * @returns `Hono`
+ * @example
+ * ```ts
+ * const app = createApp({ sql, db, jwtSecret, storage, logger });
+ * ```
+ */
 export function createApp(deps: AppDependencies): Hono {
   const app = new Hono();
 

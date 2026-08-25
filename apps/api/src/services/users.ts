@@ -11,10 +11,29 @@ export interface UsersServiceDependencies {
   logger: Logger;
 }
 
+/**
+ * Lists a User's own Tokens, newest first.
+ *
+ * @param deps - The database this reads from.
+ * @param owner - The User whose Tokens to list.
+ * @returns `TokenRow[]`
+ */
 export async function listTokens(deps: UsersServiceDependencies, owner: UserRow): Promise<TokenRow[]> {
   return deps.db.select().from(tokens).where(eq(tokens.user_id, owner.id)).orderBy(desc(tokens.created_at));
 }
 
+/**
+ * Mints a new Token for a User.
+ *
+ * @remarks
+ * The plaintext secret is returned only here — it is never stored, and
+ * never appears in `listTokens` above.
+ *
+ * @param deps - The database and logger this needs.
+ * @param owner - The User the Token belongs to.
+ * @param name - A caller-supplied label for the Token.
+ * @returns `{ token: TokenRow; secret: string }`
+ */
 export async function mintToken(
   deps: UsersServiceDependencies,
   owner: UserRow,
@@ -33,6 +52,19 @@ export async function mintToken(
   return { token: created, secret };
 }
 
+/**
+ * Deletes one of a User's own Tokens.
+ *
+ * @remarks
+ * A Token id belonging to someone else, or that doesn't exist at all, is
+ * reported identically to an owned Token that's already gone — the caller
+ * cannot distinguish "not yours" from "not found" either way.
+ *
+ * @param deps - The database and logger this needs.
+ * @param owner - The User the Token must belong to.
+ * @param tokenId - The Token's id.
+ * @throws TokenNotFoundError if no Token by that id belongs to `owner`.
+ */
 export async function deleteToken(deps: UsersServiceDependencies, owner: UserRow, tokenId: string): Promise<void> {
   // A malformed id can never belong to the owner — treat it the same as
   // "not found" rather than letting an invalid UUID reach Postgres as a raw

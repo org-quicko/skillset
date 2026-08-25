@@ -22,6 +22,14 @@ const REDACT_PATHS = [
   "*.jwt",
 ];
 
+/**
+ * Builds the process-wide Pino logger, pretty-printed in development and
+ * structured JSON elsewhere, with credential-shaped fields always redacted.
+ *
+ * @param level - The minimum level to log at. Defaults to `LOG_LEVEL` from
+ * the environment, or `"info"` if that's unset.
+ * @returns `Logger`
+ */
 export function createLogger(level: string = process.env.LOG_LEVEL ?? "info"): Logger {
   // Pretty-printing is a dev convenience; skip the transport (and its worker
   // thread) entirely in production or when logging is off, e.g. in tests.

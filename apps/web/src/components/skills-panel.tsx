@@ -4,7 +4,7 @@ import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillList } from "@/components/skill-list";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useRouter } from "@/lib/router";
+import { useRouter } from "@/lib/use-router";
 
 const SKILL_PATH_PREFIX = "/skills/";
 
@@ -44,7 +44,7 @@ export function SkillsPanel({ role }: { role: Role }) {
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Publish a Skill</DialogTitle>
-            <DialogDescription>Drop the Skill's folder here, or choose it from a dialog.</DialogDescription>
+            <DialogDescription>Drop the Skill&apos;s folder here, or choose it from a dialog.</DialogDescription>
           </DialogHeader>
           <PublishSkillForm
             onPublished={(name) => {

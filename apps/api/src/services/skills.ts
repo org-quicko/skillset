@@ -43,6 +43,40 @@ const skillSelection = {
   },
 };
 
+// The Publisher is null-per-field, not null-as-a-whole: `leftJoin` nulls out
+// only the columns that come from `users`, while `email` — snapshotted onto
+// the Skill row itself — is always present (see skillSelection above).
+interface SkillPublisher {
+  user_id: string | null;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+interface SkillSummary {
+  name: string;
+  description: string;
+  published_at: Date;
+  published_by: SkillPublisher;
+}
+
+interface SkillDetail extends SkillSummary {
+  body: string;
+}
+
+interface PublishedSkill extends SkillDetail {
+  // The publisher just authenticated the request — every field is known,
+  // unlike the leftJoin-derived, possibly-removed Publisher above.
+  published_by: { user_id: string; email: string; first_name: string; last_name: string };
+}
+
+interface SkillUpload {
+  url: string;
+  method: string;
+  headers: { "content-type": string };
+  expires_in_seconds: number;
+}
+
 /** A page below 1 — or not a number at all — is the first page, not an error. */
 function parsePage(raw: string | undefined): number {
   const page = Number(raw ?? "1");
@@ -54,7 +88,19 @@ async function assertSkillExists(deps: SkillsServiceDependencies, name: string):
   if (!skill) throw new SkillNotFoundError();
 }
 
-export async function listSkills(deps: SkillsServiceDependencies, rawPage: string | undefined) {
+/**
+ * Lists Skills, newest-published first, one page at a time.
+ *
+ * @param deps - The database this reads from.
+ * @param rawPage - The requested page number, as a string straight from a
+ * query parameter. Anything below 1, or not a number at all, is treated as
+ * the first page.
+ * @returns `{ items: SkillSummary[]; page: number; page_size: number; total: number }`
+ */
+export async function listSkills(
+  deps: SkillsServiceDependencies,
+  rawPage: string | undefined,
+): Promise<{ items: SkillSummary[]; page: number; page_size: number; total: number }> {
   const page = parsePage(rawPage);
 
   const items = await deps.db
@@ -75,9 +121,19 @@ export async function listSkills(deps: SkillsServiceDependencies, rawPage: strin
   return { items, page, page_size: SKILL_PAGE_SIZE, total: totals?.total ?? 0 };
 }
 
-// An exact-name read against the primary key. Full-text search is a
-// different route's job — a lookup by name never goes through it.
-export async function getSkill(deps: SkillsServiceDependencies, name: string) {
+/**
+ * Reads a single Skill by its exact name.
+ *
+ * @remarks
+ * An exact-name read against the primary key. Full-text search is a
+ * different route's job — a lookup by name never goes through it.
+ *
+ * @param deps - The database this reads from.
+ * @param name - The Skill's name.
+ * @returns `SkillDetail`
+ * @throws SkillNotFoundError if no Skill exists by that name.
+ */
+export async function getSkill(deps: SkillsServiceDependencies, name: string): Promise<SkillDetail> {
   const [skill] = await deps.db
     .select(skillSelection)
     .from(skills)
@@ -89,12 +145,40 @@ export async function getSkill(deps: SkillsServiceDependencies, name: string) {
   return skill;
 }
 
+/**
+ * Validates and publishes a Skill, then returns a presigned URL to upload
+ * its Artifact to.
+ *
+ * @remarks
+ * Idempotent by name: publishing an existing Skill replaces its
+ * description and body, and the publisher and published-at become
+ * whoever published it last (ADR-0002). The row is written before the
+ * Artifact is uploaded, so between the two the Skill lists and reads but
+ * its Artifact cannot yet be retrieved.
+ *
+ * @param deps - The database, storage adapter, and logger this needs.
+ * @param publisher - The authenticated User publishing the Skill.
+ * @param rawName - The Skill's name, taken from the request path and not
+ * yet validated.
+ * @param payload - The request body, expected to carry `description` and
+ * `body`; not yet known to have either.
+ * @returns `{ skill: PublishedSkill; upload: SkillUpload }`
+ * @throws SkillValidationError if `rawName`, `payload.description`, or
+ * `payload.body` fails validation.
+ * @example
+ * ```ts
+ * const { skill, upload } = await publishSkill(deps, publisher, "my-skill", {
+ *   description: "Does a thing.",
+ *   body: "# my-skill\n...",
+ * });
+ * ```
+ */
 export async function publishSkill(
   deps: SkillsServiceDependencies,
   publisher: UserRow,
   rawName: string,
   payload: Record<string, unknown> | null,
-) {
+): Promise<{ skill: PublishedSkill; upload: SkillUpload }> {
   // The name comes from the path; the caller parsed it out of the SKILL.md
   // frontmatter. Validated here against the same rules the shared module
   // applies — the API does not read the Artifact to confirm the two agree
@@ -163,12 +247,22 @@ export async function publishSkill(
   };
 }
 
-// Irreversible (spec: the one action withheld from writers) — no version
-// history, no soft delete (ADR-0002). Existence is checked up front so a
-// missing Skill 404s before either delete runs; the storage delete happens
-// first because a dangling row with no Artifact is a state the API already
-// tolerates (a Skill whose Artifact was never uploaded), while a dangling
-// Artifact for a row that no longer exists is not.
+/**
+ * Permanently deletes a Skill and its Artifact.
+ *
+ * @remarks
+ * Irreversible (spec: the one action withheld from writers) — no version
+ * history, no soft delete (ADR-0002). Existence is checked up front so a
+ * missing Skill 404s before either delete runs; the storage delete happens
+ * first because a dangling row with no Artifact is a state the API already
+ * tolerates (a Skill whose Artifact was never uploaded), while a dangling
+ * Artifact for a row that no longer exists is not.
+ *
+ * @param deps - The database, storage adapter, and logger this needs.
+ * @param name - The Skill's name.
+ * @throws SkillNotFoundError if no Skill exists by that name.
+ * @throws SkillDeleteFailedError if the storage or database delete fails.
+ */
 export async function deleteSkill(deps: SkillsServiceDependencies, name: string): Promise<void> {
   await assertSkillExists(deps, name);
 
@@ -182,11 +276,19 @@ export async function deleteSkill(deps: SkillsServiceDependencies, name: string)
   deps.logger.info({ skill_name: name }, "skill deleted");
 }
 
-// Any authenticated User may retrieve an Artifact — reader is the base
-// role, so the route's requireAuth alone is the whole authorisation check.
-// The key is named after the Skill (storage/keys.ts), so the presigned
-// location's own path already ends in the filename a download should have;
-// nothing else names it.
+/**
+ * Presigns a short-lived URL to download a Skill's Artifact.
+ *
+ * @remarks
+ * Any authenticated User may retrieve an Artifact — reader is the base
+ * role, so the route's requireAuth alone is the whole authorisation check.
+ *
+ * @param deps - The database and storage adapter this needs.
+ * @param name - The Skill's name.
+ * @returns `string`
+ * @throws SkillNotFoundError if no Skill exists by that name.
+ * @throws ArtifactMissingError if the Skill's Artifact was never uploaded.
+ */
 export async function getArtifactDownloadUrl(deps: SkillsServiceDependencies, name: string): Promise<string> {
   await assertSkillExists(deps, name);
 

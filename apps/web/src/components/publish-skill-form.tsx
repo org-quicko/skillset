@@ -78,7 +78,7 @@ export function PublishSkillForm({
           isDragging ? "border-primary bg-accent" : "border-border",
         )}
       >
-        <p className="text-sm text-muted-foreground">Drag a Skill's folder here</p>
+        <p className="text-sm text-muted-foreground">Drag a Skill&apos;s folder here</p>
         <p className="text-xs text-muted-foreground">or</p>
         <Button
           type="button"

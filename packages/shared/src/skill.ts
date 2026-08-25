@@ -42,7 +42,7 @@ export const SkillPageSchema = z.object({
 });
 export type SkillPage = z.infer<typeof SkillPageSchema>;
 
-/** PUT /skills/{name} request body. The name comes from the path. */
+/** PUT /skills/\{name\} request body. The name comes from the path. */
 export const SkillPublishSchema = z.object({
   description: z.string(),
   body: z.string(),

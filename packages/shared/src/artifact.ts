@@ -29,6 +29,18 @@ export function normalizeSkillPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
+/**
+ * Whether a file path should be dropped before a Skill's files are counted
+ * or archived.
+ *
+ * @remarks
+ * Excludes dependency directories by name, anything dot-prefixed (version
+ * control metadata, tooling directories, dotfile editor artifacts), known
+ * OS/editor cruft file names, and editor backup file suffixes.
+ *
+ * @param path - The file's path, relative to the Skill's root.
+ * @returns `true` if the path should be excluded.
+ */
 export function isExcludedPath(path: string): boolean {
   const segments = normalizeSkillPath(path).split("/");
   const fileName = segments[segments.length - 1] ?? "";

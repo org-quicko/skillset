@@ -5,7 +5,7 @@ import { Header } from "@/components/header";
 import { LoginForm } from "@/components/login-form";
 import { SettingsPage } from "@/components/settings-page";
 import { useCurrentUser, useSetupState } from "@/hooks/use-auth";
-import { useRouter } from "@/lib/router";
+import { useRouter } from "@/lib/use-router";
 
 function App() {
   const setup = useSetupState();
