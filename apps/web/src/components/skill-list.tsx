@@ -1,6 +1,7 @@
 import type { Publisher } from "@skill-registry/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useSkills } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
@@ -15,16 +16,20 @@ export function SkillList({
   canPublish,
   page,
   onPageChange,
+  query,
+  onQueryChange,
   onSelect,
   onPublish,
 }: {
   canPublish: boolean;
   page: number;
   onPageChange: (page: number) => void;
+  query: string;
+  onQueryChange: (query: string) => void;
   onSelect: (name: string) => void;
   onPublish: () => void;
 }) {
-  const skills = useSkills(page);
+  const skills = useSkills(page, query);
   const totalPages = skills.data ? Math.max(1, Math.ceil(skills.data.total / skills.data.page_size)) : 1;
 
   return (
@@ -39,9 +44,16 @@ export function SkillList({
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <Input
+          placeholder="Search by what a Skill does..."
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+        />
         {skills.isError && <p className="text-sm text-destructive">{apiErrorMessage(skills.error)}</p>}
         {skills.isSuccess && skills.data.items.length === 0 && (
-          <p className="text-sm text-muted-foreground">No Skills published yet.</p>
+          <p className="text-sm text-muted-foreground">
+            {query ? "No Skills match your search." : "No Skills published yet."}
+          </p>
         )}
         {skills.isSuccess && skills.data.items.length > 0 && (
           <Table>

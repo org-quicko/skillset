@@ -409,6 +409,177 @@ describe("Listing Skills (ticket 03)", () => {
 });
 
 /**
+ * Seam 1 again: full-text search rides the same `/skills` route as the
+ * unfiltered list, so what's under test is the `q` parameter's behaviour —
+ * plain phrases, quoted phrases, exclusions, pagination, and the empty-query
+ * fallback — plus the two limitations ADR-0004 accepts rather than treats as
+ * defects: stemming isn't substring matching, and a hyphenated query term
+ * tokenises into separate words rather than staying one unit.
+ */
+describe("Searching Skills (ticket 10)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let reader: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        email: "ada@example.com",
+        password: PASSWORD,
+      }),
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+
+    // 51 near-identical "widget" Skills prove search paginates the same way
+    // the unfiltered list does; four distinct Skills carry the vocabulary the
+    // other tests search for, so neither set interferes with the other.
+    const base = Date.UTC(2026, 1, 1);
+    await context.db.insert(skills).values([
+      ...Array.from({ length: 51 }, (_, index) => ({
+        name: `widget-${String(index).padStart(3, "0")}`,
+        description: "A generic widget Skill for demoing pagination.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + index * 60_000),
+      })),
+      {
+        name: "postgresql-migrations",
+        description: "Runs schema migrations against a Postgresql database.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + 51 * 60_000),
+      },
+      {
+        name: "code-review-bot",
+        description: "Comments on pull requests during code review.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + 52 * 60_000),
+      },
+      {
+        name: "quality-metrics-tracker",
+        description: "Tracks code quality and review turnaround over time.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + 53 * 60_000),
+      },
+      {
+        name: "changelog-writer",
+        description: "Drafts a changelog entry from recent commits.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + 54 * 60_000),
+      },
+      {
+        name: "async-await",
+        description: "A minimal concurrency helper.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + 55 * 60_000),
+      },
+      {
+        name: "async-await-helper",
+        description: "Handles retries for workflows that need to pause on network calls.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_at: new Date(base + 56 * 60_000),
+      },
+    ]);
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function search(q: string, extraParams: Record<string, string> = {}): Promise<ApiPage> {
+    const params = new URLSearchParams({ q, ...extraParams });
+    const res = await context.app.request(`/api/skills?${params.toString()}`, {
+      headers: { cookie: reader.cookie },
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as ApiPage;
+  }
+
+  it("matches a plain phrase against name or description", async () => {
+    const page = await search("changelog");
+    expect(page.items.map((s) => s.name)).toEqual(["changelog-writer"]);
+  });
+
+  it("matches a quoted phrase only where the words are adjacent", async () => {
+    const page = await search('"code review"');
+    expect(page.items.map((s) => s.name)).toEqual(["code-review-bot"]);
+  });
+
+  it("excludes results carrying a `-excluded` term", async () => {
+    const page = await search("review -bot");
+    expect(page.items.map((s) => s.name)).toEqual(["quality-metrics-tracker"]);
+  });
+
+  it("returns the ordinary most-recent-first list for an empty search", async () => {
+    const page = await search("");
+    expect(page.page).toBe(1);
+    expect(page.total).toBe(57);
+    expect(page.items.length).toBe(50);
+    expect(page.items[0]?.name).toBe("async-await-helper");
+  });
+
+  it("paginates search results the same way the unfiltered list is", async () => {
+    const page1 = await search("widget");
+    expect(page1.page).toBe(1);
+    expect(page1.page_size).toBe(50);
+    expect(page1.total).toBe(51);
+    expect(page1.items.length).toBe(50);
+    expect(page1.items[0]?.name).toBe("widget-050");
+
+    const page2 = await search("widget", { page: "2" });
+    expect(page2.page).toBe(2);
+    expect(page2.items.length).toBe(1);
+    expect(page2.items[0]?.name).toBe("widget-000");
+  });
+
+  it("known limit: stemming does not substring-match, so \"postgres\" misses \"postgresql\"", async () => {
+    const page = await search("postgres");
+    expect(page.items).toEqual([]);
+  });
+
+  it("known limit: a hyphenated name tokenises per word, so it is not a substring of a longer one", async () => {
+    // "async-await-helper" reads like it contains "async-await", but the
+    // hyphen decomposes each name into its own word sequence rather than a
+    // substring-matchable identifier — searching the shorter name finds only
+    // the exact one, never the Skill it looks like a prefix of.
+    const page = await search("async-await");
+    expect(page.items.map((s) => s.name)).toEqual(["async-await"]);
+  });
+
+  it("reads a Skill by exact name without going through search", async () => {
+    const res = await context.app.request("/api/skills/postgresql-migrations", { headers: { cookie: reader.cookie } });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ApiSkill).name).toBe("postgresql-migrations");
+  });
+});
+
+/**
  * Seam 1 again: the redirect target itself is a presigned URL from the fake
  * storage adapter, not something a request test asserts the shape of — what
  * is under test is who gets redirected at all, and what happens when the

@@ -4,7 +4,7 @@ import {
   validateSkillDescription,
   validateSkillName,
 } from "@skill-registry/shared";
-import { count, desc, eq } from "drizzle-orm";
+import { count, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { skills, users, type UserRow } from "../db/schema.js";
 import { ArtifactMissingError, SkillDeleteFailedError, SkillNotFoundError } from "../http/errors.js";
@@ -83,25 +83,55 @@ function parsePage(raw: string | undefined): number {
   return Number.isInteger(page) && page >= 1 ? page : 1;
 }
 
+/** A blank or all-whitespace search term is treated as no search term at all. */
+function parseQuery(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 async function assertSkillExists(deps: SkillsServiceDependencies, name: string): Promise<void> {
   const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.name, name)).limit(1);
   if (!skill) throw new SkillNotFoundError();
 }
 
 /**
- * Lists Skills, newest-published first, one page at a time.
+ * Lists Skills, newest-published first, one page at a time, optionally
+ * narrowed by a full-text search term.
+ *
+ * @remarks
+ * A search term is matched against the generated `search` column with
+ * Postgres's web-search query parser (`websearch_to_tsquery`), which accepts
+ * a plain phrase, `"quoted phrases"`, and `-exclusions`
+ * (docs/adr/0004-postgres-over-sqlite.md). It stems rather than
+ * substring-matches — `postgres` will not find `postgresql` — and hyphenated
+ * identifiers tokenise per word, so an unquoted hyphenated term matches any
+ * Skill containing all of its words, not just the one it names. A blank or
+ * missing term is treated as no search at all, so this doubles as the
+ * ordinary list endpoint.
  *
  * @param deps - The database this reads from.
  * @param rawPage - The requested page number, as a string straight from a
  * query parameter. Anything below 1, or not a number at all, is treated as
  * the first page.
- * @returns `{ items: SkillSummary[]; page: number; page_size: number; total: number }`
+ * @param rawQuery - The raw `q` query-string parameter, or `undefined` when
+ * it is absent. Trimmed before use; blank after trimming is treated as no
+ * search term.
+ * @returns The matching page of Skills, alongside the page number, page
+ * size, and the total count of matches (not the unfiltered table).
+ * @example
+ * ```ts
+ * // GET /skills?q=%22code%20review%22%20-legacy&page=2
+ * await listSkills(deps, "2", '"code review" -legacy');
+ * ```
  */
 export async function listSkills(
   deps: SkillsServiceDependencies,
   rawPage: string | undefined,
+  rawQuery?: string,
 ): Promise<{ items: SkillSummary[]; page: number; page_size: number; total: number }> {
   const page = parsePage(rawPage);
+  const query = parseQuery(rawQuery);
+  const matches = query ? sql`${skills.search} @@ websearch_to_tsquery('english', ${query})` : undefined;
 
   const items = await deps.db
     .select({
@@ -112,11 +142,12 @@ export async function listSkills(
     })
     .from(skills)
     .leftJoin(users, eq(skills.published_by, users.id))
+    .where(matches)
     .orderBy(desc(skills.published_at))
     .limit(SKILL_PAGE_SIZE)
     .offset((page - 1) * SKILL_PAGE_SIZE);
 
-  const [totals] = await deps.db.select({ total: count() }).from(skills);
+  const [totals] = await deps.db.select({ total: count() }).from(skills).where(matches);
 
   return { items, page, page_size: SKILL_PAGE_SIZE, total: totals?.total ?? 0 };
 }

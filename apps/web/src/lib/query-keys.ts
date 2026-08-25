@@ -8,8 +8,25 @@ export const tokensQueryKey = ["tokens"] as const;
 
 /** One page of the Skill list. A shared prefix so publishing can invalidate every page at once. */
 export const skillsListQueryKey = ["skills", "list"] as const;
-export function skillsQueryKey(page: number) {
-  return [...skillsListQueryKey, page] as const;
+
+/**
+ * Keys one page of the Skill list, optionally narrowed by a search term.
+ *
+ * The term is part of the key — not just the URL — so switching between
+ * search terms and paging within one are cached as distinct entries, and
+ * TanStack Query's `placeholderData: keepPreviousData` (see `useSkills`)
+ * keeps showing the previous term's results while a new term's request is
+ * still in flight instead of the list emptying out.
+ *
+ * @param page - The 1-indexed page number.
+ * @param q - The search term, or `""` for the ordinary unfiltered list.
+ * @returns A query key rooted at {@link skillsListQueryKey}, so invalidating
+ * that shared prefix still invalidates every term/page combination.
+ * @example
+ * skillsQueryKey(1, "code review") // => ["skills", "list", "code review", 1]
+ */
+export function skillsQueryKey(page: number, q: string) {
+  return [...skillsListQueryKey, q, page] as const;
 }
 
 /** A single Skill, with its `SKILL.md` body. */
