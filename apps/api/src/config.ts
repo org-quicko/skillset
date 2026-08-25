@@ -12,6 +12,24 @@ export interface Config {
   };
 }
 
+/**
+ * Reads and validates the environment into a typed Config.
+ *
+ * @remarks
+ * Required variables are checked up front so a misconfiguration fails at
+ * startup rather than surfacing later as a runtime error on the first
+ * request that needs them.
+ *
+ * @param env - The environment to read from. Defaults to `process.env`;
+ * overridable for tests.
+ * @returns `Config`
+ * @throws Error if `JWT_SECRET`, `DATABASE_URL`, or `STORAGE_BUCKET` is
+ * missing, or if `PORT` is set to something other than a valid port number.
+ * @example
+ * ```ts
+ * const config = loadConfig();
+ * ```
+ */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const jwtSecret = env.JWT_SECRET;
   if (!jwtSecret) {

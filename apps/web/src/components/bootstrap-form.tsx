@@ -22,7 +22,7 @@ export function BootstrapForm() {
     <Card className="w-full max-w-sm">
       <CardHeader>
         <CardTitle>Set up the Registry</CardTitle>
-        <CardDescription>You're the first to arrive — sign up and you'll be its Superadmin.</CardDescription>
+        <CardDescription>You&apos;re the first to arrive — sign up and you&apos;ll be its Superadmin.</CardDescription>
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>

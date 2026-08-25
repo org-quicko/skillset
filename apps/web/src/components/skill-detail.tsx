@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { useSkill } from "@/hooks/use-skills";

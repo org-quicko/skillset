@@ -5,6 +5,13 @@ import { clearSessionCookie, setSessionCookie } from "../auth/session.js";
 import { ValidationError } from "../http/errors.js";
 import { login, type AuthServiceDependencies } from "../services/auth.js";
 
+/**
+ * Registers the `/auth/login` and `/auth/logout` routes.
+ *
+ * @param app - The Hono app to register the routes on.
+ * @param deps - The dependencies `login` needs to verify credentials and
+ * issue a session.
+ */
 export function registerAuthRoutes(app: Hono<{ Variables: AuthVariables }>, deps: AuthServiceDependencies): void {
   app.post("/auth/login", async (c) => {
     const parsed = LoginSchema.safeParse(await c.req.json().catch(() => null));

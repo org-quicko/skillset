@@ -17,6 +17,21 @@ export interface AuthServiceDependencies {
 // wrong password (a real argon2id verify) take indistinguishably long.
 const LOGIN_TIMING_FLOOR_MS = 200;
 
+/**
+ * Verifies a User's credentials and, on success, issues a session token.
+ *
+ * @remarks
+ * Runs at a fixed minimum duration regardless of outcome, so a failed
+ * login due to an unknown email (no hash to verify) takes as long as one
+ * due to a wrong password (a real argon2id verify) — otherwise response
+ * time alone would reveal whether an email is registered.
+ *
+ * @param deps - The database, JWT secret, and logger this needs.
+ * @param credentials - The email and password to verify.
+ * @returns `{ user: UserRow; token: string }`
+ * @throws InvalidCredentialsError if the email is unknown or the password
+ * doesn't match.
+ */
 export async function login(
   deps: AuthServiceDependencies,
   credentials: { email: string; password: string },

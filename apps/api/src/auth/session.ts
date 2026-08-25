@@ -27,6 +27,13 @@ export async function verifySession(token: string, jwtSecret: string): Promise<s
   }
 }
 
+/**
+ * Sets the session cookie on the response: HTTP-only, secure, and scoped to
+ * the whole site.
+ *
+ * @param c - The request context to set the cookie on.
+ * @param token - The signed session token to store in the cookie.
+ */
 export function setSessionCookie(c: Context, token: string): void {
   setCookie(c, SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -37,6 +44,11 @@ export function setSessionCookie(c: Context, token: string): void {
   });
 }
 
+/**
+ * Clears the session cookie, logging the current session out.
+ *
+ * @param c - The request context to clear the cookie on.
+ */
 export function clearSessionCookie(c: Context): void {
   deleteCookie(c, SESSION_COOKIE_NAME, { path: "/" });
 }

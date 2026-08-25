@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLogout } from "@/hooks/use-auth";
-import { useRouter } from "@/lib/router";
+import { useRouter } from "@/lib/use-router";
 
 function initials(user: User): string {
   return `${user.first_name[0]}${user.last_name[0]}`.toUpperCase();

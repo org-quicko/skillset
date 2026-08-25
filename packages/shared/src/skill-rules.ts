@@ -34,12 +34,22 @@ export type SkillRule =
   | "artifact_too_large"
   | "uncompressed_too_large";
 
+/**
+ * Thrown when a Skill fails one of the shared validation rules. Carries the
+ * specific `rule` that was broken and, where there is one, the `field` or
+ * file — both of which land verbatim in the API's error body.
+ */
 export class SkillValidationError extends Error {
   // Declared and assigned rather than written as parameter properties: the
   // web interface compiles shared code with erasableSyntaxOnly.
   readonly rule: SkillRule;
   readonly field: string | undefined;
 
+  /**
+   * @param rule - The specific rule that was broken.
+   * @param message - A human-readable description of the failure.
+   * @param field - The request field or file the failure relates to, if any.
+   */
   constructor(rule: SkillRule, message: string, field?: string) {
     super(message);
     this.name = "SkillValidationError";
@@ -48,6 +58,17 @@ export class SkillValidationError extends Error {
   }
 }
 
+/**
+ * Validates a Skill's name against the required shape.
+ *
+ * @param value - The candidate name, typically read straight from
+ * frontmatter and not yet known to be a string.
+ * @returns `string`
+ * @throws SkillValidationError with rule `name_required` if `value` is
+ * missing or not a string, `name_too_long` if it exceeds
+ * `SKILL_NAME_MAX_LENGTH` characters, or `name_invalid` if it doesn't
+ * match the required pattern.
+ */
 export function validateSkillName(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new SkillValidationError("name_required", "A Skill needs a name in its SKILL.md frontmatter.", "name");
@@ -69,6 +90,16 @@ export function validateSkillName(value: unknown): string {
   return value;
 }
 
+/**
+ * Validates a Skill's description against the required shape.
+ *
+ * @param value - The candidate description, typically read straight from
+ * frontmatter and not yet known to be a string.
+ * @returns `string`
+ * @throws SkillValidationError with rule `description_required` if `value`
+ * is missing, not a string, or blank, or `description_too_long` if it
+ * exceeds `SKILL_DESCRIPTION_MAX_LENGTH` characters.
+ */
 export function validateSkillDescription(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new SkillValidationError(
@@ -87,6 +118,15 @@ export function validateSkillDescription(value: unknown): string {
   return value;
 }
 
+/**
+ * Validates a Skill's body against the required shape.
+ *
+ * @param value - The candidate body, typically the SKILL.md content below
+ * the frontmatter.
+ * @returns `string`
+ * @throws SkillValidationError with rule `body_required` if `value` is
+ * missing, not a string, or blank.
+ */
 export function validateSkillBody(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new SkillValidationError("body_required", "A Skill needs a SKILL.md body.", "body");

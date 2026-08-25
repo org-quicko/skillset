@@ -1,11 +1,5 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-
-interface RouterContextValue {
-  pathname: string;
-  navigate: (path: string) => void;
-}
-
-const RouterContext = createContext<RouterContextValue | null>(null);
+import { useEffect, useState, type ReactNode } from "react";
+import { RouterContext } from "@/lib/router-context";
 
 export function RouterProvider({ children }: { children: ReactNode }) {
   const [pathname, setPathname] = useState(() => window.location.pathname);
@@ -22,10 +16,4 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }
 
   return <RouterContext.Provider value={{ pathname, navigate }}>{children}</RouterContext.Provider>;
-}
-
-export function useRouter() {
-  const context = useContext(RouterContext);
-  if (!context) throw new Error("useRouter must be used within a RouterProvider");
-  return context;
 }

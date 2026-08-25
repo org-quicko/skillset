@@ -12,6 +12,13 @@ import {
 
 export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceDependencies {}
 
+/**
+ * Registers the `/skills` routes: list, read, publish, delete, and
+ * download an Artifact.
+ *
+ * @param app - The Hono app to register the routes on.
+ * @param deps - The auth and Skills-service dependencies the routes need.
+ */
 export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: SkillRouteDependencies): void {
   app.get("/skills", requireAuth(deps), async (c) => {
     return c.json(SkillPageSchema.parse(await listSkills(deps, c.req.query("page"), c.req.query("q"))));

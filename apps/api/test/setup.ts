@@ -38,6 +38,13 @@ export async function startTestContext(): Promise<{
   return { context: { app, sql, db, storage }, container };
 }
 
+/**
+ * Tears down a test context: closes the database connection and stops the
+ * Postgres container.
+ *
+ * @param context - The test context returned by `startTestContext`.
+ * @param container - The Postgres container returned by `startTestContext`.
+ */
 export async function stopTestContext(
   context: TestContext,
   container: StartedPostgreSqlContainer,

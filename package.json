@@ -11,8 +11,20 @@
   },
   "scripts": {
     "dev": "bun --filter @skill-registry/api dev",
+    "prebuild": "bun run lint",
     "build": "bun --filter @skill-registry/web build",
     "test": "bun run --filter '@skill-registry/shared' --filter '@skill-registry/api' test",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "eslint": "^9.19.0",
+    "eslint-plugin-react": "^7.37.3",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "eslint-plugin-tsdoc": "^0.3.0",
+    "globals": "^15.14.0",
+    "typescript-eslint": "^8.21.0"
   }
 }
