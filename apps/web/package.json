@@ -11,7 +11,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@base-ui/react": "^1.7.0",
     "@fontsource-variable/roboto": "^5.3.0",
     "@skill-registry/shared": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
@@ -21,6 +20,7 @@
     "dompurify": "^3.4.14",
     "lucide-react": "^1.33.0",
     "marked": "^18.0.10",
+    "radix-ui": "^1.6.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwind-merge": "^3.6.0",
