@@ -31,6 +31,7 @@ function fakePublished() {
       metadata: null,
       allowed_tools: null,
       tags: [],
+      installs: 0,
     },
     upload: {
       url: "https://storage.example/bucket/code-review.zip?sig=abc",
