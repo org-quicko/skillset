@@ -2,16 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "api",
+      "name": "app",
       "runtimeExecutable": "docker",
       "runtimeArgs": ["compose", "up", "-d", "--build"],
       "port": 3000
-    },
-    {
-      "name": "web",
-      "runtimeExecutable": "bun",
-      "runtimeArgs": ["--filter", "@skill-registry/web", "dev"],
-      "port": 5173
     }
   ]
 }
