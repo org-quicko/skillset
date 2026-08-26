@@ -19,7 +19,7 @@
       "get": {
         "tags": ["setup"],
         "summary": "Read first-run setup state",
-        "description": "Tells the web interface whether to show the bootstrap screen or the login screen. The only unauthenticated read in the API.",
+        "description": "Tells the web interface whether to show the bootstrap screen or the login screen. Unauthenticated, as the Skill reads are (ADR-0013).",
         "security": [],
         "responses": {
           "200": {
@@ -391,7 +391,8 @@
       "get": {
         "tags": ["skills"],
         "summary": "List, search, filter, and sort Skills",
-        "description": "Reads from the `skill_directory` view (ticket 23, docs/data-model.md), not `skills` directly. Defaults to sorted by install count, descending. With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects.",
+        "description": "Reads from the `skill_directory` view (ticket 23, docs/data-model.md), not `skills` directly. Defaults to sorted by install count, descending. With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. Unauthenticated (ADR-0013).",
+        "security": [],
         "parameters": [
           {
             "name": "q",
@@ -451,8 +452,7 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/ValidationFailed" },
-          "401": { "$ref": "#/components/responses/Unauthenticated" }
+          "400": { "$ref": "#/components/responses/ValidationFailed" }
         }
       }
     },
@@ -531,13 +531,13 @@
       "get": {
         "tags": ["skills"],
         "summary": "Read a Skill by name",
-        "description": "An exact-name read, for resolving `name` to `id` — the web keeps `/skills/<name>` as its own browser URL and needs this to land a reader there with nothing already cached (a bookmark, a shared link, a refresh). Not full-text search: `GET /skills?q=` ranks by recency and caps at one page, so it cannot guarantee finding an existing Skill by exact name, and Postgres's stopword handling can make it return nothing at all for a name that happens to be one.",
+        "description": "An exact-name read, for resolving `name` to `id` — the web keeps `/skills/<name>` as its own browser URL and needs this to land a reader there with nothing already cached (a bookmark, a shared link, a refresh). Not full-text search: `GET /skills?q=` ranks by recency and caps at one page, so it cannot guarantee finding an existing Skill by exact name, and Postgres's stopword handling can make it return nothing at all for a name that happens to be one. Unauthenticated (ADR-0013).",
+        "security": [],
         "responses": {
           "200": {
             "description": "The Skill",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
           },
-          "401": { "$ref": "#/components/responses/Unauthenticated" },
           "404": { "$ref": "#/components/responses/SkillNotFound" }
         }
       }
@@ -547,13 +547,13 @@
       "get": {
         "tags": ["skills"],
         "summary": "Read a Skill",
-        "description": "An exact-id read. Does not go through full-text search. The web keeps `/skills/<name>` as its own browser URL and resolves `name` to `id` itself before calling this — see `GET /skills/by-name/{name}`.",
+        "description": "An exact-id read. Does not go through full-text search. The web keeps `/skills/<name>` as its own browser URL and resolves `name` to `id` itself before calling this — see `GET /skills/by-name/{name}`. Unauthenticated (ADR-0013).",
+        "security": [],
         "responses": {
           "200": {
             "description": "The Skill",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
           },
-          "401": { "$ref": "#/components/responses/Unauthenticated" },
           "404": { "$ref": "#/components/responses/SkillNotFound" }
         }
       },
@@ -577,7 +577,8 @@
       "get": {
         "tags": ["skills"],
         "summary": "Retrieve a Skill's Artifact",
-        "description": "Authorises the request, records one Install, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Any authenticated User may retrieve an Artifact. The response body is the zip, named after the Skill. A caller that sends `Accept: application/json` gets the Skill itself back instead alongside `url` to fetch the Artifact from, rather than a redirect; this is for a caller (the web app's own Download control) that needs to know the request succeeded before navigating there itself. Either representation records the same one Install. `installs` on that Skill reflects the last periodic refresh, not necessarily this request's own Install (ADR-0012).",
+        "description": "Records one Install, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Unauthenticated — anyone who can reach the Registry may retrieve an Artifact (ADR-0013). The response body is the zip, named after the Skill. A caller that sends `Accept: application/json` gets the Skill itself back instead alongside `url` to fetch the Artifact from, rather than a redirect; this is for a caller (the web app's own Download control) that needs to know the request succeeded before navigating there itself. Either representation records the same one Install. `installs` on that Skill reflects the last periodic refresh, not necessarily this request's own Install (ADR-0012).",
+        "security": [],
         "parameters": [
           {
             "name": "Accept",
@@ -620,7 +621,6 @@
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthenticated" },
           "404": {
             "description": "No such Skill, or its Artifact was never uploaded",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }

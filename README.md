@@ -20,8 +20,9 @@ refuses to start if `JWT_SECRET` or `DATABASE_URL` is missing.
 
 ## Development
 
-This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres) and `apps/web`
-(Vite + React + Tailwind + shadcn/ui).
+This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres), `apps/web`
+(Vite + React + Tailwind + shadcn/ui), `apps/cli` (the `skillreg` command), and
+`packages/shared` (the rules and schemas all three are built against).
 
 ```bash
 bun install

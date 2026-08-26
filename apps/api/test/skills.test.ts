@@ -427,7 +427,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(skill.tags.map((tag) => tag.name).sort()).toEqual(["example", "testing"]);
   });
 
-  it("returns 404 for a Skill that does not exist, and refuses reads without a session", async () => {
+  it("returns 404 for a Skill that does not exist, and serves reads without a session", async () => {
     const missing = await context.app.request(`/api/skills/${crypto.randomUUID()}`, {
       headers: { cookie: reader.cookie },
     });
@@ -439,8 +439,10 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
+    // Reads need no session or Token (ADR-0013).
     const anonymous = await context.app.request(`/api/skills/${publishedSkill.id}`);
-    expect(anonymous.status).toBe(401);
+    expect(anonymous.status).toBe(200);
+    expect(((await anonymous.json()) as ApiSkill).name).toBe("anonymous-read-attempt");
   });
 
   it("returns 404 for a malformed id", async () => {
@@ -474,7 +476,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(((await res.json()) as ApiSkill).name).toBe("in");
   });
 
-  it("returns 404 for a name that does not exist, and refuses reads without a session", async () => {
+  it("returns 404 for a name that does not exist, and serves reads without a session", async () => {
     const missing = await context.app.request("/api/skills/by-name/no-such-skill", {
       headers: { cookie: reader.cookie },
     });
@@ -484,8 +486,10 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       description: "Read without a session.",
       body: "Body.\n",
     });
+    // The path `skillreg add` takes with no Token configured (ADR-0013).
     const anonymous = await context.app.request("/api/skills/by-name/by-name-anonymous-attempt");
-    expect(anonymous.status).toBe(401);
+    expect(anonymous.status).toBe(200);
+    expect(((await anonymous.json()) as ApiSkill).name).toBe("by-name-anonymous-attempt");
   });
 
   it("keeps attribution after the publishing User is removed", async () => {
@@ -636,9 +640,10 @@ describe("Listing Skills (ticket 03)", () => {
     expect(((await badSortOrder.json()) as ApiError).error.field).toBe("sort_order");
   });
 
-  it("refuses listing without a session", async () => {
+  it("lists without a session", async () => {
+    // Zero-friction browsing is the point of ADR-0013; only writes stay gated.
     const res = await context.app.request("/api/skills");
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -1069,7 +1074,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     expect(events.length).toBe(2);
   });
 
-  it("refuses an unauthenticated request", async () => {
+  it("serves an unauthenticated request", async () => {
     const published = await publish(context, writer, "another-downloadable-skill", {
       description: "Has an Artifact too.",
       body: "Body.\n",
@@ -1077,10 +1082,12 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await context.storage.put("skills/another-downloadable-skill.zip", new Uint8Array([1]));
 
+    // What `skillreg add` does against a Registry the User never logged in to (ADR-0013).
     const res = await context.app.request(`/api/skills/${publishedSkill.id}/artifact`, {
       redirect: "manual",
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBeTruthy();
   });
 
   it("returns 404 for a Skill that does not exist", async () => {
