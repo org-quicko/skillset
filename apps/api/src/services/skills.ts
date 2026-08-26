@@ -10,7 +10,6 @@ import {
 } from "@skill-registry/shared";
 import { count, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client.js";
-import { isWellFormedId } from "../db/ids.js";
 import { skills, users, type UserRow } from "../db/schema.js";
 import { ArtifactMissingError, SkillDeleteFailedError, SkillNotFoundError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
@@ -169,6 +168,27 @@ function buildSearchCondition(query: string) {
 }
 
 /**
+ * Runs an id-keyed lookup, treating a malformed id the same as "no row" —
+ * Postgres rejects a non-UUID literal with `invalid_text_representation`
+ * (22P02) before it ever gets the chance to not-match, so that's caught
+ * here rather than pre-validated: letting Postgres itself reject the format
+ * means there's no separate format check to keep in sync with what the
+ * database actually accepts.
+ *
+ * @param query - Runs the id-keyed select; called with the id already bound.
+ * @returns The first row, or `undefined` for a malformed id or no match — the caller decides what "not found" means.
+ */
+async function selectByIdOrUndefined<T>(query: () => Promise<T[]>): Promise<T | undefined> {
+  try {
+    const [row] = await query();
+    return row;
+  } catch (cause) {
+    if (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "22P02") return undefined;
+    throw cause;
+  }
+}
+
+/**
  * Resolves a Skill's id to its current name, so a route needs only the id
  * the wire gives it — the Artifact's storage key is still derived from the
  * name (docs/data-model.md).
@@ -179,9 +199,9 @@ function buildSearchCondition(query: string) {
  * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
  */
 async function getSkillNameById(deps: SkillsServiceDependencies, id: string): Promise<string> {
-  if (!isWellFormedId(id)) throw new SkillNotFoundError();
-
-  const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.id, id)).limit(1);
+  const skill = await selectByIdOrUndefined(() =>
+    deps.db.select({ name: skills.name }).from(skills).where(eq(skills.id, id)).limit(1),
+  );
   if (!skill) throw new SkillNotFoundError();
   return skill.name;
 }
@@ -270,15 +290,14 @@ export async function listSkills(
  * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
  */
 export async function getSkill(deps: SkillsServiceDependencies, id: string): Promise<SkillDetail> {
-  if (!isWellFormedId(id)) throw new SkillNotFoundError();
-
-  const [skill] = await deps.db
-    .select(skillSelection)
-    .from(skills)
-    .leftJoin(users, eq(skills.published_by, users.id))
-    .where(eq(skills.id, id))
-    .limit(1);
-
+  const skill = await selectByIdOrUndefined(() =>
+    deps.db
+      .select(skillSelection)
+      .from(skills)
+      .leftJoin(users, eq(skills.published_by, users.id))
+      .where(eq(skills.id, id))
+      .limit(1),
+  );
   if (!skill) throw new SkillNotFoundError();
   return { ...skill, tags: await getSkillTags(deps, skill.id) };
 }

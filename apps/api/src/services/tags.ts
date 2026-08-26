@@ -1,7 +1,6 @@
 import { validateTagName, validateTagNames } from "@skill-registry/shared";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "../db/client.js";
-import { isWellFormedId } from "../db/ids.js";
 import { skillTags, skills, tags } from "../db/schema.js";
 import { SkillNotFoundError, TagNameConflictError, TagNotFoundError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
@@ -19,6 +18,17 @@ export interface TagSummary {
 /** Postgres's unique_violation code — raised here only by `tags.name`'s unique constraint. */
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "23505";
+}
+
+/**
+ * Postgres's invalid_text_representation code — raised for a malformed
+ * `uuid` literal. A malformed id can never match a row, so this is caught
+ * at the query rather than pre-validated: letting Postgres itself reject
+ * the format means there's no separate format check to keep in sync with
+ * what the database actually accepts.
+ */
+function isInvalidIdSyntax(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "22P02";
 }
 
 /**
@@ -138,9 +148,13 @@ export async function setSkillTags(
   skillId: string,
   rawNames: unknown,
 ): Promise<TagSummary[]> {
-  if (!isWellFormedId(skillId)) throw new SkillNotFoundError();
-
-  const [skill] = await deps.db.select({ id: skills.id }).from(skills).where(eq(skills.id, skillId)).limit(1);
+  let skill: { id: string } | undefined;
+  try {
+    [skill] = await deps.db.select({ id: skills.id }).from(skills).where(eq(skills.id, skillId)).limit(1);
+  } catch (cause) {
+    if (isInvalidIdSyntax(cause)) throw new SkillNotFoundError();
+    throw cause;
+  }
   if (!skill) throw new SkillNotFoundError();
 
   const names = validateTagNames(rawNames);
@@ -192,8 +206,6 @@ export async function setSkillTags(
  * @throws TagNameConflictError if the normalised name is already held by a different Tag.
  */
 export async function renameTag(deps: TagsServiceDependencies, id: string, rawName: unknown): Promise<TagSummary> {
-  if (!isWellFormedId(id)) throw new TagNotFoundError();
-
   const name = validateTagName(rawName);
 
   let row: TagSummary | undefined;
@@ -204,6 +216,7 @@ export async function renameTag(deps: TagsServiceDependencies, id: string, rawNa
       .where(eq(tags.id, id))
       .returning({ id: tags.id, name: tags.name });
   } catch (cause) {
+    if (isInvalidIdSyntax(cause)) throw new TagNotFoundError();
     if (isUniqueViolation(cause)) throw new TagNameConflictError();
     throw cause;
   }
