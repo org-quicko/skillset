@@ -49,6 +49,15 @@ The zip archive of a Skill, uploaded directly to object storage by the client an
 as a single object per Skill.
 _Avoid_: Bundle, package, tarball, blob
 
+**Install**:
+A recorded, countable instance of a Skill being obtained — one event per occurrence,
+produced by a web Download of its Artifact or (once the CLI exists) `skillreg add`. A
+Skill's install count is the total number of Install events recorded for it. "Download"
+still names the plain act of fetching the Artifact's bytes; every Download produces one
+Install event, but Install is the countable unit the log, the count, and the API's
+`installs` field are named after.
+_Avoid_: Download (as the countable unit — Download is the action, Install is the count)
+
 **Token**:
 A secret a User mints to let the CLI act as them. Shown once, stored only as a hash, and
 carrying whatever role its owner has.

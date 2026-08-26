@@ -4,9 +4,12 @@ import {
   check,
   customType,
   index,
+  integer,
   jsonb,
   pgEnum,
+  pgMaterializedView,
   pgTable,
+  pgView,
   primaryKey,
   text,
   timestamp,
@@ -106,16 +109,23 @@ export const skills = pgTable(
     compatibility: text("compatibility"),
     metadata: jsonb("metadata").$type<Record<string, string>>(),
     allowed_tools: text("allowed_tools"),
-    // Attribution is stored twice on purpose: the reference gives a current
-    // name while the User exists, and the email snapshot outlives them being
-    // removed. Removing a User must not erase who changed a shared Skill.
+    // Attribution is stored three ways on purpose: the reference gives a
+    // current name while the User exists, the email snapshot outlives them
+    // being removed, and published_by_name (ticket 23) is a display-name
+    // snapshot taken at the same moment, for the Skill list and full-text
+    // search below — neither needs a live join to `users`, and neither
+    // updates retroactively if that User later renames themselves. Removing
+    // a User must not erase who changed a shared Skill.
     published_by: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
     published_by_email: text("published_by_email").notNull(),
+    published_by_name: text("published_by_name").notNull(),
     published_at: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    // Folds in published_by_name (ticket 23) alongside name and description,
+    // so a search term matching only a Skill's publisher still returns it.
     search: tsvector("search").generatedAlwaysAs(
-      sql`to_tsvector('english', name || ' ' || coalesce(description, ''))`,
+      sql`to_tsvector('english', name || ' ' || coalesce(description, '') || ' ' || published_by_name)`,
     ),
   },
   (table) => ({
@@ -187,3 +197,84 @@ export const skillTags = pgTable(
 
 export type SkillTagRow = typeof skillTags.$inferSelect;
 export type NewSkillTagRow = typeof skillTags.$inferInsert;
+
+/**
+ * Where a recorded Install came from (ADR-0012): today only a web Download,
+ * eventually also `skillreg add` (ticket 09) once it exists.
+ */
+export const skillInstallSourceEnum = pgEnum("skill_install_source", ["web", "cli"]);
+
+/**
+ * The Install event log (ADR-0012, spec: `.scratch/skill-analytics/spec.md`)
+ * — one immutable row per Install, an append-only history rather than a
+ * running total. `skill_analytics` (below) is the aggregate derived from
+ * this table; nothing reads a Skill's install count from here directly.
+ *
+ * No `updated_at`: every other table carries the created_at/updated_at pair
+ * by convention, but a row here is never touched again after insert — a
+ * column that can only ever equal `created_at` would be a bare column, not
+ * genuine consistency with the rest of the schema.
+ */
+export const skillInstallEvents = pgTable(
+  "skill_install_events",
+  {
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
+    skill_id: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    source: skillInstallSourceEnum("source").notNull(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    skillIdIdx: index("skill_install_events_skill_id_idx").on(table.skill_id),
+  }),
+);
+
+export type SkillInstallEventRow = typeof skillInstallEvents.$inferSelect;
+export type NewSkillInstallEventRow = typeof skillInstallEvents.$inferInsert;
+
+/**
+ * A materialized view of running install counts per Skill, aggregated from
+ * `skill_install_events` (ADR-0012). Refreshed on a schedule — see
+ * `refreshInstallCounts` in `../services/analytics.js` — never read live, so
+ * every count shown anywhere can lag reality by up to that interval.
+ *
+ * Drizzle has no `CREATE MATERIALIZED VIEW` generator, the same gap
+ * `skills.search` (above) has for a generated column — its migration is
+ * hand-written and this is declared `.existing()` so Drizzle never tries to
+ * generate DDL for it, only to type queries against it. A Skill with no
+ * recorded Install has no row here; every read path defaults that to 0
+ * itself (docs/data-model.md), the same as it did against the plain table
+ * this view replaced.
+ */
+export const skillAnalytics = pgMaterializedView("skill_analytics", {
+  skill_id: uuid("skill_id").notNull(),
+  install_count: integer("install_count").notNull(),
+}).existing();
+
+/**
+ * The Skill list's read model (ticket 23): one row per Skill, joining
+ * `skills` to `skill_analytics` (so a Skill with no Install still reads `0`)
+ * and aggregating its Tags into a `{id, name}[]` array. A plain view, not
+ * materialized — unlike `skill_analytics`, everything here except the
+ * install count is always current.
+ *
+ * Tag *filtering* (matching against one or more selected Tag ids) is done as
+ * a membership check against `skill_tags` directly in the query that reads
+ * from this view, not as a condition against `tags` below — aggregating an
+ * array is for display, not for filtering by its contents.
+ *
+ * Hand-written in its migration, the same as `skill_analytics` above and
+ * `skills.search` — Drizzle has no `CREATE VIEW` generator either, and this
+ * is declared `.existing()` so Drizzle only types queries against it.
+ */
+export const skillDirectory = pgView("skill_directory", {
+  id: uuid("id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  published_by_name: text("published_by_name").notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull(),
+  install_count: integer("install_count").notNull(),
+  tags: jsonb("tags").notNull().$type<Array<{ id: string; name: string }>>(),
+  search: tsvector("search"),
+}).existing();

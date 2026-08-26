@@ -1,7 +1,8 @@
 # Data Model
 
-Postgres 18. Five tables. Managed with Drizzle migrations; the generated search column is
-declared in hand-written SQL because Drizzle has no native `tsvector`.
+Postgres 18. Eight tables, one materialized view, and one plain view. Managed with Drizzle
+migrations; the generated search column and both views are declared in hand-written SQL because
+Drizzle has no native generator for any of them (ADR-0012).
 
 Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag.
 
@@ -95,6 +96,7 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 | `allowed_tools`      | `text`        | null                                                    |
 | `published_by`       | `uuid`        | null, references `users(id)` on delete set null         |
 | `published_by_email` | `text`        | not null                                               |
+| `published_by_name`  | `text`        | not null                                               |
 | `published_at`       | `timestamptz` | not null, default `now()`                              |
 | `created_at`          | `timestamptz` | not null, default `now()` — set once, on first insert, never touched again |
 | `updated_at`          | `timestamptz` | not null, default `now()` — bumped on every republish  |
@@ -132,12 +134,19 @@ every republish while `published_at` doesn't, and a future non-publish mutation 
 row would have somewhere generic to record itself without overloading a
 publish-specific field.
 
-**Publisher attribution is stored twice, on purpose.** `published_by` joins to the User for a
-current name while that User exists; `published_by_email` is a snapshot taken at publish time
+**Publisher attribution is stored three ways, on purpose.** `published_by` joins to the User for
+a current name while that User exists; `published_by_email` is a snapshot taken at publish time
 so that attribution survives the User being removed. A foreign key alone cannot do this — the
 reference is nulled when the row goes — and removing a User must not erase the record of who
 changed a shared Skill. Any writer may replace any Skill, so this is the only accountability
 the model has.
+
+`published_by_name` (ticket 23) is a third snapshot, written the same moment `published_by_email`
+is: a display name the Skill list and full-text search (below) can use without a live join to
+`users`, and one that doesn't change if that User later renames themselves — a republish is what
+refreshes it, the same full-replace semantics every other publish-time field has. Existing Skills
+were backfilled once, from the User each currently referenced (or, for a Skill whose publisher was
+already removed by then, its `published_by_email`) — see the migration adding this column.
 
 The Artifact's storage key is **derived** from the name rather than stored. There is no size
 or digest column: the API never sees the bytes, so it has nothing truthful to record.
@@ -146,12 +155,13 @@ There is no status column and no soft delete. A row exists from the moment publi
 before its Artifact has been uploaded — the accepted consequence being that an abandoned
 publish leaves a Skill that lists and reads but fails to download until an Admin removes it.
 
-The generated column and its index:
+The generated column and its index — folding in `published_by_name` (ticket 23) alongside `name`
+and `description`, so a search term matching only a Skill's publisher still returns it:
 
 ```sql
 ALTER TABLE skills ADD COLUMN search tsvector
   GENERATED ALWAYS AS (
-    to_tsvector('english', name || ' ' || coalesce(description, ''))
+    to_tsvector('english', name || ' ' || coalesce(description, '') || ' ' || published_by_name)
   ) STORED;
 
 CREATE INDEX skills_search_idx ON skills USING GIN (search);
@@ -211,6 +221,110 @@ old and new.
 
 Indexes: primary key on `(skill_id, tag_id)`; on `tag_id`, for renaming or ever deleting a Tag
 without a full scan of this table.
+
+## `skill_install_events`
+
+The Install event log (ADR-0012, `.scratch/skill-analytics/spec.md`) — one immutable row per
+Install, an append-only history rather than a running total.
+
+| Column       | Type                  | Constraints                                          |
+| ------------ | --------------------- | ----------------------------------------------------- |
+| `id`         | `uuid`                | primary key, default `uuidv7()`                        |
+| `skill_id`   | `uuid`                | not null, references `skills(id)` on delete cascade    |
+| `source`     | `skill_install_source`| not null — `web` or `cli`                              |
+| `created_at` | `timestamptz`         | not null, default `now()`                              |
+
+`skill_install_source` is an enum: `web` (a Skill's Artifact downloaded through the API) or `cli`
+(`skillreg add`, ticket 09 — not built yet, but the column already distinguishes it once it is).
+Downloading a Skill's Artifact appends one row here today, via an internal `recordInstall`
+function (not a public endpoint — nothing lets a client inflate this directly), called once the
+Artifact is confirmed to exist and right before the presigned download URL is issued. The write is
+best-effort: a failure is logged and swallowed, never allowed to fail the download itself.
+
+There is no `updated_at`. Every other table in this schema carries the pair by convention, but a
+row here is never touched again after insert — a column that could only ever equal `created_at`
+would be a bare column, not genuine consistency with the rest of the schema. Rows are kept
+forever: nothing prunes or rolls this table up.
+
+Indexes: primary key on `id`; on `skill_id`, for the aggregation `skill_analytics` runs below.
+
+## `skill_analytics` (materialized view)
+
+A running install count per Skill, aggregated from `skill_install_events` (ADR-0012).
+
+| Column          | Type      | Constraints |
+| --------------- | --------- | ----------- |
+| `skill_id`      | `uuid`    | one row per Skill with at least one Install |
+| `install_count` | `integer` | `count(*)` of that Skill's rows in `skill_install_events` |
+
+```sql
+CREATE MATERIALIZED VIEW skill_analytics AS
+  SELECT skill_id, count(*)::integer AS install_count
+  FROM skill_install_events
+  GROUP BY skill_id;
+```
+
+A Skill with no recorded Install has no row here at all — the same "absent means 0" contract the
+plain table this view replaced had. Every read path (a Skill's detail read, its list-summary read)
+treats "no row" and "a row with `install_count = 0`" identically.
+
+**This view is never read live.** It is recomputed only by `refreshInstallCounts`
+(`apps/api/src/services/analytics.ts`) — a plain `REFRESH MATERIALIZED VIEW`, called on every tick
+of a schedule (`ANALYTICS_REFRESH_CRON`, a `node-cron` expression, default every 30 seconds) that
+is wired up only in `server.ts`, never inside request handling. Every install count shown
+anywhere — a Skill's own page, the Skill list, `sort_by=installs` — can therefore lag reality by up
+to that interval, including a reader not seeing their own just-completed download reflected
+immediately. See ADR-0012 for why this replaced an atomic `install_count + 1` upsert on a live
+table.
+
+## `skill_directory` (view)
+
+The Skill list's read model (ticket 23) — `GET /skills` reads from here, and nowhere else. One row
+per Skill, joining `skills` to `skill_analytics` and aggregating its Tags.
+
+| Column               | Type          | Constraints |
+| -------------------- | ------------- | ----------- |
+| `id`                 | `uuid`        | |
+| `name`               | `text`        | |
+| `description`        | `text`        | |
+| `published_by_name`  | `text`        | |
+| `updated_at`          | `timestamptz` | |
+| `search`             | `tsvector`    | `skills.search`, unchanged |
+| `install_count`      | `integer`     | `0` for a Skill with no row in `skill_analytics` |
+| `tags`               | `jsonb`       | `{id, name}[]`, `[]` for a Skill with no Tags |
+
+```sql
+CREATE VIEW skill_directory AS
+  SELECT
+    s.id, s.name, s.description, s.published_by_name, s.updated_at, s.search,
+    COALESCE(sa.install_count, 0) AS install_count,
+    COALESCE(
+      (SELECT jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name) ORDER BY t.name)
+       FROM skill_tags st JOIN tags t ON t.id = st.tag_id
+       WHERE st.skill_id = s.id),
+      '[]'::jsonb
+    ) AS tags
+  FROM skills s
+  LEFT JOIN skill_analytics sa ON sa.skill_id = s.id;
+```
+
+A plain view, not materialized — unlike `skill_analytics`, everything here is always current
+except the install count it inherits, which lags exactly as far as `skill_analytics` does
+(ADR-0012). Tag *filtering* (`GET /skills?tag_id=…`, any-match across one or more Tags) is a
+membership check against `skill_tags` directly in the query that reads from this view, not a
+condition against the `tags` column above — that column is for display, so a filter never has to
+express "does this jsonb array contain one of these ids" in SQL.
+
+`GET /skills` sorts by `install_count` or `updated_at` (`sort_by`, default `installs`; `sort_order`,
+default `desc`), governing order unconditionally — even with a search term (`q`) active, there is
+no separate relevance ranking. `page_size` is client-supplied, defaulting to 10 and clamped to
+[1, 100] rather than rejected; an invalid `sort_by` or `sort_order` is rejected instead, the same
+field-named validation error the rest of the API gives bad input. Ties on the requested sort column
+(e.g. every Skill with 0 installs) break on `id` ascending, so paging through them with infinite
+scroll never repeats or skips a row.
+
+Indexes: none today. `REFRESH MATERIALIZED VIEW CONCURRENTLY` (which would need one) was considered
+and deferred — see ADR-0012.
 
 ## Not built yet: `user_identities`
 

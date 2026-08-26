@@ -1,8 +1,10 @@
 import { join } from "node:path";
+import cron from "node-cron";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations, waitForDatabase } from "./db/migrate.js";
 import { createLogger } from "./logger.js";
+import { refreshInstallCounts } from "./services/analytics.js";
 import { S3StorageAdapter } from "./storage/s3.js";
 import { createApp } from "./app.js";
 
@@ -29,8 +31,17 @@ async function main() {
 
   const app = createApp({ sql, db, storage, webRoot, jwtSecret: config.jwtSecret, logger });
 
+  // Only wired here, never inside createApp — a test app built via
+  // startTestContext() must never start a real background timer (ADR-0012);
+  // tests call refreshInstallCounts directly instead.
+  cron.schedule(config.analyticsRefreshCron, () => {
+    refreshInstallCounts({ db }).catch((error) => {
+      logger.error({ err: error }, "failed to refresh skill_analytics");
+    });
+  });
+
   Bun.serve({ fetch: app.fetch, port: config.port });
-  logger.info({ port: config.port }, "Skill Registry listening");
+  logger.info({ port: config.port, analytics_refresh_cron: config.analyticsRefreshCron }, "Skill Registry listening");
 }
 
 main().catch((error) => {

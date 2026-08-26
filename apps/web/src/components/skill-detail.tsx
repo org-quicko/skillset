@@ -47,7 +47,7 @@ export function SkillDetail({
             <SkillBodyCard body={skill.data.body} />
           </div>
           <div className="flex flex-col gap-4">
-            <SkillAnalyticsCard />
+            <SkillAnalyticsCard installs={skill.data.installs} />
             <SkillActionsCard
               id={skill.data.id}
               name={skill.data.name}
