@@ -34,6 +34,9 @@ export function skillQueryKey(name: string) {
   return ["skills", "detail", name] as const;
 }
 
+/** The whole Tag catalog — what a tag editor's autocomplete filters against. */
+export const tagsListQueryKey = ["tags", "list"] as const;
+
 /** One page of the User list. A shared prefix so any mutation can invalidate every page at once. */
 export const usersListQueryKey = ["users", "list"] as const;
 

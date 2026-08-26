@@ -1,4 +1,4 @@
-import { SkillValidationError } from "@skill-registry/shared";
+import { SkillValidationError, TagValidationError } from "@skill-registry/shared";
 import type { Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AuthVariables } from "../auth/middleware.js";
@@ -166,6 +166,22 @@ export class SkillDeleteFailedError extends AppError {
   }
 }
 
+/** No Tag exists by the requested id. */
+export class TagNotFoundError extends AppError {
+  /** Builds the 404 `not_found` error. */
+  constructor() {
+    super(404, "not_found", "No Tag by that id.");
+  }
+}
+
+/** A rename targeted a name a different Tag already holds (ADR-0011). */
+export class TagNameConflictError extends AppError {
+  /** Builds the 409 `tag_name_conflict` error. */
+  constructor() {
+    super(409, "tag_name_conflict", "A Tag by that name already exists.", { field: "name" });
+  }
+}
+
 /**
  * Every error response in the API is produced here, and only here: routes
  * and services throw — an `AppError` subclass, the shared
@@ -189,7 +205,7 @@ export function registerErrorHandler(app: Hono<{ Variables: AuthVariables }>, lo
       return errorResponse(c, err.status, err.code, err.message, err.field);
     }
 
-    if (err instanceof SkillValidationError) {
+    if (err instanceof SkillValidationError || err instanceof TagValidationError) {
       logger.debug({ code: err.rule, field: err.field }, err.message);
       return errorResponse(c, 400, err.rule, err.message, err.field);
     }

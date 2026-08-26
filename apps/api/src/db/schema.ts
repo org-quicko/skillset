@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -104,10 +105,6 @@ export const skills = pgTable(
     compatibility: text("compatibility"),
     metadata: jsonb("metadata").$type<Record<string, string>>(),
     allowed_tools: text("allowed_tools"),
-    // Registry-owned, never parsed from or written into SKILL.md
-    // (ADR-0008). No publish path — including replacing an existing
-    // Skill — ever writes this column.
-    tags: text("tags").array(),
     // Attribution is stored twice on purpose: the reference gives a current
     // name while the User exists, and the email snapshot outlives them being
     // removed. Removing a User must not erase who changed a shared Skill.
@@ -132,3 +129,55 @@ export const skills = pgTable(
 
 export type SkillRow = typeof skills.$inferSelect;
 export type NewSkillRow = typeof skills.$inferInsert;
+
+/**
+ * The Tag catalog — registry-wide, not scoped to any one Skill (ADR-0008,
+ * ADR-0011). `name` is stored already lowercased and trimmed (the shared
+ * `validateTagName` normalises before this is ever written), so a plain
+ * unique index is enough to catch a collision; there's no need for a
+ * case-insensitive functional index.
+ */
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
+    name: text("name").notNull().unique(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // The same rule the shared validation module applies, enforced where the
+    // row is written rather than trusted from the caller.
+    nameFormat: check(
+      "tags_name_format",
+      sql`${table.name} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(${table.name}) <= 32`,
+    ),
+  }),
+);
+
+export type TagRow = typeof tags.$inferSelect;
+export type NewTagRow = typeof tags.$inferInsert;
+
+/**
+ * The many-to-many join between Skills and Tags. Both sides cascade: deleting
+ * a Skill must not orphan its join rows, and — while no route deletes a Tag
+ * today (ADR-0011) — a future one shouldn't have to remember to clean this
+ * table up too.
+ */
+export const skillTags = pgTable(
+  "skill_tags",
+  {
+    skill_id: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    tag_id: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.skill_id, table.tag_id] }),
+    tagIdIdx: index("skill_tags_tag_id_idx").on(table.tag_id),
+  }),
+);
+
+export type SkillTagRow = typeof skillTags.$inferSelect;
+export type NewSkillTagRow = typeof skillTags.$inferInsert;

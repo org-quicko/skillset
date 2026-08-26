@@ -1,9 +1,9 @@
 # Data Model
 
-Postgres 18. Three tables. Managed with Drizzle migrations; the generated search column is
+Postgres 18. Five tables. Managed with Drizzle migrations; the generated search column is
 declared in hand-written SQL because Drizzle has no native `tsvector`.
 
-Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token.
+Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag.
 
 Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
 TypeScript type — there is no separate camelCase domain shape or conversion boundary. Types are
@@ -92,7 +92,6 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 | `compatibility`      | `text`        | null, length ≤ 500                                     |
 | `metadata`           | `jsonb`       | null — a mapping of string keys to string values       |
 | `allowed_tools`      | `text`        | null                                                    |
-| `tags`               | `text[]`      | null — never written by publish, see below              |
 | `published_by`       | `uuid`        | null, references `users(id)` on delete set null         |
 | `published_by_email` | `text`        | not null                                               |
 | `published_at`       | `timestamptz` | not null, default `now()`                              |
@@ -119,9 +118,8 @@ that fails validation rejects the whole publish rather than being stored or drop
 doesn't set it), so republishing a Skill without a field it previously had clears it, the same
 full-replace semantics `description` and `body` already have.
 
-**`tags`** is registry-owned metadata, never parsed out of or written into a `SKILL.md` file
-(ADR-0008). No publish path — a fresh publish or a replace of an existing Skill — ever writes
-this column; it is `null` for every Skill until something outside publishing sets it.
+**Tags** are not a column on this table at all — see `tags` and `skill_tags` below. No publish
+path (a fresh publish or a replace of an existing Skill) ever touches them (ADR-0008).
 
 **Publisher attribution is stored twice, on purpose.** `published_by` joins to the User for a
 current name while that User exists; `published_by_email` is a snapshot taken at publish time
@@ -150,6 +148,51 @@ CREATE INDEX skills_search_idx ON skills USING GIN (search);
 
 Indexes: primary key on `id`; unique on `name`; GIN on `search`; on `published_at` descending,
 for the most-recent-first listing.
+
+## `tags`
+
+The Tag catalog — registry-wide, not scoped to any one Skill (ADR-0011).
+
+| Column       | Type          | Constraints                                     |
+| ------------ | ------------- | ------------------------------------------------ |
+| `id`         | `uuid`        | primary key, default `uuidv7()`                  |
+| `name`       | `text`        | not null, unique                                 |
+| `created_at` | `timestamptz` | not null, default `now()`                        |
+
+`name` is always stored already lowercased and trimmed — the shared `validateTagName`
+normalises before this is ever written — so a plain unique index catches a collision without
+needing a case-insensitive functional one. A check constraint enforces the same shape a
+Skill's `name` has: 1–32 characters, lowercase alphanumerics and hyphens, no leading,
+trailing, or doubled hyphen.
+
+A Tag can outlive every Skill that once carried it: detaching the last reference does not
+delete the row, and no route deletes a Tag at all today (ADR-0011) — an unused catalog entry
+is accepted clutter, not a state the schema tries to prevent.
+
+Indexes: unique on `name`.
+
+## `skill_tags`
+
+The many-to-many join between `skills` and `tags` (ADR-0011). No columns beyond the two ids —
+there is nothing else to say about one Skill carrying one Tag.
+
+| Column     | Type   | Constraints                                          |
+| ---------- | ------ | ----------------------------------------------------- |
+| `skill_id` | `uuid` | not null, references `skills(id)` on delete cascade   |
+| `tag_id`   | `uuid` | not null, references `tags(id)` on delete cascade     |
+
+Primary key on `(skill_id, tag_id)` — the pair is the row's identity, so a Skill can't carry
+the same Tag twice. Both sides cascade: deleting a Skill must not orphan its join rows, and —
+although no route deletes a Tag yet — a future one shouldn't have to remember to clean this
+table up too.
+
+`PUT /skills/{id}/tags` (a full replace) resolves every name in the request to a `tags` row —
+reusing an existing one or creating it — then deletes and re-inserts this Skill's rows in one
+transaction, so the join always reflects exactly the set just sent, never a partial merge of
+old and new.
+
+Indexes: primary key on `(skill_id, tag_id)`; on `tag_id`, for renaming or ever deleting a Tag
+without a full scan of this table.
 
 ## Not built yet: `user_identities`
 

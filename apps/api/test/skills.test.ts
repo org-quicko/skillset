@@ -14,6 +14,11 @@ interface ApiPublisher {
   last_name: string | null;
 }
 
+interface ApiTag {
+  id: string;
+  name: string;
+}
+
 interface ApiSkill {
   id: string;
   name: string;
@@ -23,7 +28,7 @@ interface ApiSkill {
   compatibility: string | null;
   metadata: Record<string, string> | null;
   allowed_tools: string | null;
-  tags: string[];
+  tags: ApiTag[];
   published_by: ApiPublisher;
   published_at: string;
 }
@@ -390,19 +395,25 @@ describe("Publishing and reading Skills (ticket 03)", () => {
   });
 
   it("leaves tags untouched when republishing, since no publish path ever writes them", async () => {
-    await publish(context, writer, "tagged-skill", { description: "Has tags already.", body: "Body.\n" });
-    await context.db.update(skills).set({ tags: ["testing", "example"] }).where(eq(skills.name, "tagged-skill"));
+    const published = await publish(context, writer, "tagged-skill", { description: "Has tags already.", body: "Body.\n" });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
+
+    await context.app.request(`/api/skills/${publishedSkill.id}/tags`, {
+      method: "PUT",
+      headers: { cookie: writer.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ tags: ["testing", "example"] }),
+    });
 
     const republished = await publish(context, admin, "tagged-skill", {
       description: "Republished by someone else.",
       body: "New body.\n",
     });
-    const { skill: publishedSkill } = (await republished.json()) as ApiPublished;
+    const { skill: republishedSkill } = (await republished.json()) as ApiPublished;
 
-    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
+    const res = await context.app.request(`/api/skills/${republishedSkill.id}`, { headers: { cookie: reader.cookie } });
     const skill = (await res.json()) as ApiSkill;
     expect(skill.description).toBe("Republished by someone else.");
-    expect(skill.tags).toEqual(["testing", "example"]);
+    expect(skill.tags.map((tag) => tag.name).sort()).toEqual(["example", "testing"]);
   });
 
   it("returns 404 for a Skill that does not exist, and refuses reads without a session", async () => {

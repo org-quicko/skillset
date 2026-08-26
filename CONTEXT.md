@@ -18,8 +18,10 @@ file is ignored.
 _Avoid_: Manifest, metadata file
 
 **Tag**:
-A short label attached to a Skill for browsing and filtering, stored on the Skill's row in
-the Registry and never written into its SKILL.md.
+A short label a Skill can carry for browsing and filtering, never written into its SKILL.md.
+Drawn from a catalog shared by the whole Registry, not private to one Skill — a Skill's Tags
+are a many-to-many relationship to that catalog, so renaming a Tag changes it everywhere it's
+attached.
 _Avoid_: Label, category, topic
 
 **User**:

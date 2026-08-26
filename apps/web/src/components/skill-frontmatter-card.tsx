@@ -50,8 +50,8 @@ export function SkillFrontmatterCard({ skill }: { skill: Skill }) {
               <span className="font-medium text-foreground">Tags</span>
               <div className="flex flex-wrap gap-1.5">
                 {skill.tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {tag}
+                  <span key={tag.id} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                    {tag.name}
                   </span>
                 ))}
               </div>
