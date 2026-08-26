@@ -38,10 +38,24 @@ export function useSkills(page: number, q: string) {
   });
 }
 
+/**
+ * Fetches a single Skill by name — the browser URL is always `/skills/<name>`
+ * (ADR-0002's flat identity is still what a person types or bookmarks), and
+ * `GET /skills/by-name/<name>` returns the same full Skill shape reading by
+ * `id` would (ticket 16), so there's no separate id lookup to do first: an
+ * indexed lookup on the unique `name` column is exactly as cheap as one on
+ * the `id` primary key. `id` itself is only needed once the Skill is already
+ * in hand, for the Delete and Download actions (`skill.id` off this query's
+ * result) — see `useDeleteSkill` and `skillArtifactUrl`.
+ *
+ * @param name - The Skill's name, from the `/skills/<name>` URL.
+ * @returns The TanStack Query result for that Skill.
+ * @throws ApiError with code `"not_found"` if no Skill exists by that name.
+ */
 export function useSkill(name: string) {
   return useQuery({
     queryKey: skillQueryKey(name),
-    queryFn: () => apiFetch(`/skills/${encodeURIComponent(name)}`, SkillSchema),
+    queryFn: () => apiFetch(`/skills/by-name/${encodeURIComponent(name)}`, SkillSchema),
     // A publish already writes this exact response into the cache
     // (usePublishSkill's onSuccess) — avoid an immediate, redundant refetch
     // of what was just returned when the reader lands straight on it.
@@ -104,12 +118,24 @@ export function usePublishSkill() {
   });
 }
 
-/** Irreversible (spec, ticket 12) — Admin-only, and the API refuses everyone else. */
+/**
+ * Deletes a Skill by id. Irreversible (spec, ticket 12) — Admin-only, and
+ * the API refuses everyone else.
+ *
+ * @remarks
+ * The mutation argument carries both `id` (what the API deletes by) and
+ * `name` (what the query cache is keyed by, so the right entries can be
+ * evicted afterwards) — the caller already has both from the Skill it's
+ * looking at.
+ * @example
+ * deleteSkill.mutate({ id: skill.id, name: skill.name })
+ */
 export function useDeleteSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => apiFetch(`/skills/${encodeURIComponent(name)}`, null, { method: "DELETE" }),
-    onSuccess: (_data, name) => {
+    mutationFn: ({ id }: { id: string; name: string }) =>
+      apiFetch(`/skills/${encodeURIComponent(id)}`, null, { method: "DELETE" }),
+    onSuccess: (_data, { name }) => {
       queryClient.invalidateQueries({ queryKey: skillsListQueryKey });
       queryClient.removeQueries({ queryKey: skillQueryKey(name) });
     },

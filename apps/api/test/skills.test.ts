@@ -15,6 +15,7 @@ interface ApiPublisher {
 }
 
 interface ApiSkill {
+  id: string;
   name: string;
   description: string;
   body: string;
@@ -176,6 +177,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(decodeURIComponent(published.upload.url)).toContain("skills/code-review.zip");
 
     const [row] = await context.db.select().from(skills).where(eq(skills.name, "code-review")).limit(1);
+    expect(row?.id).toBe(published.skill.id);
     expect(row?.body).toBe("# Review\n\nSteps here.\n");
     expect(row?.published_by_email).toBe(writer.email);
   });
@@ -219,6 +221,9 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(new Date(secondPublished.skill.published_at).getTime()).toBeGreaterThanOrEqual(
       new Date(firstPublished.skill.published_at).getTime(),
     );
+    // Generated once, on first insert, and never changes across republishes
+    // of the same name (ticket 16).
+    expect(secondPublished.skill.id).toBe(firstPublished.skill.id);
 
     const rows = await context.db.select().from(skills).where(eq(skills.name, "shared-skill"));
     expect(rows.length).toBe(1);
@@ -305,18 +310,20 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     });
   }
 
-  it("reads a Skill by name, returning its description, body, publisher, and published-at", async () => {
-    await publish(context, writer, "readable-skill", {
+  it("reads a Skill by id, returning its description, body, publisher, and published-at", async () => {
+    const published = await publish(context, writer, "readable-skill", {
       description: "Readable.",
       body: "# Readable\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/readable-skill", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, {
       headers: { cookie: reader.cookie },
     });
     expect(res.status).toBe(200);
 
     const skill = (await res.json()) as ApiSkill;
+    expect(skill.id).toBe(publishedSkill.id);
     expect(skill.name).toBe("readable-skill");
     expect(skill.description).toBe("Readable.");
     expect(skill.body).toBe("# Readable\n");
@@ -330,9 +337,10 @@ describe("Publishing and reading Skills (ticket 03)", () => {
   });
 
   it("leaves license, compatibility, metadata, and allowed-tools null, and tags empty, when a publish never sets them", async () => {
-    await publish(context, writer, "bare-skill", { description: "No extras.", body: "Body.\n" });
+    const published = await publish(context, writer, "bare-skill", { description: "No extras.", body: "Body.\n" });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/bare-skill", { headers: { cookie: reader.cookie } });
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
     const skill = (await res.json()) as ApiSkill;
     expect(skill.license).toBeNull();
     expect(skill.compatibility).toBeNull();
@@ -342,7 +350,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
   });
 
   it("round-trips license, compatibility, metadata, and allowed-tools when a publish sets all four", async () => {
-    await publish(context, writer, "full-frontmatter-skill", {
+    const published = await publish(context, writer, "full-frontmatter-skill", {
       description: "Has every optional field.",
       body: "Body.\n",
       license: "Apache-2.0",
@@ -350,8 +358,9 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       metadata: { author: "quicko", version: "1.0" },
       allowed_tools: "Bash(git:*) Read",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/full-frontmatter-skill", { headers: { cookie: reader.cookie } });
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
     const skill = (await res.json()) as ApiSkill;
     expect(skill.license).toBe("Apache-2.0");
     expect(skill.compatibility).toBe("Requires git and jq.");
@@ -370,9 +379,13 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       license: "MIT",
     });
 
-    await publish(context, writer, "shrinking-skill", { description: "Lost its license.", body: "Body.\n" });
+    const second = await publish(context, writer, "shrinking-skill", {
+      description: "Lost its license.",
+      body: "Body.\n",
+    });
+    const { skill: publishedSkill } = (await second.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/shrinking-skill", { headers: { cookie: reader.cookie } });
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
     expect(((await res.json()) as ApiSkill).license).toBeNull();
   });
 
@@ -380,21 +393,76 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     await publish(context, writer, "tagged-skill", { description: "Has tags already.", body: "Body.\n" });
     await context.db.update(skills).set({ tags: ["testing", "example"] }).where(eq(skills.name, "tagged-skill"));
 
-    await publish(context, admin, "tagged-skill", { description: "Republished by someone else.", body: "New body.\n" });
+    const republished = await publish(context, admin, "tagged-skill", {
+      description: "Republished by someone else.",
+      body: "New body.\n",
+    });
+    const { skill: publishedSkill } = (await republished.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/tagged-skill", { headers: { cookie: reader.cookie } });
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
     const skill = (await res.json()) as ApiSkill;
     expect(skill.description).toBe("Republished by someone else.");
     expect(skill.tags).toEqual(["testing", "example"]);
   });
 
   it("returns 404 for a Skill that does not exist, and refuses reads without a session", async () => {
-    const missing = await context.app.request("/api/skills/no-such-skill", {
+    const missing = await context.app.request(`/api/skills/${crypto.randomUUID()}`, {
       headers: { cookie: reader.cookie },
     });
     expect(missing.status).toBe(404);
 
-    const anonymous = await context.app.request("/api/skills/readable-skill");
+    const published = await publish(context, writer, "anonymous-read-attempt", {
+      description: "Read without a session.",
+      body: "Body.\n",
+    });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
+
+    const anonymous = await context.app.request(`/api/skills/${publishedSkill.id}`);
+    expect(anonymous.status).toBe(401);
+  });
+
+  it("returns 404 for a malformed id", async () => {
+    const res = await context.app.request("/api/skills/not-a-uuid", { headers: { cookie: reader.cookie } });
+    expect(res.status).toBe(404);
+  });
+
+  it("reads a Skill by its exact name, not through search", async () => {
+    const published = await publish(context, writer, "by-name-skill", {
+      description: "Reachable by exact name.",
+      body: "# By name\n",
+    });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
+
+    const res = await context.app.request("/api/skills/by-name/by-name-skill", {
+      headers: { cookie: reader.cookie },
+    });
+    expect(res.status).toBe(200);
+
+    const skill = (await res.json()) as ApiSkill;
+    expect(skill.id).toBe(publishedSkill.id);
+    expect(skill.name).toBe("by-name-skill");
+    expect(skill.body).toBe("# By name\n");
+  });
+
+  it("finds a Skill by name even when its name is an English stopword — a case full-text search cannot match", async () => {
+    await publish(context, writer, "in", { description: "A one-word, stopword-only name.", body: "Body.\n" });
+
+    const res = await context.app.request("/api/skills/by-name/in", { headers: { cookie: reader.cookie } });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ApiSkill).name).toBe("in");
+  });
+
+  it("returns 404 for a name that does not exist, and refuses reads without a session", async () => {
+    const missing = await context.app.request("/api/skills/by-name/no-such-skill", {
+      headers: { cookie: reader.cookie },
+    });
+    expect(missing.status).toBe(404);
+
+    await publish(context, writer, "by-name-anonymous-attempt", {
+      description: "Read without a session.",
+      body: "Body.\n",
+    });
+    const anonymous = await context.app.request("/api/skills/by-name/by-name-anonymous-attempt");
     expect(anonymous.status).toBe(401);
   });
 
@@ -406,14 +474,15 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       password: PASSWORD,
       role: "writer",
     });
-    await publish(context, departing, "orphaned-skill", {
+    const published = await publish(context, departing, "orphaned-skill", {
       description: "Published by someone since removed.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
     await context.db.delete(users).where(eq(users.id, departing.id));
 
-    const res = await context.app.request("/api/skills/orphaned-skill", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, {
       headers: { cookie: reader.cookie },
     });
     const skill = (await res.json()) as ApiSkill;
@@ -688,8 +757,11 @@ describe("Searching Skills (ticket 10)", () => {
     expect(page.items.map((s) => s.name)).toEqual(["async-await-helper", "async-await"]);
   });
 
-  it("reads a Skill by exact name without going through search", async () => {
-    const res = await context.app.request("/api/skills/postgresql-migrations", { headers: { cookie: reader.cookie } });
+  it("reads a Skill by id without going through search", async () => {
+    const [row] = await context.db.select({ id: skills.id }).from(skills).where(eq(skills.name, "postgresql-migrations"));
+    if (!row) throw new Error("Seed Skill was not inserted.");
+
+    const res = await context.app.request(`/api/skills/${row.id}`, { headers: { cookie: reader.cookie } });
     expect(res.status).toBe(200);
     expect(((await res.json()) as ApiSkill).name).toBe("postgresql-migrations");
   });
@@ -743,13 +815,14 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
   });
 
   it("redirects a reader to a short-lived presigned location named after the Skill", async () => {
-    await publish(context, writer, "downloadable-skill", {
+    const published = await publish(context, writer, "downloadable-skill", {
       description: "Has an Artifact.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await context.storage.put("skills/downloadable-skill.zip", new Uint8Array([1, 2, 3]));
 
-    const res = await context.app.request("/api/skills/downloadable-skill/artifact", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}/artifact`, {
       headers: { cookie: reader.cookie },
       redirect: "manual",
     });
@@ -761,20 +834,21 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
   });
 
   it("refuses an unauthenticated request", async () => {
-    await publish(context, writer, "another-downloadable-skill", {
+    const published = await publish(context, writer, "another-downloadable-skill", {
       description: "Has an Artifact too.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await context.storage.put("skills/another-downloadable-skill.zip", new Uint8Array([1]));
 
-    const res = await context.app.request("/api/skills/another-downloadable-skill/artifact", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}/artifact`, {
       redirect: "manual",
     });
     expect(res.status).toBe(401);
   });
 
   it("returns 404 for a Skill that does not exist", async () => {
-    const res = await context.app.request("/api/skills/no-such-skill/artifact", {
+    const res = await context.app.request(`/api/skills/${crypto.randomUUID()}/artifact`, {
       headers: { cookie: reader.cookie },
       redirect: "manual",
     });
@@ -784,12 +858,13 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
   });
 
   it("fails comprehensibly when the Skill's row exists but its Artifact was never uploaded", async () => {
-    await publish(context, writer, "abandoned-skill", {
+    const published = await publish(context, writer, "abandoned-skill", {
       description: "The upload after this never happened.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/abandoned-skill/artifact", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}/artifact`, {
       headers: { cookie: reader.cookie },
       redirect: "manual",
     });
@@ -847,13 +922,14 @@ describe("Deleting a Skill (ticket 12)", () => {
   });
 
   it("removes the row and the Artifact, and frees the name for publishing again", async () => {
-    await publish(context, writer, "doomed-skill", {
+    const published = await publish(context, writer, "doomed-skill", {
       description: "About to go.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await context.storage.put("skills/doomed-skill.zip", new Uint8Array([1, 2, 3]));
 
-    const res = await context.app.request("/api/skills/doomed-skill", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, {
       method: "DELETE",
       headers: { cookie: admin.cookie },
     });
@@ -863,7 +939,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     expect(rows.length).toBe(0);
     expect(await context.storage.exists("skills/doomed-skill.zip")).toBe(false);
 
-    const missing = await context.app.request("/api/skills/doomed-skill", { headers: { cookie: reader.cookie } });
+    const missing = await context.app.request(`/api/skills/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
     expect(missing.status).toBe(404);
 
     const republished = await publish(context, writer, "doomed-skill", {
@@ -871,15 +947,19 @@ describe("Deleting a Skill (ticket 12)", () => {
       body: "New body.\n",
     });
     expect(republished.status).toBe(200);
+    // No version history: the name is free, but the row — and its id — is new.
+    const { skill: republishedSkill } = (await republished.json()) as ApiPublished;
+    expect(republishedSkill.id).not.toBe(publishedSkill.id);
   });
 
   it("succeeds even when the Artifact behind the row was never uploaded", async () => {
-    await publish(context, writer, "never-uploaded-skill", {
+    const published = await publish(context, writer, "never-uploaded-skill", {
       description: "The upload never happened.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    const res = await context.app.request("/api/skills/never-uploaded-skill", {
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}`, {
       method: "DELETE",
       headers: { cookie: admin.cookie },
     });
@@ -890,24 +970,25 @@ describe("Deleting a Skill (ticket 12)", () => {
   });
 
   it("refuses readers and writers, allowing only Admins", async () => {
-    await publish(context, writer, "protected-skill", {
+    const published = await publish(context, writer, "protected-skill", {
       description: "Not going anywhere yet.",
       body: "Body.\n",
     });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    const byReader = await context.app.request("/api/skills/protected-skill", {
+    const byReader = await context.app.request(`/api/skills/${publishedSkill.id}`, {
       method: "DELETE",
       headers: { cookie: reader.cookie },
     });
     expect(byReader.status).toBe(403);
 
-    const byWriter = await context.app.request("/api/skills/protected-skill", {
+    const byWriter = await context.app.request(`/api/skills/${publishedSkill.id}`, {
       method: "DELETE",
       headers: { cookie: writer.cookie },
     });
     expect(byWriter.status).toBe(403);
 
-    const anonymous = await context.app.request("/api/skills/protected-skill", { method: "DELETE" });
+    const anonymous = await context.app.request(`/api/skills/${publishedSkill.id}`, { method: "DELETE" });
     expect(anonymous.status).toBe(401);
 
     const rows = await context.db.select().from(skills).where(eq(skills.name, "protected-skill"));
@@ -915,7 +996,7 @@ describe("Deleting a Skill (ticket 12)", () => {
   });
 
   it("returns 404 for a Skill that does not exist", async () => {
-    const res = await context.app.request("/api/skills/no-such-skill", {
+    const res = await context.app.request(`/api/skills/${crypto.randomUUID()}`, {
       method: "DELETE",
       headers: { cookie: admin.cookie },
     });

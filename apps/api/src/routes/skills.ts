@@ -5,6 +5,7 @@ import {
   deleteSkill,
   getArtifactDownloadUrl,
   getSkill,
+  getSkillByName,
   listSkills,
   publishSkill,
   type SkillsServiceDependencies,
@@ -13,8 +14,8 @@ import {
 export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceDependencies {}
 
 /**
- * Registers the `/skills` routes: list, read, publish, delete, and
- * download an Artifact.
+ * Registers the `/skills` routes: list, read (by id or by name), publish,
+ * delete, and download an Artifact.
  *
  * @param app - The Hono app to register the routes on.
  * @param deps - The auth and Skills-service dependencies the routes need.
@@ -24,8 +25,16 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
     return c.json(SkillPageSchema.parse(await listSkills(deps, c.req.query("page"), c.req.query("q"))));
   });
 
-  app.get("/skills/:name", requireAuth(deps), async (c) => {
-    return c.json(SkillSchema.parse(await getSkill(deps, c.req.param("name"))));
+  // Ahead of `/skills/:id` so its literal `by-name` segment wins the match —
+  // the web's only way to resolve `/skills/<name>` to an id with nothing
+  // already cached (getSkillByName's docs explain why this isn't full-text
+  // search).
+  app.get("/skills/by-name/:name", requireAuth(deps), async (c) => {
+    return c.json(SkillSchema.parse(await getSkillByName(deps, c.req.param("name"))));
+  });
+
+  app.get("/skills/:id", requireAuth(deps), async (c) => {
+    return c.json(SkillSchema.parse(await getSkill(deps, c.req.param("id"))));
   });
 
   app.put("/skills/:name", requireAuth(deps), requireRole("writer"), async (c) => {
@@ -35,13 +44,13 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
     return c.json(SkillPublishedSchema.parse(result));
   });
 
-  app.delete("/skills/:name", requireAuth(deps), requireRole("admin"), async (c) => {
-    await deleteSkill(deps, c.req.param("name"));
+  app.delete("/skills/:id", requireAuth(deps), requireRole("admin"), async (c) => {
+    await deleteSkill(deps, c.req.param("id"));
     return c.body(null, 204);
   });
 
-  app.get("/skills/:name/artifact", requireAuth(deps), async (c) => {
-    const url = await getArtifactDownloadUrl(deps, c.req.param("name"));
+  app.get("/skills/:id/artifact", requireAuth(deps), async (c) => {
+    const url = await getArtifactDownloadUrl(deps, c.req.param("id"));
     return c.redirect(url, 302);
   });
 }

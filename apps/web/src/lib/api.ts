@@ -25,8 +25,8 @@ export function apiErrorMessage(error: unknown): string {
  * presigned storage location, and following that is exactly what a plain
  * navigation (a clicked link) does on its own.
  */
-export function skillArtifactUrl(name: string): string {
-  return `/api/skills/${encodeURIComponent(name)}/artifact`;
+export function skillArtifactUrl(id: string): string {
+  return `/api/skills/${encodeURIComponent(id)}/artifact`;
 }
 
 export interface ApiFetchOptions extends RequestInit {

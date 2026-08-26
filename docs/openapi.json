@@ -428,19 +428,6 @@
     },
     "/skills/{name}": {
       "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
-      "get": {
-        "tags": ["skills"],
-        "summary": "Read a Skill",
-        "description": "An exact-name read. Does not go through full-text search.",
-        "responses": {
-          "200": {
-            "description": "The Skill",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
-          },
-          "401": { "$ref": "#/components/responses/Unauthenticated" },
-          "404": { "$ref": "#/components/responses/SkillNotFound" }
-        }
-      },
       "put": {
         "tags": ["skills"],
         "summary": "Publish a Skill",
@@ -507,6 +494,38 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
+      }
+    },
+    "/skills/by-name/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
+      "get": {
+        "tags": ["skills"],
+        "summary": "Read a Skill by name",
+        "description": "An exact-name read, for resolving `name` to `id` — the web keeps `/skills/<name>` as its own browser URL and needs this to land a reader there with nothing already cached (a bookmark, a shared link, a refresh). Not full-text search: `GET /skills?q=` ranks by recency and caps at one page, so it cannot guarantee finding an existing Skill by exact name, and Postgres's stopword handling can make it return nothing at all for a name that happens to be one.",
+        "responses": {
+          "200": {
+            "description": "The Skill",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/SkillNotFound" }
+        }
+      }
+    },
+    "/skills/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
+      "get": {
+        "tags": ["skills"],
+        "summary": "Read a Skill",
+        "description": "An exact-id read. Does not go through full-text search. The web keeps `/skills/<name>` as its own browser URL and resolves `name` to `id` itself before calling this — see `GET /skills/by-name/{name}`.",
+        "responses": {
+          "200": {
+            "description": "The Skill",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/SkillNotFound" }
+        }
       },
       "delete": {
         "tags": ["skills"],
@@ -523,8 +542,8 @@
         }
       }
     },
-    "/skills/{name}/artifact": {
-      "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
+    "/skills/{id}/artifact": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
       "get": {
         "tags": ["skills"],
         "summary": "Retrieve a Skill's Artifact",
@@ -586,6 +605,13 @@
           "maxLength": 64,
           "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
         }
+      },
+      "SkillId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The Skill's id.",
+        "schema": { "type": "string", "format": "uuid" }
       }
     },
     "responses": {
@@ -598,7 +624,7 @@
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "SkillNotFound": {
-        "description": "No Skill by that name",
+        "description": "No Skill by that id",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "UserNotFound": {
@@ -663,6 +689,7 @@
       "SkillSummary": {
         "type": "object",
         "required": [
+          "id",
           "name",
           "description",
           "license",
@@ -674,6 +701,11 @@
           "published_at"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identity for reading, deleting, and downloading this Skill — generated once, on first publish, and never changes across republishes of the same name. `name` remains how a Skill is published."
+          },
           "name": {
             "type": "string",
             "maxLength": 64,

@@ -84,11 +84,11 @@ export class AlreadyInitializedError extends AppError {
   }
 }
 
-/** No Skill exists by the requested name. */
+/** No Skill exists by the requested id. */
 export class SkillNotFoundError extends AppError {
   /** Builds the 404 `not_found` error. */
   constructor() {
-    super(404, "not_found", "No Skill by that name.");
+    super(404, "not_found", "No Skill by that id.");
   }
 }
 

@@ -25,7 +25,10 @@ export const userRoleEnum = pgEnum("user_role", ["reader", "writer", "admin", "s
 export const users = pgTable(
   "users",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    // Postgres 18's native uuidv7() (this repo runs postgres:18-alpine) —
+    // time-ordered, so an id sorts the same as its row's creation order,
+    // unlike the random v4 gen_random_uuid() this replaced.
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
     email: text("email").notNull().unique(),
     first_name: text("first_name").notNull(),
     last_name: text("last_name").notNull(),
@@ -51,7 +54,7 @@ export type NewUserRow = typeof users.$inferInsert;
 export const tokens = pgTable(
   "tokens",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
     // Cascade: removing a User must end their CLI access, not orphan it
     // (docs/data-model.md).
     user_id: uuid("user_id")
@@ -81,9 +84,14 @@ const tsvector = customType<{ data: string; driverData: string }>({
 export const skills = pgTable(
   "skills",
   {
-    // The Skill's name is its sole identity — flat, no namespacing, no
-    // version history. Publishing replaces the row (ADR-0002).
-    name: text("name").primaryKey(),
+    // Stable identity for the API's read/delete/artifact routes (ticket 16).
+    // Generated once, on first insert, and never changes across
+    // republishes of the same name (`onConflictDoUpdate` never sets it).
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
+    // The Skill's name is still how it's published (`PUT /skills/{name}` is
+    // a name-keyed upsert, ADR-0002) and how the Artifact is keyed in
+    // storage — just no longer the primary key.
+    name: text("name").notNull().unique(),
     description: text("description").notNull(),
     // The SKILL.md body as supplied by the publisher. The API never reads the
     // Artifact (ADR-0001), so this is not parsed out of it.

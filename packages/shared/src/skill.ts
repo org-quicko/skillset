@@ -38,6 +38,7 @@ export const SkillFrontmatterExtrasSchema = z.object({
 
 export const SkillSummarySchema = z
   .object({
+    id: z.string(),
     name: SkillNameSchema,
     description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
     published_by: PublisherSchema,

@@ -9,6 +9,7 @@ import {
   validateSkillName,
 } from "@skill-registry/shared";
 import { count, desc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { Database } from "../db/client.js";
 import { skills, users, type UserRow } from "../db/schema.js";
 import { ArtifactMissingError, SkillDeleteFailedError, SkillNotFoundError } from "../http/errors.js";
@@ -35,6 +36,7 @@ export interface SkillsServiceDependencies {
  * respond with `SkillSchema.parse(row)` and no mapping step.
  */
 const skillSelection = {
+  id: skills.id,
   name: skills.name,
   description: skills.description,
   body: skills.body,
@@ -68,6 +70,7 @@ interface SkillPublisher {
 }
 
 interface SkillSummary {
+  id: string;
   name: string;
   description: string;
   license: string | null;
@@ -170,9 +173,31 @@ function buildSearchCondition(query: string) {
     : sql`${skills.search} @@ to_tsquery('english', ${prefix})`;
 }
 
-async function assertSkillExists(deps: SkillsServiceDependencies, name: string): Promise<void> {
-  const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.name, name)).limit(1);
+/**
+ * A malformed id can never match a row — every id-keyed lookup below treats
+ * it the same as "not found" rather than letting an invalid UUID reach
+ * Postgres as a raw query error.
+ */
+function isWellFormedSkillId(id: string): boolean {
+  return z.uuid().safeParse(id).success;
+}
+
+/**
+ * Resolves a Skill's id to its current name, so a route needs only the id
+ * the wire gives it — the Artifact's storage key is still derived from the
+ * name (docs/data-model.md).
+ *
+ * @param deps - The database this reads from.
+ * @param id - The Skill's id.
+ * @returns The Skill's current name.
+ * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
+ */
+async function getSkillNameById(deps: SkillsServiceDependencies, id: string): Promise<string> {
+  if (!isWellFormedSkillId(id)) throw new SkillNotFoundError();
+
+  const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.id, id)).limit(1);
   if (!skill) throw new SkillNotFoundError();
+  return skill.name;
 }
 
 /**
@@ -220,6 +245,7 @@ export async function listSkills(
 
   const rows = await deps.db
     .select({
+      id: skillSelection.id,
       name: skillSelection.name,
       description: skillSelection.description,
       license: skillSelection.license,
@@ -245,18 +271,52 @@ export async function listSkills(
 }
 
 /**
+ * Reads a single Skill by its id.
+ *
+ * @remarks
+ * An exact-id read against the primary key. Full-text search is a
+ * different route's job — a lookup by id never goes through it.
+ *
+ * @param deps - The database this reads from.
+ * @param id - The Skill's id.
+ * @returns `SkillDetail`
+ * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
+ */
+export async function getSkill(deps: SkillsServiceDependencies, id: string): Promise<SkillDetail> {
+  if (!isWellFormedSkillId(id)) throw new SkillNotFoundError();
+
+  const [skill] = await deps.db
+    .select(skillSelection)
+    .from(skills)
+    .leftJoin(users, eq(skills.published_by, users.id))
+    .where(eq(skills.id, id))
+    .limit(1);
+
+  if (!skill) throw new SkillNotFoundError();
+  return { ...skill, tags: normalizeTags(skill.tags) };
+}
+
+/**
  * Reads a single Skill by its exact name.
  *
  * @remarks
- * An exact-name read against the primary key. Full-text search is a
- * different route's job — a lookup by name never goes through it.
+ * The web keeps `/skills/<name>` as its own browser URL and needs an
+ * authoritative name → id resolution for a reader who lands there with
+ * nothing already cached (a bookmark, a shared link, a refresh) — this is
+ * that lookup. A single indexed equality match against the unique `name`
+ * column, not full-text search: `GET /skills?q=` ranks by recency and caps
+ * at one page, so it cannot guarantee finding an existing Skill by exact
+ * name, and Postgres's `english` search config drops stopwords entirely,
+ * which would silently 404 a real Skill whose name happens to be one
+ * (docs/data-model.md's `name` format allows single-word, even
+ * single-character, names).
  *
  * @param deps - The database this reads from.
  * @param name - The Skill's name.
  * @returns `SkillDetail`
  * @throws SkillNotFoundError if no Skill exists by that name.
  */
-export async function getSkill(deps: SkillsServiceDependencies, name: string): Promise<SkillDetail> {
+export async function getSkillByName(deps: SkillsServiceDependencies, name: string): Promise<SkillDetail> {
   const [skill] = await deps.db
     .select(skillSelection)
     .from(skills)
@@ -373,6 +433,7 @@ export async function publishSkill(
 
   return {
     skill: {
+      id: row.id,
       name: row.name,
       description: row.description,
       body: row.body,
@@ -410,16 +471,16 @@ export async function publishSkill(
  * Artifact for a row that no longer exists is not.
  *
  * @param deps - The database, storage adapter, and logger this needs.
- * @param name - The Skill's name.
- * @throws SkillNotFoundError if no Skill exists by that name.
+ * @param id - The Skill's id.
+ * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
  * @throws SkillDeleteFailedError if the storage or database delete fails.
  */
-export async function deleteSkill(deps: SkillsServiceDependencies, name: string): Promise<void> {
-  await assertSkillExists(deps, name);
+export async function deleteSkill(deps: SkillsServiceDependencies, id: string): Promise<void> {
+  const name = await getSkillNameById(deps, id);
 
   try {
     await deps.storage.delete(artifactKey(name));
-    await deps.db.delete(skills).where(eq(skills.name, name));
+    await deps.db.delete(skills).where(eq(skills.id, id));
   } catch (cause) {
     throw new SkillDeleteFailedError(cause);
   }
@@ -435,13 +496,13 @@ export async function deleteSkill(deps: SkillsServiceDependencies, name: string)
  * role, so the route's requireAuth alone is the whole authorisation check.
  *
  * @param deps - The database and storage adapter this needs.
- * @param name - The Skill's name.
+ * @param id - The Skill's id.
  * @returns `string`
- * @throws SkillNotFoundError if no Skill exists by that name.
+ * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
  * @throws ArtifactMissingError if the Skill's Artifact was never uploaded.
  */
-export async function getArtifactDownloadUrl(deps: SkillsServiceDependencies, name: string): Promise<string> {
-  await assertSkillExists(deps, name);
+export async function getArtifactDownloadUrl(deps: SkillsServiceDependencies, id: string): Promise<string> {
+  const name = await getSkillNameById(deps, id);
 
   const key = artifactKey(name);
   if (!(await deps.storage.exists(key))) throw new ArtifactMissingError();

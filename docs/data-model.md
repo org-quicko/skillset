@@ -17,7 +17,7 @@ A User of the Registry.
 
 | Column                 | Type          | Constraints                                       |
 | ---------------------- | ------------- | ------------------------------------------------- |
-| `id`                   | `uuid`        | primary key, default generated                    |
+| `id`                   | `uuid`        | primary key, default `uuidv7()`                   |
 | `email`                | `text`        | not null, unique                                  |
 | `first_name`           | `text`        | not null                                          |
 | `last_name`            | `text`        | not null                                          |
@@ -54,7 +54,7 @@ A Token a User mints for the CLI.
 
 | Column         | Type          | Constraints                                          |
 | -------------- | ------------- | ---------------------------------------------------- |
-| `id`           | `uuid`        | primary key, default generated                       |
+| `id`           | `uuid`        | primary key, default `uuidv7()`                      |
 | `user_id`      | `uuid`        | not null, references `users(id)` on delete cascade   |
 | `name`         | `text`        | not null                                             |
 | `token_hash`   | `text`        | not null, unique — SHA-256 hex, see below            |
@@ -84,7 +84,8 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 
 | Column               | Type          | Constraints                                            |
 | -------------------- | ------------- | ------------------------------------------------------ |
-| `name`               | `text`        | primary key                                            |
+| `id`                 | `uuid`        | primary key, default `uuidv7()`                        |
+| `name`               | `text`        | not null, unique                                       |
 | `description`        | `text`        | not null, length ≤ 1024                                |
 | `body`               | `text`        | not null                                               |
 | `license`            | `text`        | null                                                    |
@@ -97,10 +98,14 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 | `published_at`       | `timestamptz` | not null, default `now()`                              |
 | `search`             | `tsvector`    | generated always as stored, see below                  |
 
-`name` is the sole identity — flat, no namespacing, no version history. Publishing replaces
-the row and the Artifact (ADR-0002). A check constraint enforces the same rule the shared
-validation module does: 1–64 characters, lowercase alphanumerics and hyphens, no leading or
-trailing hyphen, no doubled hyphen.
+`id` is the stable identity `GET`, `DELETE`, and the Artifact download route key a Skill by —
+generated once, on first insert, and never changes across republishes of the same name
+(the conflict-update path never sets it). `name` stays how a Skill is **published**: flat, no
+namespacing, no version history, and still the row's sole *publishing* identity — `PUT` is an
+upsert by name, since there is no `id` before the row exists, and it is still how the Artifact
+is keyed in storage (ADR-0002). A check constraint enforces the same rule the shared validation
+module does: 1–64 characters, lowercase alphanumerics and hyphens, no leading or trailing
+hyphen, no doubled hyphen.
 
 `body` is the `SKILL.md` content, supplied by the CLI or the web interface rather than parsed
 from the Artifact — the API never reads the Artifact (ADR-0001). It is rendered through an
@@ -143,8 +148,8 @@ ALTER TABLE skills ADD COLUMN search tsvector
 CREATE INDEX skills_search_idx ON skills USING GIN (search);
 ```
 
-Indexes: primary key on `name`; GIN on `search`; on `published_at` descending, for the
-most-recent-first listing.
+Indexes: primary key on `id`; unique on `name`; GIN on `search`; on `published_at` descending,
+for the most-recent-first listing.
 
 ## Not built yet: `user_identities`
 

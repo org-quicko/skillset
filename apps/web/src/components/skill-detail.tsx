@@ -44,7 +44,7 @@ export function SkillDetail({
           </div>
           <div className="flex flex-col gap-4">
             <SkillAnalyticsCard />
-            <SkillActionsCard name={skill.data.name} canDelete={canDelete} onDeleted={onDeleted} />
+            <SkillActionsCard id={skill.data.id} name={skill.data.name} canDelete={canDelete} onDeleted={onDeleted} />
           </div>
         </div>
       )}
