@@ -4,20 +4,24 @@ import { AGENTS, canonicalInstallDir, resolveInstallDir, type AgentId, type Scop
 const ctx = (env: Record<string, string | undefined> = {}) => ({ env, homeDir: "/home/dev", projectRoot: "/repo" });
 
 describe("AGENTS table", () => {
-  it("has exactly claude-code, codex, and generic", () => {
-    expect(AGENTS.map((a) => a.id).sort()).toEqual(["claude-code", "codex", "generic"]);
+  it("has ADR-0006's five verified Agents plus generic", () => {
+    expect(AGENTS.map((a) => a.id).sort()).toEqual(["claude-code", "codex", "generic", "github-copilot", "opencode", "pi"]);
   });
 });
 
 describe("resolveInstallDir — project scope", () => {
-  it("codex and generic resolve to the same project directory", () => {
-    expect(resolveInstallDir("codex", "project", ctx())).toBe(resolveInstallDir("generic", "project", ctx()));
-    expect(resolveInstallDir("generic", "project", ctx())).toBe("/repo/.agents/skills");
+  it("codex, github-copilot, opencode, and generic — the project directory shared by three Agents (plus generic) — resolve identically", () => {
+    const sharedAgents: AgentId[] = ["codex", "github-copilot", "opencode", "generic"];
+    const dirs = sharedAgents.map((agent) => resolveInstallDir(agent, "project", ctx()));
+    expect(new Set(dirs)).toEqual(new Set(["/repo/.agents/skills"]));
   });
 
-  it("claude-code never coincides with the canonical directory", () => {
+  it("claude-code and pi never coincide with the canonical directory", () => {
     expect(resolveInstallDir("claude-code", "project", ctx())).toBe("/repo/.claude/skills");
-    expect(resolveInstallDir("claude-code", "project", ctx())).not.toBe(canonicalInstallDir("project", ctx()));
+    expect(resolveInstallDir("pi", "project", ctx())).toBe("/repo/.pi/skills");
+    const canonical = canonicalInstallDir("project", ctx());
+    expect(resolveInstallDir("claude-code", "project", ctx())).not.toBe(canonical);
+    expect(resolveInstallDir("pi", "project", ctx())).not.toBe(canonical);
   });
 });
 
@@ -27,6 +31,12 @@ describe("resolveInstallDir — user scope", () => {
     { agent: "claude-code", env: { CLAUDE_CONFIG_DIR: "/custom/claude" }, expected: "/custom/claude/skills" },
     { agent: "codex", env: {}, expected: "/home/dev/.codex/skills" },
     { agent: "codex", env: { CODEX_HOME: "/custom/codex" }, expected: "/custom/codex/skills" },
+    { agent: "github-copilot", env: {}, expected: "/home/dev/.copilot/skills" },
+    // github-copilot has no environment override at all, per upstream — the default is unconditional.
+    { agent: "github-copilot", env: { XDG_CONFIG_HOME: "/custom/config" }, expected: "/home/dev/.copilot/skills" },
+    { agent: "opencode", env: {}, expected: "/home/dev/.config/opencode/skills" },
+    { agent: "opencode", env: { XDG_CONFIG_HOME: "/custom/config" }, expected: "/custom/config/opencode/skills" },
+    { agent: "pi", env: {}, expected: "/home/dev/.pi/agent/skills" },
     { agent: "generic", env: {}, expected: "/home/dev/.config/agents/skills" },
     { agent: "generic", env: { XDG_CONFIG_HOME: "/custom/config" }, expected: "/custom/config/agents/skills" },
   ];
@@ -44,6 +54,13 @@ describe("resolveInstallDir — user scope", () => {
 
   it("an env override that is blank or whitespace-only falls back to the default", () => {
     expect(resolveInstallDir("claude-code", "user", ctx({ CLAUDE_CONFIG_DIR: "   " }))).toBe("/home/dev/.claude/skills");
+  });
+});
+
+describe("pi — the Agent whose two Scopes use different suffixes (ADR-0006)", () => {
+  it("project Scope ends in /skills, user Scope ends in /agent/skills", () => {
+    expect(resolveInstallDir("pi", "project", ctx())).toBe("/repo/.pi/skills");
+    expect(resolveInstallDir("pi", "user", ctx())).toBe("/home/dev/.pi/agent/skills");
   });
 });
 

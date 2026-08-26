@@ -69,12 +69,13 @@ export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteR
     throw error;
   }
 
-  const scope: Scope = options.scope
-    ? (options.scope as Scope)
-    : ((await promptChoice("Install for which scope?", SCOPES, deps)) as Scope);
+  // Agent before Scope, matching the ticket's prompt order.
   const agentIds: AgentId[] = hasAgents
     ? (options.agent as AgentId[])
     : ((await promptMultiChoice("Install for which Agent(s)?", AGENT_IDS, deps)) as AgentId[]);
+  const scope: Scope = options.scope
+    ? (options.scope as Scope)
+    : ((await promptChoice("Install for which scope?", SCOPES, deps)) as Scope);
 
   return installSkill({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skill.name, files, scope, agentIds);
 }

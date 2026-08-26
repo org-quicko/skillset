@@ -47,12 +47,37 @@ describe("installSkill", () => {
     });
   });
 
-  it("codex and generic together at project scope: written once, reported for both", async () => {
+  it("codex, github-copilot, opencode, and generic together at project scope — the directory shared by three Agents (plus generic): written once, reported for all", async () => {
     await withTempProject(async (cwd) => {
-      const reports = await installSkill({ cwd, env: {}, homeDir: cwd }, "code-review", files, "project", ["codex", "generic"]);
+      const reports = await installSkill(
+        { cwd, env: {}, homeDir: cwd },
+        "code-review",
+        files,
+        "project",
+        ["codex", "github-copilot", "opencode", "generic"],
+      );
 
       const expectedDir = join(cwd, ".agents", "skills", "code-review");
-      expect(reports).toEqual([{ directory: expectedDir, mode: "canonical", agents: ["codex", "generic"] }]);
+      expect(reports).toEqual([
+        { directory: expectedDir, mode: "canonical", agents: ["codex", "github-copilot", "opencode", "generic"] },
+      ]);
+    });
+  });
+
+  it("pi — the Agent whose two Scopes use different suffixes — gets a real symlink at both project and user scope", async () => {
+    await withTempProject(async (cwd) => {
+      const projectReports = await installSkill({ cwd, env: {}, homeDir: cwd }, "code-review", files, "project", ["pi"]);
+      const projectLinkDir = join(cwd, ".pi", "skills", "code-review");
+      expect(projectReports).toEqual([{ directory: projectLinkDir, mode: "symlink", agents: ["pi"] }]);
+      expect(await readFile(join(projectLinkDir, "SKILL.md"), "utf8")).toContain("code-review");
+
+      const userReports = await installSkill({ cwd, env: {}, homeDir: cwd }, "code-review", files, "user", ["pi"]);
+      const userLinkDir = join(cwd, ".pi", "agent", "skills", "code-review");
+      expect(userReports).toEqual([{ directory: userLinkDir, mode: "symlink", agents: ["pi"] }]);
+      expect(await readFile(join(userLinkDir, "scripts", "run.sh"), "utf8")).toBe("echo hi");
+
+      // Different directories, confirming the asymmetry rather than one Scope aliasing the other.
+      expect(projectLinkDir).not.toBe(userLinkDir);
     });
   });
 

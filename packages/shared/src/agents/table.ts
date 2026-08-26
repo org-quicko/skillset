@@ -1,16 +1,17 @@
 /**
- * `claude-code` and `codex`'s directories and environment overrides are derived from
- * `vercel-labs/skills` (MIT), `src/agents.ts` at commit
- * `dd3ca3c85581e593434546a4016fb3a7e7b7f937` (2026-08-18). See LICENSE.vercel-labs-skills
- * in this directory for the upstream copyright notice and licence text. `generic` is our
- * own addition, not upstream's — see docs/adr/0014.
+ * `claude-code`, `codex`, `github-copilot`, `opencode`, and `pi`'s directories and
+ * environment overrides are derived from `vercel-labs/skills` (MIT), `src/agents.ts` at
+ * commit `dd3ca3c85581e593434546a4016fb3a7e7b7f937` (2026-08-18) — the five Agents
+ * ADR-0006 verifies. See LICENSE.vercel-labs-skills in this directory for the upstream
+ * copyright notice and licence text. `generic` is our own addition, not upstream's — see
+ * docs/adr/0014.
  *
  * Paths are POSIX-style strings, relative to a project root or a home directory, never
  * touching `node:path` or `node:os` — this module is shared with the browser (spec,
  * "Shape"). The CLI resolves these against the real filesystem.
  */
 
-export type AgentId = "claude-code" | "codex" | "generic";
+export type AgentId = "claude-code" | "codex" | "github-copilot" | "opencode" | "pi" | "generic";
 export type Scope = "project" | "user";
 
 export interface AgentEntry {
@@ -42,6 +43,26 @@ export const AGENTS: readonly AgentEntry[] = [
     displayName: "Codex",
     projectSkillsDir: ".agents/skills",
     userSkillsDir: (env, homeDir) => `${trimmedEnv(env.CODEX_HOME) ?? `${homeDir}/.codex`}/skills`,
+  },
+  {
+    id: "github-copilot",
+    displayName: "GitHub Copilot",
+    projectSkillsDir: ".agents/skills",
+    userSkillsDir: (_env, homeDir) => `${homeDir}/.copilot/skills`,
+  },
+  {
+    id: "opencode",
+    displayName: "OpenCode",
+    projectSkillsDir: ".agents/skills",
+    userSkillsDir: (env, homeDir) => `${trimmedEnv(env.XDG_CONFIG_HOME) ?? `${homeDir}/.config`}/opencode/skills`,
+  },
+  {
+    // Asymmetric on purpose (ADR-0006) — the one Agent whose two Scopes use different
+    // suffixes ("skills" vs. "agent/skills"), easiest to get wrong.
+    id: "pi",
+    displayName: "Pi",
+    projectSkillsDir: ".pi/skills",
+    userSkillsDir: (_env, homeDir) => `${homeDir}/.pi/agent/skills`,
   },
   {
     id: "generic",

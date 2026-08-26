@@ -125,7 +125,7 @@ describe("runAdd", () => {
         throw new Error(`Unexpected request to ${url}`);
       });
 
-      // AGENTS order is claude-code(1), codex(2), generic(3); "1" for scope picks "project" (SCOPES[0]).
+      // Prompt order is Agent then Scope. First "1" picks AGENT_IDS[0] (claude-code); second "1" picks SCOPES[0] (project).
       const answers = ["1", "1"];
       const reports = await runAdd(
         baseDeps({
