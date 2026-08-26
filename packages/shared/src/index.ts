@@ -7,6 +7,8 @@ export * from "./error.js";
 export * from "./token.js";
 export * from "./skill-rules.js";
 export * from "./skill.js";
+export * from "./tag-rules.js";
+export * from "./tag.js";
 export * from "./frontmatter.js";
 export * from "./artifact.js";
 export * from "./publish.js";

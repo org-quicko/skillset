@@ -16,11 +16,15 @@ import { apiErrorMessage } from "@/lib/api";
 export function SkillDetail({
   name,
   canDelete,
+  canEditTags,
+  canRenameTags,
   onBack,
   onDeleted,
 }: {
   name: string;
   canDelete: boolean;
+  canEditTags: boolean;
+  canRenameTags: boolean;
   onBack: () => void;
   onDeleted: () => void;
 }) {
@@ -44,7 +48,15 @@ export function SkillDetail({
           </div>
           <div className="flex flex-col gap-4">
             <SkillAnalyticsCard />
-            <SkillActionsCard id={skill.data.id} name={skill.data.name} canDelete={canDelete} onDeleted={onDeleted} />
+            <SkillActionsCard
+              id={skill.data.id}
+              name={skill.data.name}
+              tags={skill.data.tags}
+              canDelete={canDelete}
+              canEditTags={canEditTags}
+              canRenameTags={canRenameTags}
+              onDeleted={onDeleted}
+            />
           </div>
         </div>
       )}

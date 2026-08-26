@@ -8,6 +8,7 @@ import type { Logger } from "./logger.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerSetupRoutes } from "./routes/setup.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
+import { registerTagsRoutes } from "./routes/tags.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import type { StorageAdapter } from "./storage/types.js";
 
@@ -53,6 +54,7 @@ export function createApp(deps: AppDependencies): Hono {
   registerAuthRoutes(api, deps);
   registerUsersRoutes(api, deps);
   registerSkillsRoutes(api, deps);
+  registerTagsRoutes(api, deps);
 
   app.route("/api", api);
 

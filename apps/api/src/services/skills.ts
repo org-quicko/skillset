@@ -9,11 +9,11 @@ import {
   validateSkillName,
 } from "@skill-registry/shared";
 import { count, desc, eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import type { Database } from "../db/client.js";
 import { skills, users, type UserRow } from "../db/schema.js";
 import { ArtifactMissingError, SkillDeleteFailedError, SkillNotFoundError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
+import { getSkillTags, getTagsBySkillIds, type TagSummary } from "./tags.js";
 import {
   ARTIFACT_CONTENT_TYPE,
   ARTIFACT_DOWNLOAD_EXPIRY_SECONDS,
@@ -44,7 +44,6 @@ const skillSelection = {
   compatibility: skills.compatibility,
   metadata: skills.metadata,
   allowed_tools: skills.allowed_tools,
-  tags: skills.tags,
   published_at: skills.published_at,
   published_by: {
     user_id: users.id,
@@ -53,11 +52,6 @@ const skillSelection = {
     last_name: users.last_name,
   },
 };
-
-/** The wire's `tags` is never null — a Skill with none simply has an empty list. */
-function normalizeTags(tags: string[] | null): string[] {
-  return tags ?? [];
-}
 
 // The Publisher is null-per-field, not null-as-a-whole: `leftJoin` nulls out
 // only the columns that come from `users`, while `email` — snapshotted onto
@@ -77,7 +71,7 @@ interface SkillSummary {
   compatibility: string | null;
   metadata: Record<string, string> | null;
   allowed_tools: string | null;
-  tags: string[];
+  tags: TagSummary[];
   published_at: Date;
   published_by: SkillPublisher;
 }
@@ -174,12 +168,24 @@ function buildSearchCondition(query: string) {
 }
 
 /**
- * A malformed id can never match a row — every id-keyed lookup below treats
- * it the same as "not found" rather than letting an invalid UUID reach
- * Postgres as a raw query error.
+ * Runs an id-keyed lookup, treating a malformed id the same as "no row" —
+ * Postgres rejects a non-UUID literal with `invalid_text_representation`
+ * (22P02) before it ever gets the chance to not-match, so that's caught
+ * here rather than pre-validated: letting Postgres itself reject the format
+ * means there's no separate format check to keep in sync with what the
+ * database actually accepts.
+ *
+ * @param query - Runs the id-keyed select; called with the id already bound.
+ * @returns The first row, or `undefined` for a malformed id or no match — the caller decides what "not found" means.
  */
-function isWellFormedSkillId(id: string): boolean {
-  return z.uuid().safeParse(id).success;
+async function selectByIdOrUndefined<T>(query: () => Promise<T[]>): Promise<T | undefined> {
+  try {
+    const [row] = await query();
+    return row;
+  } catch (cause) {
+    if (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "22P02") return undefined;
+    throw cause;
+  }
 }
 
 /**
@@ -193,9 +199,9 @@ function isWellFormedSkillId(id: string): boolean {
  * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
  */
 async function getSkillNameById(deps: SkillsServiceDependencies, id: string): Promise<string> {
-  if (!isWellFormedSkillId(id)) throw new SkillNotFoundError();
-
-  const [skill] = await deps.db.select({ name: skills.name }).from(skills).where(eq(skills.id, id)).limit(1);
+  const skill = await selectByIdOrUndefined(() =>
+    deps.db.select({ name: skills.name }).from(skills).where(eq(skills.id, id)).limit(1),
+  );
   if (!skill) throw new SkillNotFoundError();
   return skill.name;
 }
@@ -252,7 +258,6 @@ export async function listSkills(
       compatibility: skillSelection.compatibility,
       metadata: skillSelection.metadata,
       allowed_tools: skillSelection.allowed_tools,
-      tags: skillSelection.tags,
       published_at: skillSelection.published_at,
       published_by: skillSelection.published_by,
     })
@@ -263,7 +268,9 @@ export async function listSkills(
     .limit(SKILL_PAGE_SIZE)
     .offset((page - 1) * SKILL_PAGE_SIZE);
 
-  const items = rows.map((row) => ({ ...row, tags: normalizeTags(row.tags) }));
+  // One extra query for however many rows this page has, not one per row.
+  const tagsBySkill = await getTagsBySkillIds(deps, rows.map((row) => row.id));
+  const items = rows.map((row) => ({ ...row, tags: tagsBySkill.get(row.id) ?? [] }));
 
   const [totals] = await deps.db.select({ total: count() }).from(skills).where(matches);
 
@@ -283,17 +290,16 @@ export async function listSkills(
  * @throws SkillNotFoundError if `id` is not a well-formed UUID, or no Skill exists by it.
  */
 export async function getSkill(deps: SkillsServiceDependencies, id: string): Promise<SkillDetail> {
-  if (!isWellFormedSkillId(id)) throw new SkillNotFoundError();
-
-  const [skill] = await deps.db
-    .select(skillSelection)
-    .from(skills)
-    .leftJoin(users, eq(skills.published_by, users.id))
-    .where(eq(skills.id, id))
-    .limit(1);
-
+  const skill = await selectByIdOrUndefined(() =>
+    deps.db
+      .select(skillSelection)
+      .from(skills)
+      .leftJoin(users, eq(skills.published_by, users.id))
+      .where(eq(skills.id, id))
+      .limit(1),
+  );
   if (!skill) throw new SkillNotFoundError();
-  return { ...skill, tags: normalizeTags(skill.tags) };
+  return { ...skill, tags: await getSkillTags(deps, skill.id) };
 }
 
 /**
@@ -325,7 +331,7 @@ export async function getSkillByName(deps: SkillsServiceDependencies, name: stri
     .limit(1);
 
   if (!skill) throw new SkillNotFoundError();
-  return { ...skill, tags: normalizeTags(skill.tags) };
+  return { ...skill, tags: await getSkillTags(deps, skill.id) };
 }
 
 /**
@@ -386,9 +392,10 @@ export async function publishSkill(
 
   // Idempotent by name: publishing an existing Skill replaces it whoever
   // published it first, and the publisher and published-at become whoever
-  // published it last (ADR-0002). `tags` is deliberately absent from both
-  // the insert and the conflict update — no publish path ever writes it
-  // (ADR-0008), so a replace leaves it exactly as it was.
+  // published it last (ADR-0002). `tags` never appears in this insert or
+  // conflict update at all — it isn't a column on `skills` any more, and no
+  // publish path ever writes it regardless (ADR-0008, ADR-0011), so a
+  // republish leaves a Skill's Tags exactly as they were.
   const published_at = new Date();
   const [row] = await deps.db
     .insert(skills)
@@ -416,6 +423,7 @@ export async function publishSkill(
         published_by: publisher.id,
         published_by_email: publisher.email,
         published_at,
+        updated_at: new Date(),
       },
     })
     .returning();
@@ -441,7 +449,9 @@ export async function publishSkill(
       compatibility: row.compatibility,
       metadata: row.metadata,
       allowed_tools: row.allowed_tools,
-      tags: normalizeTags(row.tags),
+      // A republish's Tags survive untouched (see the comment above); a
+      // brand new Skill simply has none yet.
+      tags: await getSkillTags(deps, row.id),
       published_at: row.published_at,
       published_by: {
         user_id: publisher.id,

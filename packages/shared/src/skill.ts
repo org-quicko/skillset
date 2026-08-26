@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TagSchema } from "./tag.js";
 import { timestamp } from "./timestamp.js";
 import { SKILL_DESCRIPTION_MAX_LENGTH, SKILL_NAME_MAX_LENGTH, SKILL_NAME_PATTERN } from "./skill-rules.js";
 
@@ -22,7 +23,8 @@ export type Publisher = z.infer<typeof PublisherSchema>;
 
 /**
  * The four optional Agent Skills spec fields the Registry keeps, plus
- * `tags` (registry metadata, never written into `SKILL.md` itself — see
+ * `tags` — the catalog Tags currently attached to this Skill (registry
+ * metadata, never written into `SKILL.md` itself — see
  * docs/adr/0008-tags-are-registry-metadata-not-frontmatter.md). Each of the
  * four is `null` when the Skill's frontmatter never set it, or set it to
  * something that failed validation and was therefore rejected at publish
@@ -33,7 +35,7 @@ export const SkillFrontmatterExtrasSchema = z.object({
   compatibility: z.string().nullable(),
   metadata: z.record(z.string(), z.string()).nullable(),
   allowed_tools: z.string().nullable(),
-  tags: z.array(z.string()),
+  tags: z.array(TagSchema),
 });
 
 export const SkillSummarySchema = z
@@ -67,7 +69,8 @@ export type SkillPage = z.infer<typeof SkillPageSchema>;
  * shared validation rules (`validateSkillLicense` and friends) are what
  * actually enforce the specification, the same way `description` and
  * `body` are not length-checked here either. `tags` is deliberately absent:
- * publishing never sets it (docs/adr/0008).
+ * publishing never sets it (docs/adr/0008) — see `PUT /skills/{id}/tags`
+ * (`SetSkillTagsSchema`) instead.
  */
 export const SkillPublishSchema = z.object({
   description: z.string(),

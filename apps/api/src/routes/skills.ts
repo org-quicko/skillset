@@ -1,4 +1,4 @@
-import { SkillPageSchema, SkillPublishedSchema, SkillSchema } from "@skill-registry/shared";
+import { SkillPageSchema, SkillPublishedSchema, SkillSchema, SkillTagsSchema } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import {
@@ -10,15 +10,16 @@ import {
   publishSkill,
   type SkillsServiceDependencies,
 } from "../services/skills.js";
+import { setSkillTags, type TagsServiceDependencies } from "../services/tags.js";
 
-export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceDependencies {}
+export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceDependencies, TagsServiceDependencies {}
 
 /**
  * Registers the `/skills` routes: list, read (by id or by name), publish,
- * delete, and download an Artifact.
+ * delete, replace a Skill's Tags, and download an Artifact.
  *
  * @param app - The Hono app to register the routes on.
- * @param deps - The auth and Skills-service dependencies the routes need.
+ * @param deps - The auth, Skills-service, and Tags-service dependencies the routes need.
  */
 export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: SkillRouteDependencies): void {
   app.get("/skills", requireAuth(deps), async (c) => {
@@ -47,6 +48,17 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
   app.delete("/skills/:id", requireAuth(deps), requireRole("admin"), async (c) => {
     await deleteSkill(deps, c.req.param("id"));
     return c.body(null, 204);
+  });
+
+  // A full replace of the Skill's Tags, by name (ADR-0011) — distinct from
+  // publish, which never touches Tags at all. `writer` minimum, same bar as
+  // publish itself: attaching an existing or brand-new Tag only affects the
+  // one Skill being edited, unlike renaming a Tag (`PATCH /tags/:id`), which
+  // reaches every Skill that carries it and is gated at `admin` instead.
+  app.put("/skills/:id/tags", requireAuth(deps), requireRole("writer"), async (c) => {
+    const payload = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const tags = await setSkillTags(deps, c.req.param("id"), payload?.tags);
+    return c.json(SkillTagsSchema.parse({ tags }));
   });
 
   app.get("/skills/:id/artifact", requireAuth(deps), async (c) => {

@@ -33,6 +33,8 @@ export function SkillsPanel({ role }: { role: Role }) {
       <SkillDetail
         name={name}
         canDelete={roleMeets(role, "admin")}
+        canEditTags={roleMeets(role, "writer")}
+        canRenameTags={roleMeets(role, "admin")}
         onBack={() => navigate("/")}
         onDeleted={() => navigate("/")}
       />
