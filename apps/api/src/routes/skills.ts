@@ -1,4 +1,10 @@
-import { SkillPageSchema, SkillPublishedSchema, SkillSchema, SkillTagsSchema } from "@skill-registry/shared";
+import {
+  SkillDirectoryPageSchema,
+  SkillPublishedSchema,
+  SkillSchema,
+  SkillTagsSchema,
+  SkillWithArtifactUrlSchema,
+} from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import {
@@ -22,8 +28,21 @@ export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceD
  * @param deps - The auth, Skills-service, and Tags-service dependencies the routes need.
  */
 export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: SkillRouteDependencies): void {
+  // Tag ids, sort, and page size are ticket 23's additions — see
+  // `listSkills`'s own docs for validation and defaulting.
   app.get("/skills", requireAuth(deps), async (c) => {
-    return c.json(SkillPageSchema.parse(await listSkills(deps, c.req.query("page"), c.req.query("q"))));
+    return c.json(
+      SkillDirectoryPageSchema.parse(
+        await listSkills(deps, {
+          page: c.req.query("page"),
+          q: c.req.query("q"),
+          tagIds: c.req.queries("tag_id"),
+          sortBy: c.req.query("sort_by"),
+          sortOrder: c.req.query("sort_order"),
+          pageSize: c.req.query("page_size"),
+        }),
+      ),
+    );
   });
 
   // Ahead of `/skills/:id` so its literal `by-name` segment wins the match —
@@ -61,8 +80,26 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
     return c.json(SkillTagsSchema.parse({ tags }));
   });
 
+  // Redirects by default — a plain link follows this on its own (ADR-0001:
+  // the API never sees the bytes, so there's nothing to stream itself). A
+  // caller that asks for JSON instead gets the Skill back alongside the same
+  // presigned URL: the web app's own Download control uses this so it can
+  // write the Skill's state straight into its cache once it knows the
+  // request actually succeeded, then navigate to `url` itself — a plain
+  // `fetch` can't safely follow the redirect (that leg is cross-origin, to
+  // storage, and its CORS policy isn't this app's to assume), but a
+  // same-origin request for this representation never touches that leg at
+  // all. Either representation records the same one Install — this branch is
+  // presentation only. `installs` on that Skill reflects the last
+  // `refreshInstallCounts` run, not necessarily this request's own Install
+  // (ADR-0012), the same lag every other read of it has.
   app.get("/skills/:id/artifact", requireAuth(deps), async (c) => {
-    const url = await getArtifactDownloadUrl(deps, c.req.param("id"));
+    const id = c.req.param("id");
+    const url = await getArtifactDownloadUrl(deps, id);
+    if (c.req.header("accept")?.includes("application/json")) {
+      const skill = await getSkill(deps, id);
+      return c.json(SkillWithArtifactUrlSchema.parse({ ...skill, url }));
+    }
     return c.redirect(url, 302);
   });
 }

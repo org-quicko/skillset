@@ -20,15 +20,6 @@ export function apiErrorMessage(error: unknown): string {
   return error.field ? `${error.message} (${error.field})` : error.message;
 }
 
-/**
- * Not fetched through `apiFetch`: the API responds with a redirect to a
- * presigned storage location, and following that is exactly what a plain
- * navigation (a clicked link) does on its own.
- */
-export function skillArtifactUrl(id: string): string {
-  return `/api/skills/${encodeURIComponent(id)}/artifact`;
-}
-
 export interface ApiFetchOptions extends RequestInit {
   /**
    * Set by callers for whom a 401 is an expected, meaningful result rather

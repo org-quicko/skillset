@@ -4,7 +4,7 @@ import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import { hashPassword } from "../src/auth/password.js";
 import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
-import { skills, users } from "../src/db/schema.js";
+import { skillInstallEvents, skills, users } from "../src/db/schema.js";
 import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
 
 interface ApiPublisher {
@@ -38,8 +38,19 @@ interface ApiPublished {
   upload: { url: string; method: string; headers: Record<string, string>; expires_in_seconds: number };
 }
 
+/** `GET /skills`'s row shape (ticket 23) — distinct from `ApiSkill`: `published_by_name` and `updated_at`, not the full Publisher and `published_at`. */
+interface ApiDirectoryEntry {
+  id: string;
+  name: string;
+  description: string;
+  published_by_name: string;
+  updated_at: string;
+  installs: number;
+  tags: ApiTag[];
+}
+
 interface ApiPage {
-  items: Array<Omit<ApiSkill, "body">>;
+  items: ApiDirectoryEntry[];
   page: number;
   page_size: number;
   total: number;
@@ -534,9 +545,10 @@ describe("Listing Skills (ticket 03)", () => {
       role: "reader",
     });
 
-    // 51 Skills, one page and one over. Seeded directly with distinct
-    // publication times — publishing itself is covered above; what is under
-    // test here is order and pagination.
+    // 51 Skills, one default page and one over, all with equal (zero)
+    // installs — every ordering assertion below pins sort_by=updated_at
+    // explicitly instead of relying on the installs-first default, so ties
+    // don't make the test's own expectations flaky.
     const base = Date.UTC(2026, 0, 1);
     await context.db.insert(skills).values(
       Array.from({ length: 51 }, (_, index) => ({
@@ -545,7 +557,9 @@ describe("Listing Skills (ticket 03)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + index * 60_000),
+        updated_at: new Date(base + index * 60_000),
       })),
     );
   }, 60_000);
@@ -554,23 +568,41 @@ describe("Listing Skills (ticket 03)", () => {
     await stopTestContext(context, container);
   });
 
-  it("returns the most recently published first, 50 to a page", async () => {
+  it("defaults to page_size 10, sorted by installs descending", async () => {
     const res = await context.app.request("/api/skills", { headers: { cookie: reader.cookie } });
     expect(res.status).toBe(200);
 
     const page = (await res.json()) as ApiPage;
     expect(page.page).toBe(1);
-    expect(page.page_size).toBe(50);
+    expect(page.page_size).toBe(10);
     expect(page.total).toBe(51);
-    expect(page.items.length).toBe(50);
+    expect(page.items.length).toBe(10);
+  });
+
+  it("sorts by updated_at, most recent first by default order within that sort", async () => {
+    const res = await context.app.request("/api/skills?sort_by=updated_at&page_size=100", {
+      headers: { cookie: reader.cookie },
+    });
+    const page = (await res.json()) as ApiPage;
     expect(page.items[0]?.name).toBe("skill-050");
-    expect(page.items[49]?.name).toBe("skill-001");
+    expect(page.items[50]?.name).toBe("skill-000");
+  });
+
+  it("sorts ascending when sort_order=asc", async () => {
+    const res = await context.app.request("/api/skills?sort_by=updated_at&sort_order=asc&page_size=100", {
+      headers: { cookie: reader.cookie },
+    });
+    const page = (await res.json()) as ApiPage;
+    expect(page.items[0]?.name).toBe("skill-000");
+    expect(page.items[50]?.name).toBe("skill-050");
   });
 
   it("serves the rest on the next page", async () => {
-    const res = await context.app.request("/api/skills?page=2", { headers: { cookie: reader.cookie } });
+    const res = await context.app.request("/api/skills?sort_by=updated_at&page=6", {
+      headers: { cookie: reader.cookie },
+    });
     const page = (await res.json()) as ApiPage;
-    expect(page.page).toBe(2);
+    expect(page.page).toBe(6);
     expect(page.items.length).toBe(1);
     expect(page.items[0]?.name).toBe("skill-000");
   });
@@ -581,9 +613,134 @@ describe("Listing Skills (ticket 03)", () => {
     expect(((await res.json()) as ApiPage).items).toEqual([]);
   });
 
+  it("accepts a client-supplied page_size and clamps it to [1, 100] rather than rejecting it", async () => {
+    const tooSmall = await context.app.request("/api/skills?page_size=0", { headers: { cookie: reader.cookie } });
+    expect(((await tooSmall.json()) as ApiPage).page_size).toBe(1);
+
+    const tooLarge = await context.app.request("/api/skills?page_size=1000", { headers: { cookie: reader.cookie } });
+    expect(((await tooLarge.json()) as ApiPage).page_size).toBe(100);
+
+    const withinBounds = await context.app.request("/api/skills?page_size=25", { headers: { cookie: reader.cookie } });
+    const page = (await withinBounds.json()) as ApiPage;
+    expect(page.page_size).toBe(25);
+    expect(page.items.length).toBe(25);
+  });
+
+  it("rejects an invalid sort_by or sort_order, naming the field that failed", async () => {
+    const badSortBy = await context.app.request("/api/skills?sort_by=name", { headers: { cookie: reader.cookie } });
+    expect(badSortBy.status).toBe(400);
+    expect(((await badSortBy.json()) as ApiError).error.field).toBe("sort_by");
+
+    const badSortOrder = await context.app.request("/api/skills?sort_order=up", { headers: { cookie: reader.cookie } });
+    expect(badSortOrder.status).toBe(400);
+    expect(((await badSortOrder.json()) as ApiError).error.field).toBe("sort_order");
+  });
+
   it("refuses listing without a session", async () => {
     const res = await context.app.request("/api/skills");
     expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * Seam 1 again: `tag_id` is repeatable and any-match, and rides the same
+ * `/skills` route the unfiltered list and search do (ticket 23).
+ */
+describe("Filtering the Skill list by Tag (ticket 23)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let writer: Session;
+  let reader: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ first_name: "Ada", last_name: "Lovelace", email: "ada@example.com", password: PASSWORD }),
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function tag(id: string, tags: string[]): Promise<void> {
+    await context.app.request(`/api/skills/${id}/tags`, {
+      method: "PUT",
+      headers: { cookie: writer.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ tags }),
+    });
+  }
+
+  async function listByTags(...tagIds: string[]): Promise<ApiPage> {
+    const params = new URLSearchParams();
+    for (const id of tagIds) params.append("tag_id", id);
+    const res = await context.app.request(`/api/skills?${params.toString()}`, { headers: { cookie: reader.cookie } });
+    expect(res.status).toBe(200);
+    return (await res.json()) as ApiPage;
+  }
+
+  async function tagIdOf(skillId: string, name: string): Promise<string> {
+    const res = await context.app.request(`/api/skills/${skillId}`, { headers: { cookie: reader.cookie } });
+    const skill = (await res.json()) as ApiSkill & { tags: ApiTag[] };
+    const found = skill.tags.find((t) => t.name === name);
+    if (!found) throw new Error(`Expected Tag "${name}" on Skill ${skillId}.`);
+    return found.id;
+  }
+
+  it("narrows to Skills carrying the given Tag", async () => {
+    const python = await publish(context, writer, "python-linter", { description: "Lints Python.", body: "Body.\n" });
+    const rust = await publish(context, writer, "rust-formatter", { description: "Formats Rust.", body: "Body.\n" });
+    await publish(context, writer, "untagged-skill", { description: "No Tags.", body: "Body.\n" });
+    const { skill: pythonSkill } = (await python.json()) as ApiPublished;
+    const { skill: rustSkill } = (await rust.json()) as ApiPublished;
+
+    await tag(pythonSkill.id, ["linter", "python"]);
+    await tag(rustSkill.id, ["formatter", "rust"]);
+
+    const pythonTagId = await tagIdOf(pythonSkill.id, "python");
+    const filtered = await listByTags(pythonTagId);
+    expect(filtered.items.map((item) => item.name)).toEqual(["python-linter"]);
+  });
+
+  it("matches a Skill carrying any one of several selected Tags, not all of them", async () => {
+    const backend = await publish(context, writer, "backend-skill", { description: "Backend.", body: "Body.\n" });
+    const frontend = await publish(context, writer, "frontend-skill", { description: "Frontend.", body: "Body.\n" });
+    await publish(context, writer, "neither-skill", { description: "Neither.", body: "Body.\n" });
+    const { skill: backendSkill } = (await backend.json()) as ApiPublished;
+    const { skill: frontendSkill } = (await frontend.json()) as ApiPublished;
+
+    await tag(backendSkill.id, ["backend"]);
+    await tag(frontendSkill.id, ["frontend"]);
+
+    const backendTagId = await tagIdOf(backendSkill.id, "backend");
+    const frontendTagId = await tagIdOf(frontendSkill.id, "frontend");
+
+    const page = await listByTags(backendTagId, frontendTagId);
+    expect(page.items.map((item) => item.name).sort()).toEqual(["backend-skill", "frontend-skill"]);
+  });
+
+  it("returns every Skill when no tag_id is given", async () => {
+    const page = await listByTags();
+    expect(page.total).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -627,7 +784,9 @@ describe("Searching Skills (ticket 10)", () => {
 
     // 51 near-identical "widget" Skills prove search paginates the same way
     // the unfiltered list does; four distinct Skills carry the vocabulary the
-    // other tests search for, so neither set interferes with the other.
+    // other tests search for, so neither set interferes with the other. All
+    // share one publisher except "solo-effort", searched for by publisher
+    // name alone (ticket 23).
     const base = Date.UTC(2026, 1, 1);
     await context.db.insert(skills).values([
       ...Array.from({ length: 51 }, (_, index) => ({
@@ -636,7 +795,9 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + index * 60_000),
+        updated_at: new Date(base + index * 60_000),
       })),
       {
         name: "postgresql-migrations",
@@ -644,7 +805,9 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + 51 * 60_000),
+        updated_at: new Date(base + 51 * 60_000),
       },
       {
         name: "code-review-bot",
@@ -652,7 +815,9 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + 52 * 60_000),
+        updated_at: new Date(base + 52 * 60_000),
       },
       {
         name: "quality-metrics-tracker",
@@ -660,7 +825,9 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + 53 * 60_000),
+        updated_at: new Date(base + 53 * 60_000),
       },
       {
         name: "changelog-writer",
@@ -668,7 +835,9 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + 54 * 60_000),
+        updated_at: new Date(base + 54 * 60_000),
       },
       {
         name: "async-await",
@@ -676,7 +845,9 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + 55 * 60_000),
+        updated_at: new Date(base + 55 * 60_000),
       },
       {
         name: "async-await-helper",
@@ -684,7 +855,19 @@ describe("Searching Skills (ticket 10)", () => {
         body: "Body.\n",
         published_by: null,
         published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
         published_at: new Date(base + 56 * 60_000),
+        updated_at: new Date(base + 56 * 60_000),
+      },
+      {
+        name: "solo-effort",
+        description: "Nothing in this description names its own author.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "priya@example.com",
+        published_by_name: "Priya Nair",
+        published_at: new Date(base + 57 * 60_000),
+        updated_at: new Date(base + 57 * 60_000),
       },
     ]);
   }, 60_000);
@@ -693,8 +876,11 @@ describe("Searching Skills (ticket 10)", () => {
     await stopTestContext(context, container);
   });
 
+  // Every seeded Skill has 0 installs — pinning sort_by=updated_at (instead
+  // of the installs-first default) is what makes these order assertions
+  // meaningful rather than an artifact of the tie-break.
   async function search(q: string, extraParams: Record<string, string> = {}): Promise<ApiPage> {
-    const params = new URLSearchParams({ q, ...extraParams });
+    const params = new URLSearchParams({ q, sort_by: "updated_at", sort_order: "desc", ...extraParams });
     const res = await context.app.request(`/api/skills?${params.toString()}`, {
       headers: { cookie: reader.cookie },
     });
@@ -733,23 +919,29 @@ describe("Searching Skills (ticket 10)", () => {
   it("returns the ordinary most-recent-first list for an empty search", async () => {
     const page = await search("");
     expect(page.page).toBe(1);
-    expect(page.total).toBe(57);
-    expect(page.items.length).toBe(50);
-    expect(page.items[0]?.name).toBe("async-await-helper");
+    expect(page.total).toBe(58);
+    expect(page.items.length).toBe(10);
+    expect(page.items[0]?.name).toBe("solo-effort");
   });
 
   it("paginates search results the same way the unfiltered list is", async () => {
-    const page1 = await search("widget");
+    const page1 = await search("widget", { page_size: "50" });
     expect(page1.page).toBe(1);
     expect(page1.page_size).toBe(50);
     expect(page1.total).toBe(51);
     expect(page1.items.length).toBe(50);
     expect(page1.items[0]?.name).toBe("widget-050");
 
-    const page2 = await search("widget", { page: "2" });
+    const page2 = await search("widget", { page_size: "50", page: "2" });
     expect(page2.page).toBe(2);
     expect(page2.items.length).toBe(1);
     expect(page2.items[0]?.name).toBe("widget-000");
+  });
+
+  it("matches a search term against only a Skill's publisher (ticket 23)", async () => {
+    const page = await search("priya");
+    expect(page.items.map((s) => s.name)).toEqual(["solo-effort"]);
+    expect(page.items[0]?.published_by_name).toBe("Priya Nair");
   });
 
   it("prefix-matches the term's last word, so a partial word finds it before it's fully typed", async () => {
@@ -842,6 +1034,39 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     const location = res.headers.get("location");
     expect(location).not.toBeNull();
     expect(decodeURIComponent(location ?? "")).toContain("skills/downloadable-skill.zip");
+  });
+
+  it("returns the Skill plus a url instead of redirecting, when asked for JSON", async () => {
+    const published = await publish(context, writer, "json-downloadable-skill", {
+      description: "Has an Artifact.",
+      body: "Body.\n",
+    });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
+    await context.storage.put("skills/json-downloadable-skill.zip", new Uint8Array([1]));
+
+    const res = await context.app.request(`/api/skills/${publishedSkill.id}/artifact`, {
+      headers: { cookie: reader.cookie, accept: "application/json" },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ApiSkill & { url: string; installs: number };
+    expect(body.id).toBe(publishedSkill.id);
+    expect(decodeURIComponent(body.url)).toContain("skills/json-downloadable-skill.zip");
+    // `installs` reflects the last refresh, not necessarily this request's own
+    // Install (ADR-0012) — the count itself is analytics.test.ts's concern.
+    expect(typeof body.installs).toBe("number");
+
+    // Records the same one Install the redirect representation does — not a
+    // second one — regardless of which representation was requested.
+    await context.app.request(`/api/skills/${publishedSkill.id}/artifact`, {
+      headers: { cookie: reader.cookie, accept: "application/json" },
+      redirect: "manual",
+    });
+    const events = await context.db
+      .select()
+      .from(skillInstallEvents)
+      .where(eq(skillInstallEvents.skill_id, publishedSkill.id));
+    expect(events.length).toBe(2);
   });
 
   it("refuses an unauthenticated request", async () => {

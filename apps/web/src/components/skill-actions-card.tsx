@@ -3,10 +3,9 @@ import { useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
 import { Button } from "@/components/ui/button";
-import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { skillArtifactUrl } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { useDownloadSkillArtifact } from "@/hooks/use-skills";
+import { apiErrorMessage } from "@/lib/api";
 
 /**
  * Download and, for those permitted, Edit tags and Delete — unchanged by
@@ -39,6 +38,7 @@ export function SkillActionsCard({
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editTagsOpen, setEditTagsOpen] = useState(false);
+  const downloadArtifact = useDownloadSkillArtifact();
 
   return (
     <Card>
@@ -46,9 +46,17 @@ export function SkillActionsCard({
         <CardTitle>Actions</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        <a href={skillArtifactUrl(id)} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-          Download
-        </a>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={downloadArtifact.isPending}
+          onClick={() => downloadArtifact.mutate({ id })}
+        >
+          {downloadArtifact.isPending ? "Downloading…" : "Download"}
+        </Button>
+        {downloadArtifact.isError && (
+          <p className="text-sm text-destructive">{apiErrorMessage(downloadArtifact.error)}</p>
+        )}
         {canEditTags && (
           <Button variant="outline" size="sm" onClick={() => setEditTagsOpen(true)}>
             Edit tags

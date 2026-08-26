@@ -1,14 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** A placeholder until the Registry actually counts installs — never a fabricated zero. */
-export function SkillAnalyticsCard() {
+/** How much a Skill has actually been used — a download today, and eventually a CLI install too. */
+export function SkillAnalyticsCard({ installs }: { installs: number }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Analytics</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-sm text-muted-foreground">Installs aren&apos;t tracked yet.</p>
+        <p className="text-sm text-muted-foreground">
+          {installs} {installs === 1 ? "install" : "installs"}
+        </p>
       </CardContent>
     </Card>
   );

@@ -14,6 +14,7 @@
     "@skill-registry/shared": "workspace:*",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.6.14",
+    "node-cron": "^4.6.0",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
     "postgres": "^3.4.5",

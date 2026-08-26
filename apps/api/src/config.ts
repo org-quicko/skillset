@@ -1,7 +1,11 @@
+import cron from "node-cron";
+
 export interface Config {
   port: number;
   databaseUrl: string;
   jwtSecret: string;
+  /** Cron expression governing how often `skill_analytics` is refreshed (ADR-0012). */
+  analyticsRefreshCron: string;
   storage: {
     bucket: string;
     region: string | undefined;
@@ -24,13 +28,22 @@ export interface Config {
  * overridable for tests.
  * @returns `Config`
  * @throws Error if `JWT_SECRET`, `DATABASE_URL`, or `STORAGE_BUCKET` is
- * missing, or if `PORT` is set to something other than a valid port number.
+ * missing, if `PORT` is set to something other than a valid port number, or
+ * if `ANALYTICS_REFRESH_CRON` is set to something `node-cron` cannot parse
+ * as a cron expression (ADR-0012).
  * @example
  * ```ts
  * const config = loadConfig();
  * ```
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const analyticsRefreshCron = env.ANALYTICS_REFRESH_CRON ?? "*/30 * * * * *";
+  if (!cron.validate(analyticsRefreshCron)) {
+    throw new Error(
+      `Invalid environment variable ANALYTICS_REFRESH_CRON: "${analyticsRefreshCron}" is not a valid cron expression.`,
+    );
+  }
+
   const jwtSecret = env.JWT_SECRET;
   if (!jwtSecret) {
     throw new Error(
@@ -61,6 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port,
     databaseUrl,
     jwtSecret,
+    analyticsRefreshCron,
     storage: {
       bucket,
       region: env.STORAGE_REGION,

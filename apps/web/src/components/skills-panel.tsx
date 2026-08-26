@@ -1,30 +1,68 @@
-import { roleMeets, type Role } from "@skill-registry/shared";
+import {
+  isSkillDirectorySortField,
+  isSkillDirectorySortOrder,
+  roleMeets,
+  type Role,
+  type SkillDirectorySortField,
+  type SkillDirectorySortOrder,
+} from "@skill-registry/shared";
 import { useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillList } from "@/components/skill-list";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useRouter } from "@/lib/use-router";
 
 const SKILL_PATH_PREFIX = "/skills/";
+const DEFAULT_SORT_BY: SkillDirectorySortField = "installs";
+const DEFAULT_SORT_ORDER: SkillDirectorySortOrder = "desc";
 
 function skillPath(name: string): string {
   return `${SKILL_PATH_PREFIX}${encodeURIComponent(name)}`;
 }
 
+/**
+ * Reads the Skill list's filter/sort state from the URL's own query string
+ * (ticket 23) rather than component state, so a specific search, Tag
+ * selection, and sort choice is bookmarkable and shareable. An unrecognised
+ * or absent `sort_by`/`sort_order` falls back to the default rather than
+ * being treated as an error — this is a read of an already-shareable link,
+ * not a form submission to validate.
+ */
+function filtersFromSearch(search: URLSearchParams): SkillDirectoryFilters {
+  const sortBy = search.get("sort_by");
+  const sortOrder = search.get("sort_order");
+  return {
+    q: search.get("q") ?? "",
+    tagIds: search.getAll("tag_id"),
+    sortBy: isSkillDirectorySortField(sortBy) ? sortBy : DEFAULT_SORT_BY,
+    sortOrder: isSkillDirectorySortOrder(sortOrder) ? sortOrder : DEFAULT_SORT_ORDER,
+  };
+}
+
+/** The inverse of `filtersFromSearch` — omits anything already at its default, so the ordinary unfiltered view's URL stays plain. */
+function searchFromFilters(filters: SkillDirectoryFilters): string {
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  for (const tagId of filters.tagIds) params.append("tag_id", tagId);
+  if (filters.sortBy !== DEFAULT_SORT_BY) params.set("sort_by", filters.sortBy);
+  if (filters.sortOrder !== DEFAULT_SORT_ORDER) params.set("sort_order", filters.sortOrder);
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
+}
+
 export function SkillsPanel({ role }: { role: Role }) {
-  const { pathname, navigate } = useRouter();
-  // Lifted above SkillList so switching to detail and back doesn't reset the
-  // reader to page 1 of the list, or clear whatever they were searching for.
-  const [page, setPage] = useState(1);
-  const [query, setQuery] = useState("");
+  const { pathname, search, navigate, replace } = useRouter();
   const [publishOpen, setPublishOpen] = useState(false);
 
-  // A new search term starts back on page 1 — the old page number rarely
-  // makes sense against a different, usually much shorter, result set.
-  function handleQueryChange(next: string) {
-    setQuery(next);
-    setPage(1);
+  const filters = filtersFromSearch(search);
+
+  // Replace, not navigate: every keystroke, Tag toggle, or sort click is a
+  // refinement of the same view, not a transition the back button should
+  // have to step back through one at a time.
+  function handleFiltersChange(next: SkillDirectoryFilters) {
+    replace(searchFromFilters(next));
   }
 
   if (pathname.startsWith(SKILL_PATH_PREFIX)) {
@@ -45,10 +83,8 @@ export function SkillsPanel({ role }: { role: Role }) {
     <>
       <SkillList
         canPublish={roleMeets(role, "writer")}
-        page={page}
-        onPageChange={setPage}
-        query={query}
-        onQueryChange={handleQueryChange}
+        filters={filters}
+        onFiltersChange={handleFiltersChange}
         onSelect={(name) => navigate(skillPath(name))}
         onPublish={() => setPublishOpen(true)}
       />

@@ -390,15 +390,43 @@
     "/skills": {
       "get": {
         "tags": ["skills"],
-        "summary": "List or search Skills",
-        "description": "Most recently published first. With `q`, results are full-text matched over name and description. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects.",
+        "summary": "List, search, filter, and sort Skills",
+        "description": "Reads from the `skill_directory` view (ticket 23, docs/data-model.md), not `skills` directly. Defaults to sorted by install count, descending. With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects.",
         "parameters": [
           {
             "name": "q",
             "in": "query",
             "required": false,
-            "description": "Full-text search phrase. Supports quoted phrases and `-exclusions`. Omitted or empty returns the ordinary list.",
+            "description": "Full-text search phrase, matched against name, description, and publisher. Supports quoted phrases and `-exclusions`. Omitted or empty returns the ordinary list.",
             "schema": { "type": "string" }
+          },
+          {
+            "name": "tag_id",
+            "in": "query",
+            "required": false,
+            "description": "Repeatable. Narrows to Skills carrying at least one of the given Tag ids (any-match). Omitted returns Skills regardless of Tags.",
+            "schema": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "description": "Governs ordering unconditionally, even with `q` set. Invalid values are rejected with a field-named validation error.",
+            "schema": { "type": "string", "enum": ["installs", "updated_at"], "default": "installs" }
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "description": "Invalid values are rejected with a field-named validation error.",
+            "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to [1, 100] rather than rejected.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }
           },
           { "$ref": "#/components/parameters/Page" }
         ],
@@ -413,16 +441,17 @@
                   "properties": {
                     "items": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/SkillSummary" }
+                      "items": { "$ref": "#/components/schemas/SkillDirectoryEntry" }
                     },
                     "page": { "type": "integer" },
-                    "page_size": { "type": "integer", "const": 50 },
+                    "page_size": { "type": "integer", "minimum": 1, "maximum": 100 },
                     "total": { "type": "integer" }
                   }
                 }
               }
             }
           },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
           "401": { "$ref": "#/components/responses/Unauthenticated" }
         }
       }
@@ -548,10 +577,42 @@
       "get": {
         "tags": ["skills"],
         "summary": "Retrieve a Skill's Artifact",
-        "description": "Authorises the request, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Any authenticated User may retrieve an Artifact. The response body is the zip, named after the Skill.",
+        "description": "Authorises the request, records one Install, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Any authenticated User may retrieve an Artifact. The response body is the zip, named after the Skill. A caller that sends `Accept: application/json` gets the Skill itself back instead alongside `url` to fetch the Artifact from, rather than a redirect; this is for a caller (the web app's own Download control) that needs to know the request succeeded before navigating there itself. Either representation records the same one Install. `installs` on that Skill reflects the last periodic refresh, not necessarily this request's own Install (ADR-0012).",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string", "enum": ["application/json"] },
+            "description": "Request the Skill-plus-url representation instead of the default redirect."
+          }
+        ],
         "responses": {
+          "200": {
+            "description": "The Skill, plus a presigned url to fetch the Artifact from — returned instead of redirecting when the request sent `Accept: application/json`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/Skill" },
+                    {
+                      "type": "object",
+                      "required": ["url"],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Short-lived presigned read URL for the Artifact"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "302": {
-            "description": "Redirect to the presigned location",
+            "description": "Redirect to the presigned location — the default representation",
             "headers": {
               "Location": {
                 "description": "Short-lived presigned read URL for the Artifact",
@@ -814,6 +875,38 @@
           "last_name": { "type": ["string", "null"] }
         }
       },
+      "SkillDirectoryEntry": {
+        "type": "object",
+        "description": "One row of `GET /skills` (ticket 23), sourced from the `skill_directory` view — deliberately not SkillSummary: `published_by_name` in place of the full Publisher object, and `updated_at` in place of `published_at`. `GET /skills/{id}` and `by-name/{name}` are unaffected and still return SkillSummary/Skill.",
+        "required": ["id", "name", "description", "published_by_name", "updated_at", "installs", "tags"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "description": { "type": "string", "maxLength": 1024 },
+          "published_by_name": {
+            "type": "string",
+            "description": "A display-name snapshot taken at publish time (docs/data-model.md) — does not update if that User later renames themselves."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this Skill was last published, republished, or otherwise changed — not when it was first published (`published_at`, only on the detail read)."
+          },
+          "installs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Same field, same lag caveat as SkillSummary.installs (ADR-0012)."
+          },
+          "tags": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Tag" }
+          }
+        }
+      },
       "SkillSummary": {
         "type": "object",
         "required": [
@@ -826,7 +919,8 @@
           "allowed_tools",
           "tags",
           "published_by",
-          "published_at"
+          "published_at",
+          "installs"
         ],
         "properties": {
           "id": {
@@ -864,7 +958,12 @@
             "description": "Registry-owned, never parsed from or written into SKILL.md (ADR-0008), and never set by publishing — see `PUT /skills/{id}/tags`. Each Tag is drawn from the registry-wide catalog (ADR-0011); empty until something attaches one."
           },
           "published_by": { "$ref": "#/components/schemas/Publisher" },
-          "published_at": { "type": "string", "format": "date-time" }
+          "published_at": { "type": "string", "format": "date-time" },
+          "installs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many times this Skill has been installed — a download today, and eventually a CLI install too. 0 until the first one is ever recorded, never null. Reflects the last periodic refresh of the underlying materialized view (ADR-0012), not necessarily every Install recorded so far — this can lag reality by a short interval."
+          }
         }
       },
       "Skill": {
