@@ -40,8 +40,9 @@ transferred, reassigned, or removed.
 _Avoid_: Owner, root, superuser
 
 **Registry**:
-The self-hosted service that holds Skills and the Users who may reach them. There is one
-Registry per deployment, serving one team.
+The self-hosted service that holds Skills. Reading a Skill needs no identity; publishing,
+deleting, and administration are restricted to the Users who hold the right role. There is
+one Registry per deployment, serving one team.
 _Avoid_: Server, hub, marketplace, repository
 
 **Artifact**:

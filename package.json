@@ -13,7 +13,7 @@
     "dev": "bun --filter @skill-registry/api dev",
     "prebuild": "bun run lint",
     "build": "bun --filter @skill-registry/web build",
-    "test": "bun run --filter '@skill-registry/shared' --filter '@skill-registry/api' test",
+    "test": "bun run --filter '@skill-registry/shared' --filter '@skill-registry/api' --filter '@skill-registry/cli' test",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint ."
   },

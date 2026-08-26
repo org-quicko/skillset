@@ -1,0 +1,27 @@
+{
+  "name": "@skill-registry/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "skillreg": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build ./src/cli.ts --outdir dist --target node --format esm --external commander --external zod --external yaml --external fflate",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "fflate": "^0.8.3",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@skill-registry/shared": "workspace:*",
+    "@types/bun": "^1.4.0",
+    "typescript": "^5.7.2"
+  }
+}
