@@ -13,3 +13,5 @@ export * from "./frontmatter.js";
 export * from "./artifact.js";
 export * from "./publish.js";
 export * from "./github.js";
+export * from "./extract.js";
+export * from "./agents/table.js";

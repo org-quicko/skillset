@@ -73,6 +73,33 @@ export async function registryFetch<T>(
   return schema.parse(await res.json());
 }
 
+/**
+ * Downloads a binary response (the Artifact) rather than parsing JSON — same auth and
+ * error handling as `registryFetch`. The server 302s to a presigned storage URL; `fetch`
+ * follows redirects by default, and strips `Authorization` on a cross-origin redirect
+ * (standard fetch/undici behaviour), so the presigned request never sees our Bearer Token.
+ */
+export async function downloadBinary(client: RegistryClient, path: string): Promise<Uint8Array> {
+  let res: Response;
+  try {
+    res = await client.fetch(new URL(`/api${path}`, client.registry), {
+      headers: client.token ? { authorization: `Bearer ${client.token}` } : {},
+    });
+  } catch (error) {
+    throw new RegistryUnreachableError(client.registry, error);
+  }
+
+  if (!res.ok) {
+    const parsed = ErrorResponseSchema.safeParse(await res.json().catch(() => null));
+    const error = parsed.success
+      ? parsed.data.error
+      : { code: "unknown_error", message: `Request failed with status ${res.status}.` };
+    throw new ApiError(res.status, error.code, error.message, error.field);
+  }
+
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 /** Uploads Artifact bytes straight to storage (ADR-0001) — never through the API, so no `/api` prefix and no auth header. */
 export async function uploadArtifact(
   fetchImpl: typeof fetch,

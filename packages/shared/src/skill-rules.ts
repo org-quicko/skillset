@@ -40,7 +40,12 @@ export type SkillRule =
   | "ambiguous_layout"
   | "too_many_entries"
   | "artifact_too_large"
-  | "uncompressed_too_large";
+  | "uncompressed_too_large"
+  | "corrupt_archive"
+  | "entry_path_traversal"
+  | "entry_absolute_path"
+  | "entry_null_byte"
+  | "entry_symlink";
 
 /**
  * Thrown when a Skill fails one of the shared validation rules. Carries the

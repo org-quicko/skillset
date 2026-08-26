@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { homedir } from "node:os";
+import { createInterface } from "node:readline/promises";
+import { runAdd } from "./commands/add.js";
 import { runLogin } from "./commands/login.js";
 import { runPublish } from "./commands/publish.js";
 import { runWhoami } from "./commands/whoami.js";
@@ -41,6 +44,40 @@ program
         { path },
       );
       console.log(`Published ${result.name} (${result.id}) at ${result.published_at}.`);
+    });
+  });
+
+program
+  .command("add")
+  .description("Download and install a Skill for one or more Agents.")
+  .argument("<name>", "The Skill's name")
+  .option("--agent <ids...>", "Agent(s) to install for (claude-code, codex, generic)")
+  .option("--scope <scope>", "Install scope: project or user")
+  .action(async (name: string, opts: { agent?: string[]; scope?: string }) => {
+    await handle(async () => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const reports = await runAdd(
+          {
+            fetch,
+            configPath: resolveConfigPath(process.env),
+            env: process.env,
+            cwd: process.cwd(),
+            homeDir: homedir(),
+            isTTY: process.stdin.isTTY === true,
+            write: (text) => process.stdout.write(text),
+            readLine: () => rl.question(""),
+          },
+          { name, agent: opts.agent, scope: opts.scope },
+        );
+        for (const report of reports) {
+          const modeLabel = report.mode === "canonical" ? "written" : report.mode === "symlink" ? "symlinked" : "copied";
+          const suffix = report.agents.length > 1 ? ` (serves: ${report.agents.join(", ")})` : "";
+          console.log(`${modeLabel} ${report.directory}${suffix}`);
+        }
+      } finally {
+        rl.close();
+      }
     });
   });
 
