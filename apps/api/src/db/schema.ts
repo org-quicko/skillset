@@ -66,6 +66,7 @@ export const tokens = pgTable(
     // apps/api/src/auth/token.ts for why this is SHA-256, not argon2id.
     token_hash: text("token_hash").notNull(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     last_used_at: timestamp("last_used_at", { withTimezone: true }),
   },
   (table) => ({
@@ -111,6 +112,8 @@ export const skills = pgTable(
     published_by: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
     published_by_email: text("published_by_email").notNull(),
     published_at: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     search: tsvector("search").generatedAlwaysAs(
       sql`to_tsvector('english', name || ' ' || coalesce(description, ''))`,
     ),
@@ -143,6 +146,7 @@ export const tags = pgTable(
     id: uuid("id").primaryKey().default(sql`uuidv7()`),
     name: text("name").notNull().unique(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     // The same rule the shared validation module applies, enforced where the
@@ -172,6 +176,8 @@ export const skillTags = pgTable(
     tag_id: uuid("tag_id")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.skill_id, table.tag_id] }),

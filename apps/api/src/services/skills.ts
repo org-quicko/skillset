@@ -423,6 +423,7 @@ export async function publishSkill(
         published_by: publisher.id,
         published_by_email: publisher.email,
         published_at,
+        updated_at: new Date(),
       },
     })
     .returning();

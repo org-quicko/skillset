@@ -84,7 +84,7 @@ async function resolveTokenUser(c: Context, deps: AuthDependencies): Promise<Use
   const [user] = await deps.db.select().from(users).where(eq(users.id, token.user_id)).limit(1);
   if (!user) return null;
 
-  await deps.db.update(tokens).set({ last_used_at: new Date() }).where(eq(tokens.id, token.id));
+  await deps.db.update(tokens).set({ last_used_at: new Date(), updated_at: new Date() }).where(eq(tokens.id, token.id));
   return user;
 }
 

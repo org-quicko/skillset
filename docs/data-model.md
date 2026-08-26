@@ -59,6 +59,7 @@ A Token a User mints for the CLI.
 | `name`         | `text`        | not null                                             |
 | `token_hash`   | `text`        | not null, unique — SHA-256 hex, see below            |
 | `created_at`   | `timestamptz` | not null, default `now()`                            |
+| `updated_at`   | `timestamptz` | not null, default `now()` — bumped alongside `last_used_at` |
 | `last_used_at` | `timestamptz` | null until first use                                 |
 
 Only the hash is stored — the secret is shown once at creation and is not recoverable.
@@ -95,6 +96,8 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 | `published_by`       | `uuid`        | null, references `users(id)` on delete set null         |
 | `published_by_email` | `text`        | not null                                               |
 | `published_at`       | `timestamptz` | not null, default `now()`                              |
+| `created_at`          | `timestamptz` | not null, default `now()` — set once, on first insert, never touched again |
+| `updated_at`          | `timestamptz` | not null, default `now()` — bumped on every republish  |
 | `search`             | `tsvector`    | generated always as stored, see below                  |
 
 `id` is the stable identity `GET`, `DELETE`, and the Artifact download route key a Skill by —
@@ -120,6 +123,14 @@ full-replace semantics `description` and `body` already have.
 
 **Tags** are not a column on this table at all — see `tags` and `skill_tags` below. No publish
 path (a fresh publish or a replace of an existing Skill) ever touches them (ADR-0008).
+
+**`created_at`/`updated_at` are generic bookkeeping, distinct from `published_at`.**
+Every table carries this pair; on `skills` it currently tracks the same events
+`published_at` already does (there is no way to change a Skill's row other than
+publishing it), so the two are redundant today — but `created_at` stays fixed across
+every republish while `published_at` doesn't, and a future non-publish mutation to this
+row would have somewhere generic to record itself without overloading a
+publish-specific field.
 
 **Publisher attribution is stored twice, on purpose.** `published_by` joins to the User for a
 current name while that User exists; `published_by_email` is a snapshot taken at publish time
@@ -158,6 +169,7 @@ The Tag catalog — registry-wide, not scoped to any one Skill (ADR-0011).
 | `id`         | `uuid`        | primary key, default `uuidv7()`                  |
 | `name`       | `text`        | not null, unique                                 |
 | `created_at` | `timestamptz` | not null, default `now()`                        |
+| `updated_at` | `timestamptz` | not null, default `now()` — bumped on rename      |
 
 `name` is always stored already lowercased and trimmed — the shared `validateTagName`
 normalises before this is ever written — so a plain unique index catches a collision without
@@ -173,18 +185,24 @@ Indexes: unique on `name`.
 
 ## `skill_tags`
 
-The many-to-many join between `skills` and `tags` (ADR-0011). No columns beyond the two ids —
-there is nothing else to say about one Skill carrying one Tag.
+The many-to-many join between `skills` and `tags` (ADR-0011).
 
-| Column     | Type   | Constraints                                          |
-| ---------- | ------ | ----------------------------------------------------- |
-| `skill_id` | `uuid` | not null, references `skills(id)` on delete cascade   |
-| `tag_id`   | `uuid` | not null, references `tags(id)` on delete cascade     |
+| Column       | Type          | Constraints                                          |
+| ------------ | ------------- | ----------------------------------------------------- |
+| `skill_id`   | `uuid`        | not null, references `skills(id)` on delete cascade   |
+| `tag_id`     | `uuid`        | not null, references `tags(id)` on delete cascade     |
+| `created_at` | `timestamptz` | not null, default `now()`                             |
+| `updated_at` | `timestamptz` | not null, default `now()`                             |
 
 Primary key on `(skill_id, tag_id)` — the pair is the row's identity, so a Skill can't carry
 the same Tag twice. Both sides cascade: deleting a Skill must not orphan its join rows, and —
 although no route deletes a Tag yet — a future one shouldn't have to remember to clean this
 table up too.
+
+`created_at`/`updated_at` always agree here in practice: a row is only ever inserted or
+deleted, never updated in place (`setSkillTags` deletes and re-inserts on every change
+rather than updating a row's `tag_id`), so `updated_at` never has a chance to diverge from
+`created_at`. Present anyway, for the same reason every other table carries the pair.
 
 `PUT /skills/{id}/tags` (a full replace) resolves every name in the request to a `tags` row —
 reusing an existing one or creating it — then deletes and re-inserts this Skill's rows in one

@@ -43,6 +43,13 @@
       "when": 1787725311004,
       "tag": "0005_flashy_revanche",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787731997618,
+      "tag": "0006_wonderful_captain_stacy",
+      "breakpoints": true
     }
   ]
 }

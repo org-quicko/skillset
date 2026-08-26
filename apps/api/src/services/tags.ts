@@ -165,7 +165,7 @@ export async function setSkillTags(
       const [row] = await tx
         .insert(tags)
         .values({ name })
-        .onConflictDoUpdate({ target: tags.name, set: { name } })
+        .onConflictDoUpdate({ target: tags.name, set: { name, updated_at: new Date() } })
         .returning({ id: tags.id, name: tags.name });
       if (!row) throw new Error("Upsert did not return the Tag.");
       resolvedTags.push(row);
@@ -212,7 +212,7 @@ export async function renameTag(deps: TagsServiceDependencies, id: string, rawNa
   try {
     [row] = await deps.db
       .update(tags)
-      .set({ name })
+      .set({ name, updated_at: new Date() })
       .where(eq(tags.id, id))
       .returning({ id: tags.id, name: tags.name });
   } catch (cause) {
