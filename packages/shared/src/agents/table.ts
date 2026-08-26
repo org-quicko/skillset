@@ -20,8 +20,13 @@ export interface AgentEntry {
   /** Relative to a project root. */
   projectSkillsDir: string;
   /**
-   * The Skill directory at "user" Scope: an absolute, POSIX-style path, honouring this
-   * Agent's own configuration-directory environment override where one exists.
+   * The Skill directory at "user" Scope.
+   *
+   * @param env - The process environment, read for this Agent's own
+   * configuration-directory override where it has one. A blank or whitespace-only value
+   * counts as unset.
+   * @param homeDir - The User's home directory, used when no override applies.
+   * @returns An absolute, POSIX-style path.
    */
   userSkillsDir(env: Record<string, string | undefined>, homeDir: string): string;
 }
@@ -72,6 +77,19 @@ export const AGENTS: readonly AgentEntry[] = [
   },
 ];
 
+/**
+ * Looks up one Agent's entry in {@link AGENTS}.
+ *
+ * @param id - The Agent to look up.
+ * @returns That Agent's table entry.
+ * @throws Error when `id` names no Agent in the table. Callers holding an unvalidated
+ * string should narrow it against `AGENTS` first rather than relying on this.
+ *
+ * @example
+ * ```ts
+ * getAgent("pi").projectSkillsDir; // ".pi/skills"
+ * ```
+ */
 export function getAgent(id: AgentId): AgentEntry {
   const agent = AGENTS.find((entry) => entry.id === id);
   if (!agent) throw new Error(`Unknown Agent: ${id}`);
@@ -85,16 +103,48 @@ export interface ResolveContext {
 }
 
 /**
- * The `generic` Agent's own directory *is* the canonical install location — its whole
- * purpose is to be the shared, convention-following spot every other selected Agent
- * either already reads from directly (when it resolves to the same path, e.g. `codex` at
- * "project" Scope) or gets symlinked to (docs/adr/0014).
+ * The directory `agentId` actually reads Skills from at `scope`.
+ *
+ * @param agentId - The Agent to resolve for.
+ * @param scope - "project" for a directory under `ctx.projectRoot`, "user" for the
+ * Agent's per-User configuration directory.
+ * @param ctx - The environment, home directory, and project root to resolve against.
+ * @returns A POSIX-style path — absolute at "user" Scope, and rooted at `ctx.projectRoot`
+ * at "project" Scope.
+ * @throws Error when `agentId` names no Agent in the table (via {@link getAgent}).
+ *
+ * @example
+ * ```ts
+ * resolveInstallDir("codex", "project", { env: {}, homeDir: "/home/dev", projectRoot: "/repo" });
+ * // -> "/repo/.agents/skills"
+ * ```
  */
 export function resolveInstallDir(agentId: AgentId, scope: Scope, ctx: ResolveContext): string {
   const agent = getAgent(agentId);
   return scope === "project" ? `${ctx.projectRoot}/${agent.projectSkillsDir}` : agent.userSkillsDir(ctx.env, ctx.homeDir);
 }
 
-export function canonicalInstallDir(scope: Scope, ctx: ResolveContext): string {
-  return resolveInstallDir("generic", scope, ctx);
+/**
+ * Every Agent that reads the same directory `agentId` resolves to, `agentId` included.
+ *
+ * One install can serve several Agents — `codex`, `github-copilot`, `opencode`, and
+ * `generic` all share `.agents/skills` at "project" Scope (ADR-0006) — and `add` names
+ * them so nobody runs the command again believing there is more to do.
+ *
+ * @param agentId - The Agent that was actually chosen.
+ * @param scope - The Scope the install is happening at.
+ * @param ctx - The environment, home directory, and project root to resolve against.
+ * @returns The sharing Agents' ids in table order; a single-element array when nothing
+ * else resolves there.
+ * @throws Error when `agentId` names no Agent in the table (via {@link getAgent}).
+ *
+ * @example
+ * ```ts
+ * agentsSharingInstallDir("codex", "project", ctx);
+ * // -> ["codex", "github-copilot", "opencode", "generic"]
+ * ```
+ */
+export function agentsSharingInstallDir(agentId: AgentId, scope: Scope, ctx: ResolveContext): AgentId[] {
+  const target = resolveInstallDir(agentId, scope, ctx);
+  return AGENTS.filter((entry) => resolveInstallDir(entry.id, scope, ctx) === target).map((entry) => entry.id);
 }

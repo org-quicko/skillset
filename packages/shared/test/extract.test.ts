@@ -2,8 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { zipSync, type Zippable } from "fflate";
 import {
   ARTIFACT_MAX_ENTRIES,
+  ARTIFACT_MAX_TRANSFER_BYTES,
   ARTIFACT_MAX_UNCOMPRESSED_BYTES,
-  planExtraction,
+  extractSkillFiles,
   SkillValidationError,
   type SkillRule,
 } from "../src/index.js";
@@ -21,7 +22,7 @@ function validSkillZip(extra: Zippable = {}): Uint8Array {
 /** The rule a zip breaks, or that it breaks none — one assertion shape for every case below. */
 function ruleFor(zipBytes: Uint8Array): SkillRule | "no error" {
   try {
-    planExtraction(zipBytes);
+    extractSkillFiles(zipBytes);
     return "no error";
   } catch (error) {
     if (error instanceof SkillValidationError) return error.rule;
@@ -30,22 +31,41 @@ function ruleFor(zipBytes: Uint8Array): SkillRule | "no error" {
 }
 
 /**
+ * Rewrites the uncompressed size a single-entry archive's central directory *declares*,
+ * leaving the compressed body alone — the shape of a zip bomb, whose header promises
+ * something the extractor must refuse before expanding it.
+ */
+function patchDeclaredSize(zipBytes: Uint8Array, declaredSize: number): Uint8Array {
+  const patched = new Uint8Array(zipBytes);
+  const view = new DataView(patched.buffer);
+  // Backward from the end: the central directory sits just before the EOCD record, so the
+  // last match is the real header rather than a coincidence inside the compressed body.
+  for (let offset = patched.length - 4; offset >= 0; offset--) {
+    if (view.getUint32(offset, true) === 0x02014b50) {
+      view.setUint32(offset + 24, declaredSize, true);
+      return patched;
+    }
+  }
+  throw new Error("No central directory header found to patch.");
+}
+
+/**
  * Seam — the extraction-safety pipeline (the only place a hostile Artifact is inspected
  * at all, since the API never does — ADR-0001; docs/adr/0014).
  */
-describe("planExtraction", () => {
+describe("extractSkillFiles", () => {
   it("extracts a valid archive", () => {
-    const files = planExtraction(validSkillZip());
+    const files = extractSkillFiles(validSkillZip());
     expect(files.map((f) => f.path)).toEqual(["SKILL.md"]);
   });
 
   it("drops directory-marker entries", () => {
-    const files = planExtraction(validSkillZip({ "references/": new Uint8Array(0) }));
+    const files = extractSkillFiles(validSkillZip({ "references/": new Uint8Array(0) }));
     expect(files.map((f) => f.path)).toEqual(["SKILL.md"]);
   });
 
   it("keeps ordinary supporting files", () => {
-    const files = planExtraction(validSkillZip({ "scripts/run.sh": encoder.encode("echo hi") }));
+    const files = extractSkillFiles(validSkillZip({ "scripts/run.sh": encoder.encode("echo hi") }));
     expect(files.map((f) => f.path).sort()).toEqual(["SKILL.md", "scripts/run.sh"]);
   });
 
@@ -101,8 +121,23 @@ describe("planExtraction", () => {
     );
   });
 
+  it("refuses an archive larger than the transfer limit without parsing it", () => {
+    expect(ruleFor(new Uint8Array(ARTIFACT_MAX_TRANSFER_BYTES + 1))).toBe("artifact_too_large");
+  });
+
+  it("refuses a bomb on its declared size, before decompressing anything", () => {
+    // A tiny body promising a huge expansion: only a check against the central directory
+    // catches this, since by the time the bytes exist the damage is done.
+    const bomb = patchDeclaredSize(validSkillZip(), ARTIFACT_MAX_UNCOMPRESSED_BYTES + 1);
+    expect(ruleFor(bomb)).toBe("uncompressed_too_large");
+  });
+
+  it("refuses a zip64 entry rather than guessing its size", () => {
+    expect(ruleFor(patchDeclaredSize(validSkillZip(), 0xffffffff))).toBe("unsupported_archive");
+  });
+
   it("tolerates a single wrapping directory", () => {
-    const files = planExtraction(
+    const files = extractSkillFiles(
       zip({
         "code-review/SKILL.md": encoder.encode("---\nname: code-review\ndescription: Reviews code.\n---\nBody.\n"),
         "code-review/scripts/run.sh": encoder.encode("echo hi"),

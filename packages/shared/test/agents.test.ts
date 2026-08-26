@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { AGENTS, canonicalInstallDir, resolveInstallDir, type AgentId, type Scope } from "../src/index.js";
+import { AGENTS, agentsSharingInstallDir, resolveInstallDir, type AgentId, type Scope } from "../src/index.js";
 
 const ctx = (env: Record<string, string | undefined> = {}) => ({ env, homeDir: "/home/dev", projectRoot: "/repo" });
 
@@ -16,12 +16,9 @@ describe("resolveInstallDir — project scope", () => {
     expect(new Set(dirs)).toEqual(new Set(["/repo/.agents/skills"]));
   });
 
-  it("claude-code and pi never coincide with the canonical directory", () => {
+  it("claude-code and pi have the project directory to themselves", () => {
     expect(resolveInstallDir("claude-code", "project", ctx())).toBe("/repo/.claude/skills");
     expect(resolveInstallDir("pi", "project", ctx())).toBe("/repo/.pi/skills");
-    const canonical = canonicalInstallDir("project", ctx());
-    expect(resolveInstallDir("claude-code", "project", ctx())).not.toBe(canonical);
-    expect(resolveInstallDir("pi", "project", ctx())).not.toBe(canonical);
   });
 });
 
@@ -64,11 +61,33 @@ describe("pi — the Agent whose two Scopes use different suffixes (ADR-0006)", 
   });
 });
 
-describe("canonicalInstallDir", () => {
-  const scopes: Scope[] = ["project", "user"];
-  for (const scope of scopes) {
-    it(`equals resolveInstallDir("generic", "${scope}", ...)`, () => {
-      expect(canonicalInstallDir(scope, ctx())).toBe(resolveInstallDir("generic", scope, ctx()));
-    });
-  }
+describe("agentsSharingInstallDir", () => {
+  it("names every Agent reading the project directory shared by three Agents plus generic", () => {
+    const sharing: AgentId[] = ["codex", "github-copilot", "opencode", "generic"];
+    for (const agent of sharing) {
+      expect(agentsSharingInstallDir(agent, "project", ctx())).toEqual(sharing);
+    }
+  });
+
+  it("names only the Agent itself when nothing else reads that directory", () => {
+    expect(agentsSharingInstallDir("claude-code", "project", ctx())).toEqual(["claude-code"]);
+    expect(agentsSharingInstallDir("pi", "project", ctx())).toEqual(["pi"]);
+  });
+
+  it("at user scope every Agent is alone, since no two resolve to the same directory", () => {
+    const scopes: Scope[] = ["user"];
+    for (const scope of scopes) {
+      for (const agent of AGENTS) {
+        expect(agentsSharingInstallDir(agent.id, scope, ctx())).toEqual([agent.id]);
+      }
+    }
+  });
+
+  it("follows an env override into a directory another Agent now shares", () => {
+    // Pointing claude-code's config directory at opencode's makes one install serve both —
+    // exactly the case the report exists to disclose.
+    const shared = ctx({ CLAUDE_CONFIG_DIR: "/home/dev/.config/opencode" });
+    expect(resolveInstallDir("claude-code", "user", shared)).toBe(resolveInstallDir("opencode", "user", shared));
+    expect(agentsSharingInstallDir("opencode", "user", shared)).toEqual(["claude-code", "opencode"]);
+  });
 });

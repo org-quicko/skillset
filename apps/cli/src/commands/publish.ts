@@ -1,13 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
-import { buildSkillBundle, isExcludedPath, SkillPublishedSchema, SkillValidationError, type SkillFile } from "@skill-registry/shared";
-import { NOT_LOGGED_IN_MESSAGE, readConfig, resolveCredentials } from "../config.js";
-import { registryFetch, uploadArtifact, type RegistryClient } from "../http.js";
+import { buildSkillBundle, isExcludedPath, SkillPublishedSchema, type SkillFile } from "@skill-registry/shared";
+import { rethrowValidationError } from "../errors.js";
+import { ApiError, registryFetch, uploadArtifact } from "../http.js";
+import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 
-export interface PublishDeps {
-  fetch: typeof fetch;
-  configPath: string;
-  env: NodeJS.ProcessEnv;
+export interface PublishDeps extends SessionDeps {
   cwd: string;
 }
 
@@ -47,10 +45,28 @@ async function walkSkillDirectory(root: string, dir: string = root): Promise<Ski
 }
 
 /**
- * Publishes the single Skill rooted at `options.path` (or `deps.cwd`):
- * validates it locally with the same rules the API applies (no network call
- * on failure), then creates the row and uploads the Artifact directly to
- * storage (ADR-0001).
+ * Publishes the single Skill rooted at a directory holding a `SKILL.md`.
+ *
+ * @param deps - The fetch implementation, config-file path, environment, and the directory
+ * a relative `options.path` is resolved against.
+ * @param options - Where the Skill lives; defaults to `deps.cwd`.
+ * @returns The published Skill's name, id, and publish timestamp.
+ * @throws Error naming the rule when the Skill fails the local check — thrown before the
+ * Registry is contacted at all.
+ * @throws Error explaining how to authenticate when no Registry and Token are configured.
+ * @throws Error about permissions when the Registry answers 403, so a reader's Token is
+ * refused with a reason rather than a generic failure; and about the Token itself on 401.
+ * @throws ApiError for any other refusal, and `RegistryUnreachableError` when neither the
+ * Registry nor storage can be reached.
+ *
+ * @remarks
+ * The Skill is validated locally with the same shared rules the API applies, then the row
+ * is created and the Artifact uploaded straight to storage (ADR-0001).
+ *
+ * @example
+ * ```ts
+ * const { name, id } = await runPublish(deps, { path: "./skills/code-review" });
+ * ```
  */
 export async function runPublish(deps: PublishDeps, options: PublishOptions): Promise<PublishResult> {
   const targetPath = options.path ? resolve(deps.cwd, options.path) : deps.cwd;
@@ -59,28 +75,33 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
   try {
     bundle = buildSkillBundle(await walkSkillDirectory(targetPath));
   } catch (error) {
-    if (error instanceof SkillValidationError) {
-      throw new Error(`${error.rule}: ${error.message}${error.field ? ` (${error.field})` : ""}`);
+    rethrowValidationError(error);
+  }
+
+  const client = await openAuthenticatedClient(deps);
+
+  let published;
+  try {
+    published = await registryFetch(client, `/skills/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
+      method: "PUT",
+      body: JSON.stringify({
+        description: bundle.description,
+        body: bundle.body,
+        license: bundle.license,
+        compatibility: bundle.compatibility,
+        metadata: bundle.metadata,
+        allowed_tools: bundle.allowed_tools,
+      }),
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      throw new Error("This Token is not allowed to publish — publishing needs the writer role or higher.");
+    }
+    if (error instanceof ApiError && error.status === 401) {
+      throw new Error("Token rejected — mint a new one from the web interface.");
     }
     throw error;
   }
-
-  const fileConfig = await readConfig(deps.configPath);
-  const credentials = resolveCredentials(deps.env, fileConfig);
-  if (!credentials) throw new Error(NOT_LOGGED_IN_MESSAGE);
-
-  const client: RegistryClient = { fetch: deps.fetch, registry: credentials.registry, token: credentials.token };
-  const published = await registryFetch(client, `/skills/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
-    method: "PUT",
-    body: JSON.stringify({
-      description: bundle.description,
-      body: bundle.body,
-      license: bundle.license,
-      compatibility: bundle.compatibility,
-      metadata: bundle.metadata,
-      allowed_tools: bundle.allowed_tools,
-    }),
-  });
 
   await uploadArtifact(deps.fetch, published.upload, bundle.artifact);
 

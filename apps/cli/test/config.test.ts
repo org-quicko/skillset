@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readConfig, resolveConfigPath, resolveCredentials, writeConfig } from "../src/config.js";
+import { readConfig, resolveConfigPath, resolveCredentials, resolveRegistryAccess, writeConfig } from "../src/config.js";
 
 describe("resolveConfigPath", () => {
   it("prefers SKILLREG_CONFIG_PATH over everything else", () => {
@@ -89,5 +89,26 @@ describe("resolveCredentials", () => {
   it("returns null when neither source has both pieces", () => {
     expect(resolveCredentials({}, null)).toBeNull();
     expect(resolveCredentials({ SKILLREG_REGISTRY: "https://env.example" }, null)).toBeNull();
+  });
+});
+
+describe("resolveRegistryAccess", () => {
+  it("needs only a Registry, since reads need no Token (ADR-0013)", () => {
+    expect(resolveRegistryAccess({ SKILLREG_REGISTRY: "https://env.example" }, null)).toEqual({
+      registry: "https://env.example",
+      token: undefined,
+    });
+  });
+
+  it("still carries a Token when one is configured", () => {
+    expect(resolveRegistryAccess({}, { registry: "https://file.example", token: "file-token" })).toEqual({
+      registry: "https://file.example",
+      token: "file-token",
+    });
+  });
+
+  it("returns null only when no Registry is known at all", () => {
+    expect(resolveRegistryAccess({}, null)).toBeNull();
+    expect(resolveRegistryAccess({ SKILLREG_TOKEN: "orphan-token" }, null)).toBeNull();
   });
 });

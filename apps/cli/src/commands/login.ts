@@ -1,4 +1,4 @@
-import { UserSchema } from "@skill-registry/shared";
+import { UserSchema, type Role } from "@skill-registry/shared";
 import { writeConfig, type Config } from "../config.js";
 import { ApiError, registryFetch, type RegistryClient } from "../http.js";
 
@@ -15,15 +15,25 @@ export interface LoginOptions {
 export interface LoginResult {
   registry: string;
   email: string;
-  role: string;
+  role: Role;
 }
 
 /**
- * Confirms `options.token` is accepted by `options.registry`, then stores
- * both in the config file. A rejected credential (401) leaves the config
- * file untouched; an unreachable registry surfaces as a distinct error
- * (`RegistryUnreachableError`, thrown by `registryFetch`) so a wrong URL is
- * never mistaken for a revoked Token (story 44).
+ * Confirms a Token is accepted by a Registry, then stores both in the config file.
+ *
+ * @param deps - The fetch implementation and where the config file lives.
+ * @param options - The Registry's URL and the Token minted from the web interface.
+ * @returns The Registry, and the email and role of the User the Token belongs to.
+ * @throws Error saying the Token was rejected when the Registry answers 401 — the config
+ * file is left untouched, so a bad Token never displaces a working one.
+ * @throws RegistryUnreachableError when the Registry cannot be reached at all, so a wrong
+ * URL is never mistaken for a revoked Token (story 44).
+ * @throws ApiError for any other refusal from the Registry.
+ *
+ * @example
+ * ```ts
+ * const { email, role } = await runLogin(deps, { registry: "https://registry.example", token });
+ * ```
  */
 export async function runLogin(deps: LoginDeps, options: LoginOptions): Promise<LoginResult> {
   const client: RegistryClient = { fetch: deps.fetch, registry: options.registry, token: options.token };

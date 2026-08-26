@@ -18,7 +18,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["apps/api/**/*.ts", "packages/shared/**/*.ts"],
+    files: ["apps/api/**/*.ts", "apps/cli/**/*.ts", "packages/shared/**/*.ts"],
     plugins: { tsdoc },
     rules: {
       "@typescript-eslint/no-unused-vars": unusedVarsRule,

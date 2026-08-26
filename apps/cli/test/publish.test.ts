@@ -111,7 +111,7 @@ describe("runPublish", () => {
     }
   });
 
-  it("surfaces the server's permission message for a reader's Token", async () => {
+  it("refuses a reader's Token with a message about permissions, not a generic failure", async () => {
     const skillDir = await makeSkillDir();
     const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
     try {
@@ -123,7 +123,7 @@ describe("runPublish", () => {
       );
 
       await expect(runPublish({ fetch: fetchImpl, configPath, env: {}, cwd: skillDir }, {})).rejects.toThrow(
-        /Your role \(reader\) does not allow this\./,
+        /not allowed to publish — publishing needs the writer role or higher/,
       );
     } finally {
       await rm(skillDir, { recursive: true, force: true });

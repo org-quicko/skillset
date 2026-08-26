@@ -42,6 +42,7 @@ export type SkillRule =
   | "artifact_too_large"
   | "uncompressed_too_large"
   | "corrupt_archive"
+  | "unsupported_archive"
   | "entry_path_traversal"
   | "entry_absolute_path"
   | "entry_null_byte"

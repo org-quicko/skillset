@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
-import { runAdd } from "./commands/add.js";
+import { AGENT_IDS, runAdd } from "./commands/add.js";
 import { runLogin } from "./commands/login.js";
 import { runPublish } from "./commands/publish.js";
 import { runWhoami } from "./commands/whoami.js";
@@ -17,7 +17,7 @@ program
   .requiredOption("--registry <url>", "The Registry's URL")
   .requiredOption("--token <secret>", "A Token minted from the web interface")
   .action(async (opts: { registry: string; token: string }) => {
-    await handle(async () => {
+    await reportErrorsAndExit(async () => {
       const result = await runLogin({ fetch, configPath: resolveConfigPath(process.env) }, opts);
       console.log(`Logged in to ${result.registry} as ${result.email} (${result.role}).`);
     });
@@ -27,7 +27,7 @@ program
   .command("whoami")
   .description("Show which Registry the CLI is authenticated against and as whom.")
   .action(async () => {
-    await handle(async () => {
+    await reportErrorsAndExit(async () => {
       const result = await runWhoami({ fetch, configPath: resolveConfigPath(process.env), env: process.env });
       console.log(`${result.registry} — ${result.email} (${result.role})`);
     });
@@ -38,7 +38,7 @@ program
   .description("Publish the Skill at [path] (defaults to the current directory).")
   .argument("[path]", "Path to the Skill's directory")
   .action(async (path: string | undefined) => {
-    await handle(async () => {
+    await reportErrorsAndExit(async () => {
       const result = await runPublish(
         { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd() },
         { path },
@@ -49,15 +49,15 @@ program
 
 program
   .command("add")
-  .description("Download and install a Skill for one or more Agents.")
+  .description("Download and install a Skill for a coding Agent.")
   .argument("<name>", "The Skill's name")
-  .option("--agent <ids...>", "Agent(s) to install for (claude-code, codex, generic)")
+  .option("--agent <id>", `Agent to install for (${AGENT_IDS.join(", ")})`)
   .option("--scope <scope>", "Install scope: project or user")
-  .action(async (name: string, opts: { agent?: string[]; scope?: string }) => {
-    await handle(async () => {
+  .action(async (name: string, opts: { agent?: string; scope?: string }) => {
+    await reportErrorsAndExit(async () => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
-        const reports = await runAdd(
+        const report = await runAdd(
           {
             fetch,
             configPath: resolveConfigPath(process.env),
@@ -70,11 +70,10 @@ program
           },
           { name, agent: opts.agent, scope: opts.scope },
         );
-        for (const report of reports) {
-          const modeLabel = report.mode === "canonical" ? "written" : report.mode === "symlink" ? "symlinked" : "copied";
-          const suffix = report.agents.length > 1 ? ` (serves: ${report.agents.join(", ")})` : "";
-          console.log(`${modeLabel} ${report.directory}${suffix}`);
-        }
+        // Naming every Agent that reads the directory — not just the chosen one — is the
+        // point: nobody should run this again believing there is more to do (ADR-0006).
+        const suffix = report.agents.length > 1 ? ` (serves: ${report.agents.join(", ")})` : "";
+        console.log(`Installed ${report.directory}${suffix}`);
       } finally {
         rl.close();
       }
@@ -82,7 +81,7 @@ program
   });
 
 /** Every command's action funnels through here: a thrown Error becomes a one-line message and exit code 1, never a stack trace. */
-async function handle(action: () => Promise<void>): Promise<void> {
+async function reportErrorsAndExit(action: () => Promise<void>): Promise<void> {
   try {
     await action();
   } catch (error) {
