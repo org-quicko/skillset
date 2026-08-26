@@ -26,11 +26,22 @@ export interface SkillRouteDependencies extends AuthDependencies, SkillsServiceD
  *
  * @param app - The Hono app to register the routes on.
  * @param deps - The auth, Skills-service, and Tags-service dependencies the routes need.
+ *
+ * @remarks
+ * The reads are unauthenticated and the writes are role-gated (ADR-0013).
+ * `deps` still carries the auth dependencies because publish, delete, and Tag
+ * replacement need them.
  */
 export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: SkillRouteDependencies): void {
+  // The four GET routes below carry no `requireAuth`: listing, searching,
+  // viewing a Skill, and downloading its Artifact are open to anyone who can
+  // reach the Registry (ADR-0013). Publish, delete, and Tag replacement stay
+  // role-gated exactly as before. None of the four reads the User row, so
+  // there is nothing for the middleware to supply them.
+  //
   // Tag ids, sort, and page size are ticket 23's additions — see
   // `listSkills`'s own docs for validation and defaulting.
-  app.get("/skills", requireAuth(deps), async (c) => {
+  app.get("/skills", async (c) => {
     return c.json(
       SkillDirectoryPageSchema.parse(
         await listSkills(deps, {
@@ -49,11 +60,11 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
   // the web's only way to resolve `/skills/<name>` to an id with nothing
   // already cached (getSkillByName's docs explain why this isn't full-text
   // search).
-  app.get("/skills/by-name/:name", requireAuth(deps), async (c) => {
+  app.get("/skills/by-name/:name", async (c) => {
     return c.json(SkillSchema.parse(await getSkillByName(deps, c.req.param("name"))));
   });
 
-  app.get("/skills/:id", requireAuth(deps), async (c) => {
+  app.get("/skills/:id", async (c) => {
     return c.json(SkillSchema.parse(await getSkill(deps, c.req.param("id"))));
   });
 
@@ -93,7 +104,7 @@ export function registerSkillsRoutes(app: Hono<{ Variables: AuthVariables }>, de
   // presentation only. `installs` on that Skill reflects the last
   // `refreshInstallCounts` run, not necessarily this request's own Install
   // (ADR-0012), the same lag every other read of it has.
-  app.get("/skills/:id/artifact", requireAuth(deps), async (c) => {
+  app.get("/skills/:id/artifact", async (c) => {
     const id = c.req.param("id");
     const url = await getArtifactDownloadUrl(deps, id);
     if (c.req.header("accept")?.includes("application/json")) {
