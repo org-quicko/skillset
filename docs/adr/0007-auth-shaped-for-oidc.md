@@ -1,5 +1,11 @@
 # Auth Shaped for OIDC, Identities Keyed by Subject
 
+> **Partly superseded by ADR-0015.** Identities are keyed by verified email, not by the
+> provider's subject claim, and there is no `user_identities` table — see ADR-0015 for why
+> the divergence from listmonk argued below was reversed, and what it costs. The rest of this
+> ADR stands: the nullable password, the session issuer taking a resolved User, and the
+> handshake shape to copy.
+
 OIDC is coming, and the first provider will be Google Workspace. We are not building it now, but
 three properties of the auth layer are cheap today and expensive to retrofit, so they are settled
 now: a password is optional on a User, issuing a session takes an already-resolved User rather than

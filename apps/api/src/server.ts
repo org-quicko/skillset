@@ -29,7 +29,15 @@ async function main() {
   const webDist = join(import.meta.dir, "../../web/dist");
   const webRoot = (await Bun.file(join(webDist, "index.html")).exists()) ? webDist : undefined;
 
-  const app = createApp({ sql, db, storage, webRoot, jwtSecret: config.jwtSecret, logger });
+  const app = createApp({
+    sql,
+    db,
+    storage,
+    webRoot,
+    jwtSecret: config.jwtSecret,
+    publicUrl: config.publicUrl,
+    logger,
+  });
 
   // Only wired here, never inside createApp — a test app built via
   // startTestContext() must never start a real background timer (ADR-0012);

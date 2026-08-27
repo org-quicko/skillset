@@ -6,6 +6,7 @@ import type { Database } from "./db/client.js";
 import { registerErrorHandler } from "./http/errors.js";
 import type { Logger } from "./logger.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerIdentityProviderRoutes } from "./routes/identity-providers.js";
 import { registerSetupRoutes } from "./routes/setup.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
 import { registerTagsRoutes } from "./routes/tags.js";
@@ -16,6 +17,8 @@ export interface AppDependencies {
   sql: postgres.Sql;
   db: Database;
   jwtSecret: string;
+  /** Absolute base URL this Registry is reached at; only an Identity Provider's `redirect_uri` needs it. */
+  publicUrl?: string;
   storage: StorageAdapter;
   logger: Logger;
   /** Absolute path to the built web interface's static assets, if any. */
@@ -52,6 +55,7 @@ export function createApp(deps: AppDependencies): Hono {
 
   registerSetupRoutes(api, deps);
   registerAuthRoutes(api, deps);
+  registerIdentityProviderRoutes(api, deps);
   registerUsersRoutes(api, deps);
   registerSkillsRoutes(api, deps);
   registerTagsRoutes(api, deps);

@@ -64,6 +64,13 @@
       "when": 1787743713084,
       "tag": "0008_panoramic_puppet_master",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787830554971,
+      "tag": "0009_rainy_bucky",
+      "breakpoints": true
     }
   ]
 }

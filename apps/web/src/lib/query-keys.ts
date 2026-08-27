@@ -62,6 +62,17 @@ export function usersQueryKey(page: number) {
   return [...usersListQueryKey, page] as const;
 }
 
+/** Every configured Identity Provider — an Admin's view, including disabled ones. */
+export const identityProvidersQueryKey = ["identity-providers"] as const;
+
+/**
+ * The Identity Providers the login page offers. A separate key from
+ * {@link identityProvidersQueryKey} because it is a different resource, not a
+ * filtered view of one: it is served unauthenticated, carries only what a
+ * button needs, and is read by visitors who have no session at all.
+ */
+export const loginProvidersQueryKey = ["auth", "providers"] as const;
+
 /**
  * Ends a session in the query cache: every other cached resource is
  * discarded, and the identity query is set to `null` directly rather than

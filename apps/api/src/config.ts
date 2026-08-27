@@ -4,6 +4,12 @@ export interface Config {
   port: number;
   databaseUrl: string;
   jwtSecret: string;
+  /**
+   * Absolute base URL this Registry is reached at, used to build the
+   * `redirect_uri` a login is returned to. Optional: only an Identity
+   * Provider needs it, so an instance with none configured is unaffected.
+   */
+  publicUrl: string | undefined;
   /** Cron expression governing how often `skill_analytics` is refreshed (ADR-0012). */
   analyticsRefreshCron: string;
   storage: {
@@ -28,9 +34,10 @@ export interface Config {
  * overridable for tests.
  * @returns `Config`
  * @throws Error if `JWT_SECRET`, `DATABASE_URL`, or `STORAGE_BUCKET` is
- * missing, if `PORT` is set to something other than a valid port number, or
- * if `ANALYTICS_REFRESH_CRON` is set to something `node-cron` cannot parse
- * as a cron expression (ADR-0012).
+ * missing, if `PORT` is set to something other than a valid port number, if
+ * `PUBLIC_URL` is set to something that is not an absolute http(s) URL, or if
+ * `ANALYTICS_REFRESH_CRON` is set to something `node-cron` cannot parse as a
+ * cron expression (ADR-0012).
  * @example
  * ```ts
  * const config = loadConfig();
@@ -64,6 +71,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error("Missing required environment variable STORAGE_BUCKET.");
   }
 
+  // Validated at startup rather than where a login uses it, so a typo
+  // surfaces on boot instead of halfway through someone's first sign-in.
+  const publicUrl = env.PUBLIC_URL?.replace(/\/+$/, "");
+  if (publicUrl !== undefined && (!URL.canParse(publicUrl) || !/^https?:$/.test(new URL(publicUrl).protocol))) {
+    throw new Error(`Invalid environment variable PUBLIC_URL: "${publicUrl}" is not an absolute http(s) URL.`);
+  }
+
   const rawPort = env.PORT ?? "3000";
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -74,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port,
     databaseUrl,
     jwtSecret,
+    publicUrl,
     analyticsRefreshCron,
     storage: {
       bucket,

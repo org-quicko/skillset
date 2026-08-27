@@ -12,7 +12,11 @@
     { "name": "auth", "description": "Logging in and out" },
     { "name": "users", "description": "Users, their own details, and their Tokens" },
     { "name": "skills", "description": "Publishing, reading, searching, and retrieving Skills" },
-    { "name": "tags", "description": "The Tag catalog: listing it, and renaming a Tag" }
+    { "name": "tags", "description": "The Tag catalog: listing it, and renaming a Tag" },
+    {
+      "name": "identity-providers",
+      "description": "Configuring the Identity Providers a Registry offers on its login page (ADR-0015)"
+    }
   ],
   "paths": {
     "/setup": {
@@ -119,6 +123,72 @@
         "responses": {
           "204": { "description": "Session ended" },
           "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/auth/providers": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "List the Identity Providers the login page offers",
+        "description": "Enabled Providers only, and only the fields a login button needs. Unauthenticated, as it must be — it is read by visitors who have no session (ADR-0013). An instance with none configured returns an empty list, and its login page is exactly what it was before.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The enabled Identity Providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/PublicIdentityProvider" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/providers/{slug}/start": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Begin a login through an Identity Provider",
+        "description": "Redirects to the provider's authorization endpoint and sets a short-lived `SameSite=Lax` cookie holding this login's nonce, the Provider it was begun against, and where to land afterwards. That cookie — not the `state` travelling through the provider — is what the callback trusts. `Lax` rather than `Strict` because the callback arrives as a top-level navigation from another origin, which a `Strict` cookie would not be sent with.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "description": "The Provider to sign in through. Must be enabled.",
+            "schema": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" }
+          },
+          {
+            "name": "destination",
+            "in": "query",
+            "required": false,
+            "description": "Where to land after signing in. Narrowed to a path within this Registry — anything else, including a protocol-relative value, becomes `/`.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "302": { "$ref": "#/components/responses/ExternalLoginRedirect" }
+        }
+      }
+    },
+    "/auth/callback": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Complete a login an Identity Provider has returned",
+        "description": "One callback path for every Provider, so a deployment registers a single redirect URI per provider console. Which Provider a response belongs to is carried in `state` and checked against the flow cookie before a token is exchanged. Then the ID token's nonce must match the cookie's, the email claim must be verified, and the organisation claim (`hd` for Google, `tid` for Entra) must equal the Provider's permitted one — matched on the claim, never on the email address's suffix. A verified email matching an existing User signs into them; one matching none creates a reader with no password.",
+        "security": [],
+        "parameters": [
+          { "name": "code", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": { "$ref": "#/components/responses/ExternalLoginRedirect" }
         }
       }
     },
@@ -743,6 +813,118 @@
           }
         }
       }
+    },
+    "/identity-providers": {
+      "get": {
+        "tags": ["identity-providers"],
+        "summary": "List every configured Identity Provider",
+        "description": "Requires at least the admin role. Includes disabled Providers, and never includes a client secret.",
+        "responses": {
+          "200": {
+            "description": "Every configured Identity Provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/IdentityProvider" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      },
+      "post": {
+        "tags": ["identity-providers"],
+        "summary": "Configure an Identity Provider",
+        "description": "Requires at least the admin role. A Provider may be created enabled, but only with a permitted domain or tenant set — with just-in-time provisioning that gate is the only control on who gets an account (ADR-0015).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slug", "kind", "display_name", "issuer_url", "client_id", "client_secret"],
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "Immutable after creation."
+                  },
+                  "kind": { "type": "string", "enum": ["google", "microsoft"] },
+                  "display_name": { "type": "string", "minLength": 1 },
+                  "issuer_url": { "type": "string", "format": "uri" },
+                  "client_id": { "type": "string", "minLength": 1 },
+                  "client_secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Stored as given, and never returned by any response."
+                  },
+                  "permitted_domain": { "type": ["string", "null"] },
+                  "enabled": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The configured Identity Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IdentityProvider" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "409": {
+            "description": "Another Identity Provider already holds that slug",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/identity-providers/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/IdentityProviderId" }],
+      "patch": {
+        "tags": ["identity-providers"],
+        "summary": "Change an Identity Provider's configuration",
+        "description": "Requires at least the admin role, and is also how a Provider is enabled and disabled. `slug` and `kind` cannot be changed: the slug is what a login carries back in `state`, and the kind decides which claim gates the domain, so altering either would silently repoint a live configuration rather than create a new one. Omitting `client_secret` leaves the stored one untouched, which is what lets a Provider be edited without its secret ever being read back.\n\nThere is deliberately no delete route. Disabling is how a Provider is taken out of service — deleting one would lock out everyone who signs in through it over a mistyped click.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "display_name": { "type": "string", "minLength": 1 },
+                  "issuer_url": { "type": "string", "format": "uri" },
+                  "client_id": { "type": "string", "minLength": 1 },
+                  "client_secret": { "type": "string", "minLength": 1 },
+                  "permitted_domain": { "type": ["string", "null"] },
+                  "enabled": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Identity Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IdentityProvider" } } }
+          },
+          "400": {
+            "description": "Invalid, or the result would be an enabled Provider with no permitted domain or tenant (`provider_ungated`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": { "$ref": "#/components/responses/IdentityProviderNotFound" }
+        }
+      }
     }
   },
   "components": {
@@ -797,9 +979,26 @@
         "required": true,
         "description": "The Tag's id.",
         "schema": { "type": "string", "format": "uuid" }
+      },
+      "IdentityProviderId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The Identity Provider's id.",
+        "schema": { "type": "string", "format": "uuid" }
       }
     },
     "responses": {
+      "ExternalLoginRedirect": {
+        "description": "A redirect. On success, to the post-login destination with a session cookie set; on any failure, to `/login?error=…` with no session issued. Failures are deliberately not distinguished from one another — the person at the other end can act no differently either way, and naming the check that failed would tell an attacker which one they tripped. The reason reaches the logs.",
+        "headers": {
+          "Location": { "schema": { "type": "string" } }
+        }
+      },
+      "IdentityProviderNotFound": {
+        "description": "No Identity Provider by that id",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
       "Unauthenticated": {
         "description": "No valid session or Token. The web interface treats this as an expired session, discards cached state, and returns to login.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
@@ -1033,6 +1232,58 @@
             "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
             "description": "Always stored already lowercased and trimmed."
           }
+        }
+      },
+      "PublicIdentityProvider": {
+        "type": "object",
+        "description": "What an unauthenticated visitor sees on the login page: enough to draw a button and start a flow, and nothing else. Must never grow a field that could carry a credential.",
+        "required": ["slug", "kind", "display_name"],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+            "description": "Immutable, and what a login carries back in `state`."
+          },
+          "kind": { "type": "string", "enum": ["google", "microsoft"] },
+          "display_name": { "type": "string", "description": "Shown on the login page as \"Continue with …\"." }
+        }
+      },
+      "IdentityProvider": {
+        "type": "object",
+        "description": "An Admin's view of a configured Identity Provider. `client_secret` is deliberately absent from this and every other response: it is written and never read back, so no response can leak it, not even to the Admin who set it.",
+        "required": [
+          "id",
+          "slug",
+          "kind",
+          "display_name",
+          "issuer_url",
+          "client_id",
+          "permitted_domain",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" },
+          "kind": { "type": "string", "enum": ["google", "microsoft"] },
+          "display_name": { "type": "string" },
+          "issuer_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The provider's Issuer Identifier, not the path to its discovery document. Discovery runs against it, and every ID token's `iss` is validated to match — pointing it at the document itself would silently disable that check."
+          },
+          "client_id": { "type": "string" },
+          "permitted_domain": {
+            "type": ["string", "null"],
+            "description": "The Workspace domain (Google `hd`) or tenant (Entra `tid`) allowed to sign in, matched on the claim rather than on the email address's suffix. With just-in-time provisioning this is the only control on who gets an account, so a Provider cannot be enabled without it."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the login page offers it and logins through it are accepted. Disabling is how a Provider is taken out of service; there is no delete."
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
         }
       },
       "Error": {

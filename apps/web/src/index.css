@@ -119,6 +119,18 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Scrolls, but draws no scrollbar. For a panel whose scrolling is already
+   obvious from its content being cut off — a scrollbar there is chrome, not a
+   cue. Never use it where the fact that a region scrolls at all would come as
+   a surprise. */
+@utility scrollbar-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

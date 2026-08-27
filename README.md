@@ -18,6 +18,18 @@ built web interface from the same origin at `http://localhost:3000`.
 See [`.env.example`](.env.example) for the full list of environment variables. The app
 refuses to start if `JWT_SECRET` or `DATABASE_URL` is missing.
 
+### Logging in through Google Workspace or Microsoft Entra
+
+Set `PUBLIC_URL` to the address the Registry is reached at, then add an Identity
+Provider under **Settings → Login** as an admin. Register the redirect URI in the
+provider's console as `<PUBLIC_URL>/api/auth/callback` — one per console, whatever the
+Provider's slug.
+
+A Provider cannot be enabled without a permitted Workspace domain or Entra tenant,
+because anyone it matches who signs in gets a reader account on their first login.
+Password login stays available whether or not a Provider is configured: it is the way
+back in if a client secret expires. See [ADR-0015](docs/adr/0015-identity-providers-keyed-by-email.md).
+
 ## Development
 
 This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres), `apps/web`

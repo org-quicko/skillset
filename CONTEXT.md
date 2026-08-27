@@ -26,7 +26,8 @@ _Avoid_: Label, category, topic
 
 **User**:
 A person with access to the Registry, identified by their email address and described by
-a first and last name.
+a first and last name. The email address is the identity: two logins asserting the same
+verified address are the same User, whichever Identity Provider asserted it.
 _Avoid_: Account, member, person
 
 **Admin**:
@@ -73,3 +74,10 @@ _Avoid_: Client, tool, editor, IDE
 Where a Skill is installed on a machine — either the current project, or the Agent's
 user-level directory.
 _Avoid_: Target, location, level, destination
+
+**Identity Provider**:
+A configured, named way for a User to prove who they are without a password, offered on the login
+page beside the password form. Several can be enabled at once and a User may sign in through any
+of them. A Provider vouches for a verified email address and for the organisation that address
+belongs to; the Registry trusts it for nothing else.
+_Avoid_: SSO, social login, connection, OIDC provider (as the domain term)

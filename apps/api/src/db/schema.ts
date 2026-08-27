@@ -278,3 +278,52 @@ export const skillDirectory = pgView("skill_directory", {
   tags: jsonb("tags").notNull().$type<Array<{ id: string; name: string }>>(),
   search: tsvector("search"),
 }).existing();
+
+export const identityProviderKindEnum = pgEnum("identity_provider_kind", ["google", "microsoft"]);
+
+/**
+ * A configured way to log in without a password (ADR-0015). Several rows may
+ * be enabled at once and every enabled one is offered on the login page.
+ *
+ * There is deliberately no `user_identities` table alongside this: a login is
+ * matched to a User by the verified email in the provider's claims, so the
+ * `users` row *is* the identity and one person signing in through two
+ * Providers is one row, not two links.
+ */
+export const identityProviders = pgTable(
+  "identity_providers",
+  {
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
+    // Immutable after creation, and carried in the `state` a login round-trips
+    // through the provider — so it is what the callback matches against its
+    // nonce cookie, and what an operator matches against their logs.
+    slug: text("slug").notNull().unique(),
+    kind: identityProviderKindEnum("kind").notNull(),
+    display_name: text("display_name").notNull(),
+    // The provider's Issuer Identifier, not its discovery document's path.
+    // Discovery runs against it and every ID token's `iss` is validated to
+    // match; pointing it at the document itself disables that check.
+    issuer_url: text("issuer_url").notNull(),
+    client_id: text("client_id").notNull(),
+    // Stored as given, following listmonk (ADR-0015). Written and never read
+    // back out over the wire — no response shape includes it.
+    client_secret: text("client_secret").notNull(),
+    // `hd` for Google, `tid` for Microsoft. Nullable only so a Provider can be
+    // drafted before it is gated; the check below makes enabling one without it
+    // impossible, because with just-in-time provisioning it is the *only*
+    // control on who gets an account.
+    permitted_domain: text("permitted_domain"),
+    enabled: boolean("enabled").notNull().default(false),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "identity_providers_enabled_requires_domain",
+      sql`NOT ${table.enabled} OR ${table.permitted_domain} IS NOT NULL`,
+    ),
+  ],
+);
+
+export type IdentityProviderRow = typeof identityProviders.$inferSelect;
+export type NewIdentityProviderRow = typeof identityProviders.$inferInsert;

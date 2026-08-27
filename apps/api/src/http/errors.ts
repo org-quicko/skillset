@@ -182,6 +182,65 @@ export class TagNameConflictError extends AppError {
   }
 }
 
+/** No Identity Provider exists by the requested id or slug. */
+export class IdentityProviderNotFoundError extends AppError {
+  /** Builds the 404 `not_found` error. */
+  constructor() {
+    super(404, "not_found", "No such Identity Provider.");
+  }
+}
+
+/** A Provider was created with a slug another Provider already holds. */
+export class IdentityProviderSlugTakenError extends AppError {
+  /** Builds the 409 `slug_taken` error. */
+  constructor() {
+    super(409, "slug_taken", "An Identity Provider with that slug already exists.", { field: "slug" });
+  }
+}
+
+/**
+ * Enabling a Provider was refused because it has no permitted domain or
+ * tenant. With just-in-time provisioning it is the only control on who gets
+ * an account (ADR-0015), so an ungated Provider is not enablable at all —
+ * the database carries the same rule as a check constraint.
+ */
+export class IdentityProviderUngatedError extends AppError {
+  /** Builds the 400 `provider_ungated` error. */
+  constructor() {
+    super(
+      400,
+      "provider_ungated",
+      "Set a permitted domain or tenant before enabling this Identity Provider: it is what decides who may sign in.",
+      { field: "permitted_domain" },
+    );
+  }
+}
+
+/**
+ * A login through an Identity Provider failed. Deliberately one error for
+ * every cause — a bad nonce, an unverified email, the wrong hosted domain —
+ * because the person at the other end can act no differently either way, and
+ * distinguishing them would tell an attacker which check they tripped. The
+ * real reason reaches the logs.
+ */
+export class ExternalLoginFailedError extends AppError {
+  /** @param reason - Logged, never returned; what actually failed. */
+  constructor(readonly reason: string) {
+    super(401, "external_login_failed", "That sign-in could not be completed.");
+  }
+}
+
+/**
+ * A login was started against a Provider, but the Registry does not know the
+ * URL it is reached at, so it cannot build the `redirect_uri` to come back to.
+ */
+export class PublicUrlNotConfiguredError extends AppError {
+  /** Builds the 500 `public_url_not_configured` error. */
+  constructor() {
+    super(500, "public_url_not_configured", "This Registry has no PUBLIC_URL configured, so it cannot complete a sign-in.");
+  }
+}
+
 /**
  * Every error response in the API is produced here, and only here: routes
  * and services throw — an `AppError` subclass, the shared

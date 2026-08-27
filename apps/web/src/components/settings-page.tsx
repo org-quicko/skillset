@@ -1,5 +1,6 @@
 import { roleMeets, type User } from "@skill-registry/shared";
 import { ArrowLeftIcon } from "lucide-react";
+import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { ProfileCard } from "@/components/profile-card";
 import { TokensCard } from "@/components/tokens-card";
 import { Button } from "@/components/ui/button";
@@ -10,11 +11,16 @@ import { cn } from "@/lib/utils";
 const PROFILE_PATH = "/settings";
 const USERS_PATH = "/settings/users";
 const TOKENS_PATH = "/settings/tokens";
+const LOGIN_PATH = "/settings/login";
 
-type Section = "profile" | "users" | "tokens";
+type Section = "profile" | "users" | "login" | "tokens";
 
+// `canManageUsers` gates the Login section too: configuring an Identity
+// Provider decides who may sign in at all, which is squarely Registry
+// administration, and the API refuses everyone below admin either way.
 function sectionFor(pathname: string, canManageUsers: boolean): Section {
   if (pathname === USERS_PATH && canManageUsers) return "users";
+  if (pathname === LOGIN_PATH && canManageUsers) return "login";
   if (pathname === TOKENS_PATH) return "tokens";
   return "profile";
 }
@@ -38,11 +44,15 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
         {canManageUsers && (
           <SettingsTab label="Users" active={section === "users"} onClick={() => navigate(USERS_PATH)} />
         )}
+        {canManageUsers && (
+          <SettingsTab label="Login" active={section === "login"} onClick={() => navigate(LOGIN_PATH)} />
+        )}
         <SettingsTab label="Tokens" active={section === "tokens"} onClick={() => navigate(TOKENS_PATH)} />
       </nav>
 
       {section === "profile" && <ProfileCard user={user} />}
       {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
+      {section === "login" && canManageUsers && <IdentityProvidersCard />}
       {section === "tokens" && <TokensCard />}
     </div>
   );

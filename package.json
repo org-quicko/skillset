@@ -12,7 +12,10 @@
   "scripts": {
     "dev": "bun --filter @skill-registry/api dev",
     "prebuild": "bun run lint",
-    "build": "bun --filter @skill-registry/web build",
+    "build:web": "bun --filter '@skill-registry/web' build",
+    "build:api": "bun --filter '@skill-registry/api' build",
+    "build:cli": "bun --filter '@skill-registry/cli' build",
+    "build": "bun run build:web && bun run build:api && bun run build:cli",
     "test": "bun run --filter '@skill-registry/shared' --filter '@skill-registry/api' --filter '@skill-registry/cli' test",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint ."

@@ -326,17 +326,49 @@ scroll never repeats or skips a row.
 Indexes: none today. `REFRESH MATERIALIZED VIEW CONCURRENTLY` (which would need one) was considered
 and deferred — see ADR-0012.
 
-## Not built yet: `user_identities`
+## `identity_providers`
 
-OIDC is not implemented, and no table for it exists. When it arrives — Google Workspace first —
-it will be a `user_identities` table holding the User, the provider, and the provider's `subject`
-claim, unique on provider and subject.
+One row per configured way to log in without a password. Several may be enabled at once, and
+every enabled one is offered on the login page.
 
-It is keyed by subject rather than email on purpose: Workspace emails are mutable, so matching a
-login on email means an admin renaming someone silently orphans their account, their Tokens, and
-the attribution on every Skill they published. Email remains the identifier a human uses and the
-key an external identity is *linked* by the first time; `subject` is what every login after that
-matches on. See ADR-0007 for what is deferred to that point.
+```
+id                uuid primary key default uuidv7()
+slug              text not null unique
+kind              identity_provider_kind not null   -- 'google' | 'microsoft'
+display_name      text not null
+issuer_url        text not null
+client_id         text not null
+client_secret     text not null
+permitted_domain  text
+enabled           boolean not null default false
+created_at        timestamptz not null default now()
+updated_at        timestamptz not null default now()
+
+check (NOT enabled OR permitted_domain IS NOT NULL)
+```
+
+`issuer_url` is the provider's Issuer Identifier (`https://accounts.google.com`,
+`https://login.microsoftonline.com/{tenant}/v2.0`), not the path to its discovery document.
+Discovery runs against it and every ID token's `iss` is validated to match; pointing it at the
+document itself silently disables that check.
+
+`permitted_domain` holds the Workspace domain (Google's `hd` claim) or tenant (Entra's `tid`),
+and is matched on the claim, never on the email address's suffix. The check constraint is the
+one rule here the database can express and does: because a login provisions a User just in
+time, this column is the *only* control on who gets an account, so an ungated Provider is not
+enablable at all rather than merely discouraged.
+
+`client_secret` is stored as given, following listmonk (ADR-0015). No response shape includes
+it — it is written and never read back, so a leaked backup is the only way it escapes.
+
+There is deliberately **no** `user_identities` table. A login is matched to a User by the
+verified email in the provider's claims and creates one if none matches, so the `users` row is
+the identity and a person signing in through two Providers is one row, not two links. ADR-0015
+reverses ADR-0007 on this point and records what it costs: a rename in the provider creates a
+second User rather than following the first.
+
+Deleting a Provider is not a supported operation — `enabled` is how one is taken out of
+service, so nobody loses their way in to a mistyped click.
 
 ## No sessions table
 
@@ -354,8 +386,17 @@ catch them:
   that User. The partial unique index stops two Users holding it at once; it does not stop
   either of those.
 - **The `/setup` route is unavailable once any User exists**, and the User it creates is the
-  Superadmin. Phrase the test that way rather than as "only the Superadmin can create Users" —
-  OIDC will add a third way for a User to come into existence (ADR-0007).
+  Superadmin. Phrase the test that way rather than as "only the Superadmin can create Users":
+  a login through an Identity Provider is a third way for a User to come into existence, so
+  the other phrasing is false (ADR-0015).
+- **An external login never grants a role above `reader`.** A created User is always a
+  `reader` — the Provider row carries no role column for a misconfiguration to set — and
+  logging in never alters the role of a User who already exists.
+- **A Provider's `slug` and `kind` never change.** The slug is what a login carries back in
+  `state` and what the callback matches against its cookie; the kind decides which claim gates
+  the domain. The update route accepts neither.
+- **A Provider is never deleted.** There is no delete route to call; `enabled` is the only way
+  one leaves service.
 - **Role permissions** — readers cannot publish, writers cannot delete a Skill or manage
   Users.
 - **Write ordering.** The row is created before the Artifact is uploaded, and the Skill list
