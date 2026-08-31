@@ -5,71 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1787299503263,
-      "tag": "0000_low_mariko_yashida",
+      "when": 1788180809434,
+      "tag": "0000_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1787308558006,
-      "tag": "0001_open_husk",
+      "when": 1788180822789,
+      "tag": "0001_views",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1787320841030,
-      "tag": "0002_silly_talkback",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1787656580445,
-      "tag": "0003_cloudy_iron_patriot",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1787721852356,
-      "tag": "0004_absent_firestar",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1787725311004,
-      "tag": "0005_flashy_revanche",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1787731997618,
-      "tag": "0006_wonderful_captain_stacy",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1787743010310,
-      "tag": "0007_first_marvel_boy",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1787743713084,
-      "tag": "0008_panoramic_puppet_master",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1787830554971,
-      "tag": "0009_rainy_bucky",
+      "when": 1788185777261,
+      "tag": "0002_permitted_organisations",
       "breakpoints": true
     }
   ]

@@ -1,5 +1,11 @@
 # Stateless JWT With Per-Request Role Resolution
 
+> **Partly superseded by ADR-0016.** Sessions are Better Auth's and live in a table, so the
+> trade-off accepted below — that a session cannot be revoked before its JWT expires — is no
+> longer paid, and `JWT_SECRET` is now `BETTER_AUTH_SECRET`. The rest of this ADR stands, and
+> is the half that mattered: the session still carries only the User's identity, never their
+> role, and authorisation is still resolved from Postgres on every request.
+
 Web sessions are a signed JWT in an `HttpOnly; Secure; SameSite=Strict` cookie, with no
 sessions table. The JWT carries **only the user id — never the role**, so authentication is
 stateless while authorisation is resolved from Postgres on every request.

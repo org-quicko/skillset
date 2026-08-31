@@ -6,7 +6,7 @@ A self-hosted registry for Agent Skills. See [`.scratch/skill-registry/spec.md`]
 
 ```bash
 cp .env.example .env
-# set JWT_SECRET in .env
+# set BETTER_AUTH_SECRET and PUBLIC_URL in .env
 docker compose up
 ```
 
@@ -16,7 +16,7 @@ built web interface from the same origin at `http://localhost:3000`.
 ## Configuration
 
 See [`.env.example`](.env.example) for the full list of environment variables. The app
-refuses to start if `JWT_SECRET` or `DATABASE_URL` is missing.
+refuses to start if `BETTER_AUTH_SECRET`, `PUBLIC_URL`, or `DATABASE_URL` is missing.
 
 ### Logging in through Google Workspace or Microsoft Entra
 

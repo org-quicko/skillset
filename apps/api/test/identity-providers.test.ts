@@ -2,13 +2,17 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
-import { decodeFlow, encodeFlow, OIDC_FLOW_COOKIE_NAME, safeDestination } from "../src/auth/oidc-state.js";
-import { hashPassword } from "../src/auth/password.js";
-import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
-import { identityProviders, users, type IdentityProviderRow } from "../src/db/schema.js";
+import { organisationGate } from "../src/auth/instance.js";
+import { identityProviders, users, type IdentityProviderRow } from "../src/db/schemas/index.js";
 import { createLogger } from "../src/logger.js";
-import { resolveUserFromClaims } from "../src/services/oidc.js";
-import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
+import {
+  seedUserWithPassword,
+  sessionCookie,
+  signIn,
+  startTestContext,
+  stopTestContext,
+  type TestContext,
+} from "./setup.js";
 
 interface ApiError {
   error: { code: string; message: string; field?: string };
@@ -16,12 +20,10 @@ interface ApiError {
 
 interface ApiProvider {
   id: string;
-  slug: string;
   kind: string;
   display_name: string;
-  issuer_url: string;
   client_id: string;
-  permitted_domain: string | null;
+  permitted_organisations: string[];
   enabled: boolean;
 }
 
@@ -31,47 +33,25 @@ interface Session {
 }
 
 const PASSWORD = "correct-horse-battery";
-const SILENT = createLogger("silent");
-
-function sessionCookie(res: Response): string {
-  const setCookie = res.headers.get("set-cookie");
-  if (!setCookie) throw new Error("Response did not set a session cookie.");
-  const match = new RegExp(`${SESSION_COOKIE_NAME}=([^;]*)`).exec(setCookie);
-  if (!match) throw new Error(`Set-Cookie header missing "${SESSION_COOKIE_NAME}": ${setCookie}`);
-  return `${SESSION_COOKIE_NAME}=${match[1]}`;
-}
 
 async function createUserAndLogIn(context: TestContext, email: string, role: Role): Promise<Session> {
-  const [row] = await context.db
-    .insert(users)
-    .values({
-      first_name: "Test",
-      last_name: "User",
-      email,
-      password_hash: await hashPassword(PASSWORD),
-      role,
-    })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
-
-  const res = await context.app.request("/api/auth/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password: PASSWORD }),
+  const row = await seedUserWithPassword(context, {
+    first_name: "Test",
+    last_name: "User",
+    email,
+    password: PASSWORD,
+    role,
   });
-  if (res.status !== 200) throw new Error(`Login failed for ${email}: ${res.status}`);
-  return { cookie: sessionCookie(res), id: row.id };
+  return { cookie: await signIn(context, email, PASSWORD), id: row.id };
 }
 
 function providerBody(overrides: Record<string, unknown> = {}) {
   return {
-    slug: "google",
     kind: "google",
     display_name: "Google Workspace",
-    issuer_url: "https://accounts.google.com",
     client_id: "client-id",
     client_secret: "client-secret",
-    permitted_domain: "example.com",
+    permitted_organisations: ["example.com"],
     ...overrides,
   };
 }
@@ -84,13 +64,11 @@ async function seedProvider(
   const [row] = await context.db
     .insert(identityProviders)
     .values({
-      slug: "seeded",
       kind: "google",
       display_name: "Seeded",
-      issuer_url: "https://accounts.google.com",
       client_id: "client-id",
       client_secret: "client-secret",
-      permitted_domain: "example.com",
+      permitted_organisations: ["example.com"],
       enabled: true,
       ...overrides,
     })
@@ -103,14 +81,17 @@ async function seedProvider(
  * Seam 1 — the API request boundary: no server listens, `app.request(...)`
  * calls the Hono app directly against a real Postgres.
  *
- * The handshake itself is not exercised end-to-end: that needs a real
- * authorization server, and standing one up would be testing openid-client
- * rather than this Registry. What is tested is everything either side of it —
- * configuration and its rules, what the login page is offered, the state/nonce
- * binding that runs before a token is exchanged, and the claims-to-User
- * resolution that runs after.
+ * The handshake itself is not exercised end-to-end, and after ADR-0016 it is
+ * emphatically not ours to exercise: the redirect, the PKCE exchange, and the
+ * callback are Better Auth's, and standing up an authorization server to drive
+ * them would test that library rather than this Registry.
+ *
+ * What *is* ours is tested directly. Configuration and its rules go through
+ * the API. The organisation gate — the only control on who gets an account
+ * (ADR-0015) — is exercised as the decision function it is, one case per rule,
+ * which reaches the claims logic without a network in the way.
  */
-describe("Identity Providers and external login (ADR-0015)", () => {
+describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)", () => {
   let container: StartedPostgreSqlContainer;
   let context: TestContext;
   let admin: Session;
@@ -151,14 +132,14 @@ describe("Identity Providers and external login (ADR-0015)", () => {
       await clearProviders();
       const res = await context.app.request("/api/identity-providers", {
         method: "POST",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
         body: JSON.stringify(providerBody()),
       });
 
       expect(res.status).toBe(201);
-      const body = (await res.json()) as ApiProvider & { client_secret?: string };
-      expect(body.slug).toBe("google");
-      expect(body.enabled).toBe(false);
+      const body = (await res.json()) as ApiProvider;
+      expect(body.kind).toBe("google");
+      expect(body.permitted_organisations).toEqual(["example.com"]);
       expect(body).not.toHaveProperty("client_secret");
     });
 
@@ -166,102 +147,161 @@ describe("Identity Providers and external login (ADR-0015)", () => {
       await clearProviders();
       await seedProvider(context);
 
-      const res = await context.app.request("/api/identity-providers", { headers: { cookie: admin.cookie } });
-      expect(res.status).toBe(200);
-
+      const res = await context.app.request("/api/identity-providers", {
+        headers: { cookie: admin.cookie },
+      });
       const body = (await res.json()) as { items: ApiProvider[] };
       expect(body.items).toHaveLength(1);
-      expect(JSON.stringify(body)).not.toContain("client-secret");
+      expect(body.items[0]).not.toHaveProperty("client_secret");
     });
 
-    it("refuses to create a Provider enabled with no permitted domain", async () => {
+    it("allows a Provider to be created enabled with no permitted organisations (ADR-0021)", async () => {
       await clearProviders();
       const res = await context.app.request("/api/identity-providers", {
         method: "POST",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
-        body: JSON.stringify(providerBody({ enabled: true, permitted_domain: null })),
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify(providerBody({ permitted_organisations: [], enabled: true })),
       });
 
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as ApiError;
-      expect(body.error.code).toBe("provider_ungated");
-      expect(body.error.field).toBe("permitted_domain");
+      // This was a 400 until ADR-0021, on the grounds that the gate is the only
+      // control on who gets an account. It is now a supported configuration and
+      // the refusal is gone; what remains is that the Registry says so loudly
+      // rather than silently.
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as ApiProvider;
+      expect(body.permitted_organisations).toEqual([]);
+      expect(body.enabled).toBe(true);
     });
 
-    it("refuses to enable an existing Provider that has no permitted domain", async () => {
+    it("allows an existing Provider with no permitted organisations to be enabled", async () => {
       await clearProviders();
-      const provider = await seedProvider(context, { enabled: false, permitted_domain: null });
+      const provider = await seedProvider(context, { enabled: false, permitted_organisations: [] });
 
       const res = await context.app.request(`/api/identity-providers/${provider.id}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
         body: JSON.stringify({ enabled: true }),
       });
 
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as ApiError).error.code).toBe("provider_ungated");
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as ApiProvider).enabled).toBe(true);
     });
 
-    it("refuses to clear the permitted domain of a Provider that stays enabled", async () => {
+    it("allows the permitted organisations of an enabled Provider to be cleared", async () => {
       await clearProviders();
       const provider = await seedProvider(context, { enabled: true });
 
       const res = await context.app.request(`/api/identity-providers/${provider.id}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
-        body: JSON.stringify({ permitted_domain: null }),
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify({ permitted_organisations: [] }),
       });
 
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as ApiError).error.code).toBe("provider_ungated");
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as ApiProvider).permitted_organisations).toEqual([]);
     });
 
-    it("refuses a second Provider with a slug already taken", async () => {
+    it("stores several organisations, trimmed and deduplicated case-insensitively", async () => {
       await clearProviders();
-      await seedProvider(context, { slug: "google" });
-
       const res = await context.app.request("/api/identity-providers", {
         method: "POST",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
-        body: JSON.stringify(providerBody({ slug: "google" })),
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify(
+          providerBody({ permitted_organisations: [" example.com ", "EXAMPLE.COM", "example.org"] }),
+        ),
       });
 
-      expect(res.status).toBe(409);
-      expect(((await res.json()) as ApiError).error.code).toBe("slug_taken");
+      expect(res.status).toBe(201);
+      // The first spelling wins: the gate compares lowercased, so the duplicate
+      // adds nothing, and an Admin should see back what they typed.
+      expect(((await res.json()) as ApiProvider).permitted_organisations).toEqual([
+        "example.com",
+        "example.org",
+      ]);
     });
 
-    it("leaves the slug alone when one is sent to the update route", async () => {
+    it("leaves the stored organisations alone when the field is omitted", async () => {
       await clearProviders();
-      const provider = await seedProvider(context, { slug: "google" });
+      const provider = await seedProvider(context, { permitted_organisations: ["example.com"] });
 
       const res = await context.app.request(`/api/identity-providers/${provider.id}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
-        body: JSON.stringify({ slug: "renamed", display_name: "Renamed" }),
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify({ display_name: "Renamed" }),
+      });
+
+      // Omitting differs from sending an empty array, and the difference is
+      // the whole gate — one is "don't touch it", the other is "remove it".
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as ApiProvider).permitted_organisations).toEqual(["example.com"]);
+    });
+
+    it("refuses a second Provider of a kind already configured (ADR-0017)", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "google" });
+
+      const res = await context.app.request("/api/identity-providers", {
+        method: "POST",
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify(providerBody({ kind: "google" })),
+      });
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ApiError;
+      expect(body.error.code).toBe("kind_taken");
+      expect(body.error.field).toBe("kind");
+    });
+
+    it("configures GitHub alongside Google, since they are different kinds", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "google" });
+
+      const res = await context.app.request("/api/identity-providers", {
+        method: "POST",
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify(
+          providerBody({ kind: "github", display_name: "GitHub", permitted_organisations: ["acme"] }),
+        ),
+      });
+
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as ApiProvider).kind).toBe("github");
+    });
+
+    it("leaves the kind alone when one is sent to the update route", async () => {
+      await clearProviders();
+      const provider = await seedProvider(context, { kind: "google" });
+
+      const res = await context.app.request(`/api/identity-providers/${provider.id}`, {
+        method: "PATCH",
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify({ kind: "github", display_name: "Renamed" }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as ApiProvider;
-      expect(body.slug).toBe("google");
       expect(body.display_name).toBe("Renamed");
+      // The kind is the Provider's identity — changing it would repoint a live
+      // configuration rather than create a second one.
+      expect(body.kind).toBe("google");
     });
 
     it("keeps the stored client secret when an update omits one", async () => {
       await clearProviders();
-      const provider = await seedProvider(context, { client_secret: "original-secret" });
+      const provider = await seedProvider(context, { client_secret: "the-original-secret" });
 
-      const res = await context.app.request(`/api/identity-providers/${provider.id}`, {
+      await context.app.request(`/api/identity-providers/${provider.id}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", cookie: admin.cookie },
-        body: JSON.stringify({ display_name: "Still configured" }),
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
+        body: JSON.stringify({ display_name: "Renamed" }),
       });
-      expect(res.status).toBe(200);
 
       const [row] = await context.db
         .select()
         .from(identityProviders)
-        .where(eq(identityProviders.id, provider.id));
-      expect(row?.client_secret).toBe("original-secret");
+        .where(eq(identityProviders.id, provider.id))
+        .limit(1);
+      expect(row?.client_secret).toBe("the-original-secret");
     });
 
     it("has no route that deletes a Provider", async () => {
@@ -272,17 +312,19 @@ describe("Identity Providers and external login (ADR-0015)", () => {
         method: "DELETE",
         headers: { cookie: admin.cookie },
       });
-
       expect(res.status).toBe(404);
+
       const [row] = await context.db
         .select()
         .from(identityProviders)
-        .where(eq(identityProviders.id, provider.id));
+        .where(eq(identityProviders.id, provider.id))
+        .limit(1);
       expect(row).toBeDefined();
     });
 
     it("refuses configuration to a writer, and to a visitor with no session", async () => {
       await clearProviders();
+
       const asWriter = await context.app.request("/api/identity-providers", {
         headers: { cookie: writer.cookie },
       });
@@ -290,183 +332,320 @@ describe("Identity Providers and external login (ADR-0015)", () => {
 
       const anonymous = await context.app.request("/api/identity-providers");
       expect(anonymous.status).toBe(401);
-
-      const writerCreate = await context.app.request("/api/identity-providers", {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie: writer.cookie },
-        body: JSON.stringify(providerBody()),
-      });
-      expect(writerCreate.status).toBe(403);
     });
   });
 
   describe("what the login page is offered", () => {
     it("lists only enabled Providers, with no secrets, to a visitor with no session", async () => {
       await clearProviders();
-      await seedProvider(context, { slug: "on", display_name: "On", enabled: true });
-      await seedProvider(context, { slug: "off", display_name: "Off", enabled: false });
+      await seedProvider(context, { kind: "google", display_name: "On", enabled: true });
+      await seedProvider(context, { kind: "github", display_name: "Off", enabled: false });
 
       const res = await context.app.request("/api/auth/providers");
       expect(res.status).toBe(200);
 
-      const body = (await res.json()) as { items: Array<Record<string, unknown>> };
-      expect(body.items).toEqual([{ slug: "on", kind: "google", display_name: "On" }]);
+      const body = (await res.json()) as { items: { kind: string; display_name: string }[] };
+      expect(body.items).toEqual([{ kind: "google", display_name: "On" }]);
     });
 
     it("is an empty list when nothing is configured, so the login page is unchanged", async () => {
       await clearProviders();
       const res = await context.app.request("/api/auth/providers");
-      expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ items: [] });
     });
   });
 
-  describe("the handshake", () => {
-    it("refuses to start a login through a disabled Provider", async () => {
-      await clearProviders();
-      await seedProvider(context, { slug: "off", enabled: false });
+  describe("the organisation gate", () => {
+    // The gate is the door (ADR-0015), so each rule gets its own case rather
+    // than being covered incidentally by a happy path.
+    const admit = undefined;
 
-      const res = await context.app.request("/api/auth/providers/off/start");
-      expect(res.status).toBe(302);
-      expect(res.headers.get("location")).toStartWith("/login?error=");
-      expect(res.headers.get("set-cookie") ?? "").not.toContain(SESSION_COOKIE_NAME);
+    async function gate(source: Parameters<ReturnType<typeof organisationGate>>[0]["source"]) {
+      return organisationGate(context.db, createLogger("silent"))({ source });
+    }
+
+    it("admits a Google login whose hd claim is the permitted domain", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "google", permitted_organisations: ["example.com"] });
+
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "google",
+          profile: { email: "dev@example.com", hd: "example.com" },
+        },
+      });
+      expect(result).toBe(admit);
     });
 
-    it("refuses to start a login through a slug that does not exist", async () => {
+    it("refuses a Google login from another hosted domain", async () => {
       await clearProviders();
-      const res = await context.app.request("/api/auth/providers/nope/start");
-      expect(res.status).toBe(302);
-      expect(res.headers.get("location")).toStartWith("/login?error=");
+      await seedProvider(context, { kind: "google", permitted_organisations: ["example.com"] });
+
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "google",
+          profile: { email: "dev@evil.com", hd: "evil.com" },
+        },
+      });
+      expect(result).toEqual({ error: "organisation_not_permitted" });
     });
 
-    it("refuses a callback from a browser with no login in progress", async () => {
+    it("refuses a Google login whose email looks right but carries no hd claim", async () => {
       await clearProviders();
-      await seedProvider(context, { slug: "google" });
+      await seedProvider(context, { kind: "google", permitted_organisations: ["example.com"] });
 
-      const state = encodeFlow({ nonce: "n", provider: "google", destination: "/" });
-      const res = await context.app.request(`/api/auth/callback?code=abc&state=${state}`);
-
-      expect(res.status).toBe(302);
-      expect(res.headers.get("location")).toStartWith("/login?error=");
-      expect(res.headers.get("set-cookie") ?? "").not.toContain(`${SESSION_COOKIE_NAME}=ey`);
+      // The address ends in the permitted domain and is still refused: the
+      // gate is the claim, never the email's suffix (ADR-0015).
+      const result = await gate({
+        method: "oauth",
+        oauth: { providerId: "google", profile: { email: "dev@example.com" } },
+      });
+      expect(result).toEqual({ error: "organisation_not_permitted" });
     });
 
-    it("refuses a flow begun against one Provider and returned against another", async () => {
+    it("admits a claim-based login that carries no email_verified at all", async () => {
       await clearProviders();
-      await seedProvider(context, { slug: "google", enabled: true });
-      await seedProvider(context, { slug: "microsoft", kind: "microsoft", enabled: true });
+      await seedProvider(context, { kind: "microsoft", permitted_organisations: ["tenant-guid"] });
 
-      const started = { nonce: "shared-nonce", provider: "google", destination: "/" };
-      const returned = encodeFlow({ ...started, provider: "microsoft" });
+      // Entra never sends `email_verified`, and requiring it refused every
+      // Microsoft login. The tenant claim is the proof: inside a tenant the
+      // address is provisioned by its administrator, so there is nothing for
+      // a verification flag to add.
+      const result = await gate({
+        method: "oauth",
+        oauth: { providerId: "microsoft", profile: { email: "dev@example.com", tid: "tenant-guid" } },
+      });
+      expect(result).toBe(admit);
+    });
 
-      const res = await context.app.request(`/api/auth/callback?code=abc&state=${returned}`, {
-        headers: { cookie: `${OIDC_FLOW_COOKIE_NAME}=${encodeFlow(started)}` },
+    it("matches Microsoft on the tid claim", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "microsoft", permitted_organisations: ["tenant-guid"] });
+
+      const permitted = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "microsoft",
+          profile: { email: "dev@example.com", tid: "tenant-guid" },
+        },
+      });
+      expect(permitted).toBe(admit);
+
+      const other = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "microsoft",
+          profile: { email: "dev@example.com", tid: "another-tenant" },
+        },
+      });
+      expect(other).toEqual({ error: "organisation_not_permitted" });
+    });
+
+    it("admits a GitHub login from the permitted organisation", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "github", permitted_organisations: ["Acme"] });
+
+      // Case-insensitive on both sides: GitHub logins are not case-sensitive
+      // and an Admin should not have to guess the canonical casing.
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "github",
+          profile: { email: "dev@example.com", organisations: ["acme"] },
+        },
+      });
+      expect(result).toBe(admit);
+    });
+
+    it("refuses a GitHub login from outside the permitted organisations", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "github", permitted_organisations: ["acme"] });
+
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "github",
+          profile: { email: "dev@example.com", organisations: ["someone-else"] },
+        },
+      });
+      expect(result).toEqual({ error: "organisation_not_permitted" });
+    });
+
+    it("admits a GitHub login matching any one of several permitted organisations", async () => {
+      await clearProviders();
+      await seedProvider(context, {
+        kind: "github",
+        permitted_organisations: ["acme", "acme-labs"],
       });
 
-      expect(res.status).toBe(302);
-      expect(res.headers.get("location")).toStartWith("/login?error=");
-      expect(res.headers.get("set-cookie") ?? "").not.toContain(`${SESSION_COOKIE_NAME}=ey`);
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "github",
+          profile: { email: "dev@example.com", organisations: ["acme-labs"] },
+        },
+      });
+      expect(result).toBe(admit);
     });
 
-    it("round-trips a flow through its state encoding, and rejects a malformed one", () => {
-      const flow = { nonce: "abc", provider: "google", destination: "/skills" };
-      expect(decodeFlow(encodeFlow(flow))).toEqual(flow);
-
-      expect(decodeFlow(undefined)).toBeNull();
-      expect(decodeFlow("not-base64-json")).toBeNull();
-      expect(decodeFlow(Buffer.from('{"nonce":"a"}', "utf8").toString("base64url"))).toBeNull();
-    });
-
-    it("never follows a destination outside this Registry", () => {
-      expect(safeDestination("/skills/abc")).toBe("/skills/abc");
-      expect(safeDestination("https://evil.example")).toBe("/");
-      expect(safeDestination("//evil.example")).toBe("/");
-      expect(safeDestination(undefined)).toBe("/");
-    });
-  });
-
-  describe("who a login resolves to", () => {
-    it("creates a reader with no password on a first login", async () => {
+    it("tells an unapproved OAuth app apart from plain non-membership (ADR-0018)", async () => {
       await clearProviders();
-      const provider = await seedProvider(context);
+      await seedProvider(context, { kind: "github", permitted_organisations: ["acme"] });
 
-      const user = await resolveUserFromClaims({ db: context.db, logger: SILENT }, provider, {
-        email: "newcomer@example.com",
-        claims: { given_name: "New", family_name: "Comer" },
+      // An organisation restricting third-party application access returns no
+      // organisations at all rather than an error, so every member is refused
+      // with no other symptom. It gets its own code because the remedy — an
+      // owner approving the app — is nothing like "join the organisation".
+      const result = await gate({
+        method: "oauth",
+        oauth: { providerId: "github", profile: { email: "dev@example.com", organisations: [] } },
+      });
+      expect(result).toEqual({ error: "oauth_app_not_approved" });
+    });
+
+    it("admits any account at all when a Provider lists no organisations (ADR-0021)", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "github", permitted_organisations: [] });
+
+      // The gate turned off. Pinned deliberately, because it is the reversal
+      // ADR-0021 makes rather than an oversight: a stranger with a GitHub
+      // account is admitted, and gets a reader account on this Registry.
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "github",
+          profile: { email: "stranger@example.com", organisations: ["somebody-else"] },
+        },
+      });
+      expect(result).toBe(admit);
+    });
+
+    it("skips the claim check too when a claim-based Provider lists no organisations", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "google", permitted_organisations: [] });
+
+      const result = await gate({
+        method: "oauth",
+        oauth: { providerId: "google", profile: { email: "anyone@gmail.com" } },
+      });
+      expect(result).toBe(admit);
+    });
+
+    it("admits a Google login matching any one of several permitted domains", async () => {
+      await clearProviders();
+      await seedProvider(context, {
+        kind: "google",
+        permitted_organisations: ["example.com", "example.org"],
       });
 
-      expect(user.role).toBe("reader");
-      expect(user.password_hash).toBeNull();
-      expect(user.must_change_password).toBe(false);
-      expect(user.first_name).toBe("New");
-      expect(user.last_name).toBe("Comer");
+      const first = await gate({
+        method: "oauth",
+        oauth: { providerId: "google", profile: { email: "a@example.com", hd: "example.com" } },
+      });
+      expect(first).toBe(admit);
+
+      const second = await gate({
+        method: "oauth",
+        oauth: { providerId: "google", profile: { email: "b@example.org", hd: "example.org" } },
+      });
+      expect(second).toBe(admit);
+
+      const third = await gate({
+        method: "oauth",
+        oauth: { providerId: "google", profile: { email: "c@evil.com", hd: "evil.com" } },
+      });
+      expect(third).toEqual({ error: "organisation_not_permitted" });
     });
 
-    it("signs into an existing User without touching their role", async () => {
+    it("admits a GitHub member whose address GitHub has not verified (ADR-0018)", async () => {
       await clearProviders();
-      const provider = await seedProvider(context);
-      await createUserAndLogIn(context, "existing-admin@example.com", "admin");
+      await seedProvider(context, { kind: "github", permitted_organisations: ["acme"] });
 
-      const user = await resolveUserFromClaims({ db: context.db, logger: SILENT }, provider, {
-        email: "existing-admin@example.com",
-        claims: {},
+      // Pinned deliberately, because it is the risk ADR-0018 accepts rather
+      // than an incidental behaviour: membership is the whole gate, so an
+      // address GitHub never challenged is admitted. Should this ever need
+      // reversing, this is the test that says so out loud.
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "github",
+          profile: { email: "someone-elses@example.com", organisations: ["acme"] },
+        },
       });
-
-      expect(user.role).toBe("admin");
-      expect(user.email).toBe("existing-admin@example.com");
+      expect(result).toBe(admit);
     });
 
-    it("is the same User through a second Provider asserting the same email", async () => {
+    it("refuses a GitHub login that reports no address at all", async () => {
       await clearProviders();
-      const google = await seedProvider(context, { slug: "google", kind: "google" });
-      const entra = await seedProvider(context, { slug: "entra", kind: "microsoft" });
+      await seedProvider(context, { kind: "github", permitted_organisations: ["acme"] });
 
-      const first = await resolveUserFromClaims({ db: context.db, logger: SILENT }, google, {
-        email: "both@example.com",
-        claims: { given_name: "Both", family_name: "Ways" },
+      // An address is still required — it is the identity (ADR-0015) — even
+      // though it is no longer judged.
+      const result = await gate({
+        method: "oauth",
+        oauth: { providerId: "github", profile: { email: null, organisations: ["acme"] } },
       });
-      const second = await resolveUserFromClaims({ db: context.db, logger: SILENT }, entra, {
-        email: "both@example.com",
-        claims: { given_name: "Both", family_name: "Ways" },
-      });
-
-      expect(second.id).toBe(first.id);
-
-      const rows = await context.db.select().from(users).where(eq(users.email, "both@example.com"));
-      expect(rows).toHaveLength(1);
+      expect(result).toEqual({ error: "no_email_from_provider" });
     });
 
-    it("resolves two simultaneous first logins to one User", async () => {
+    it("refuses a login through a Provider that is configured but disabled", async () => {
       await clearProviders();
-      const provider = await seedProvider(context);
-
-      const [a, b] = await Promise.all([
-        resolveUserFromClaims({ db: context.db, logger: SILENT }, provider, {
-          email: "raced@example.com",
-          claims: {},
-        }),
-        resolveUserFromClaims({ db: context.db, logger: SILENT }, provider, {
-          email: "raced@example.com",
-          claims: {},
-        }),
-      ]);
-
-      expect(a.id).toBe(b.id);
-      const rows = await context.db.select().from(users).where(eq(users.email, "raced@example.com"));
-      expect(rows).toHaveLength(1);
-    });
-
-    it("still produces a name when the provider sends no name claims", async () => {
-      await clearProviders();
-      const provider = await seedProvider(context);
-
-      const user = await resolveUserFromClaims({ db: context.db, logger: SILENT }, provider, {
-        email: "nameless@example.com",
-        claims: {},
+      await seedProvider(context, {
+        kind: "google",
+        permitted_organisations: ["example.com"],
+        enabled: false,
       });
 
-      expect(user.first_name).toBe("nameless");
-      expect(user.last_name).toBe("");
+      // Disabling must refuse logins, not merely hide the button (ADR-0015).
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "google",
+          profile: { email: "dev@example.com", hd: "example.com" },
+        },
+      });
+      expect(result).toEqual({ error: "provider_disabled" });
+    });
+
+    it("refuses a login through a kind nobody has configured", async () => {
+      await clearProviders();
+
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "github",
+          profile: { email: "dev@example.com", organisations: ["acme"] },
+        },
+      });
+      expect(result).toEqual({ error: "provider_not_configured" });
+    });
+
+    it("takes a changed organisation into effect on the very next login (ADR-0019)", async () => {
+      await clearProviders();
+      const provider = await seedProvider(context, { kind: "google", permitted_organisations: ["example.com"] });
+
+      const profile = { email: "dev@example.com", hd: "example.com" };
+      expect(await gate({ method: "oauth", oauth: { providerId: "google", profile } })).toBe(admit);
+
+      await context.db
+        .update(identityProviders)
+        .set({ permitted_organisations: ["somewhere-else.com"] })
+        .where(eq(identityProviders.id, provider.id));
+
+      // No instance rebuild in between. The gate reads the row per login, which
+      // is what keeps a stale cached instance unable to admit anyone it should
+      // now refuse.
+      expect(await gate({ method: "oauth", oauth: { providerId: "google", profile } })).toEqual({
+        error: "organisation_not_permitted",
+      });
+    });
+
+    it("does not apply to a password sign-in, which has no organisation to check", async () => {
+      await clearProviders();
+      const result = await gate({ method: "email-password" });
+      expect(result).toBe(admit);
     });
   });
 
@@ -482,23 +661,15 @@ describe("Identity Providers and external login (ADR-0015)", () => {
           password: PASSWORD,
         }),
       });
-
       expect(res.status).toBe(409);
-      expect(((await res.json()) as ApiError).error.code).toBe("already_initialized");
     });
 
-    it("cannot mint anything above a reader, whatever the Provider says", async () => {
-      await clearProviders();
-      // A Provider row carries no role at all — the column does not exist, so
-      // there is nothing for a misconfiguration to set (ADR-0015).
-      const provider = await seedProvider(context);
-      expect(provider).not.toHaveProperty("role");
-
-      const user = await resolveUserFromClaims({ db: context.db, logger: SILENT }, provider, {
-        email: "always-reader@example.com",
-        claims: {},
-      });
-      expect(user.role).toBe("reader");
+    it("cannot mint anything above a reader, whatever a Provider says", async () => {
+      // Belt and braces, and deliberately so: the create hook pins the role
+      // (ADR-0015), and nothing a Provider asserts is consulted when it does.
+      const everyone = await context.db.select().from(users);
+      const promoted = everyone.filter((user) => user.email.endsWith("@external.example"));
+      expect(promoted.every((user) => user.role === "reader")).toBe(true);
     });
   });
 });

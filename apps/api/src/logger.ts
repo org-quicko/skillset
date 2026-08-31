@@ -16,6 +16,11 @@ const REDACT_PATHS = [
   "*.token_hash",
   "secret",
   "*.secret",
+  // A Provider row is now read whole to configure Better Auth (ADR-0019), so
+  // this is the field most likely to reach a log by accident — and unlike a
+  // password hash it is a live third-party credential (ADR-0015).
+  "client_secret",
+  "*.client_secret",
   "authorization",
   "*.authorization",
   "jwt",

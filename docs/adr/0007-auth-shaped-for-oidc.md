@@ -5,6 +5,12 @@
 > the divergence from listmonk argued below was reversed, and what it costs. The rest of this
 > ADR stands: the nullable password, the session issuer taking a resolved User, and the
 > handshake shape to copy.
+>
+> **Further superseded by ADR-0016**, which takes the last of it. The handshake is no longer
+> ours to copy — Better Auth performs it. What still stands from this ADR is the smallest and
+> most durable part: a password is optional on a User, and issuing a session takes an
+> already-resolved User rather than a set of credentials. Both are what made this migration
+> additive rather than a rewrite, which is the argument the ADR was making.
 
 OIDC is coming, and the first provider will be Google Workspace. We are not building it now, but
 three properties of the auth layer are cheap today and expensive to retrofit, so they are settled

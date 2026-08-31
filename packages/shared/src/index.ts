@@ -1,4 +1,5 @@
 export * from "./role.js";
+export * from "./page.js";
 export * from "./timestamp.js";
 export * from "./user.js";
 export * from "./setup.js";

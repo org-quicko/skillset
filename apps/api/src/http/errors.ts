@@ -10,23 +10,16 @@ function errorResponse(c: Context, status: ContentfulStatusCode, code: string, m
 }
 
 /**
- * Base of every error the API deliberately raises for an expected failure —
- * self-describing (status + code baked in at construction) so `onError`
- * below never needs a lookup table mapping error types to responses; adding
- * a new domain error never requires touching it.
+ * Base of every error the API raises for an expected failure. Status and code
+ * are baked in at construction, so `onError` below needs no error-to-response
+ * lookup table and a new domain error never touches it.
  */
 export class AppError extends Error {
   readonly status: ContentfulStatusCode;
   readonly code: string;
   readonly field?: string;
 
-  /**
-   * @param status - The HTTP status code the error should respond with.
-   * @param code - The machine-readable error code returned in the response body.
-   * @param message - The human-readable error message.
-   * @param options - Optional extras: `field` names the request field the error
-   * relates to, and `cause` is attached to the Error's native `cause`.
-   */
+  /** `options.cause` is attached to the Error's native `cause`, not stored separately. */
   constructor(
     status: ContentfulStatusCode,
     code: string,
@@ -43,7 +36,6 @@ export class AppError extends Error {
 
 /** No valid session or Token was presented on a request that requires one. */
 export class UnauthenticatedError extends AppError {
-  /** Builds the 401 `unauthenticated` error. */
   constructor() {
     super(401, "unauthenticated", "No valid session or Token.");
   }
@@ -51,7 +43,6 @@ export class UnauthenticatedError extends AppError {
 
 /** The caller is authenticated but not allowed to perform this action. */
 export class ForbiddenError extends AppError {
-  /** @param message - Explains why the action is forbidden. */
   constructor(message: string) {
     super(403, "forbidden", message);
   }
@@ -59,26 +50,13 @@ export class ForbiddenError extends AppError {
 
 /** A request failed validation before reaching the domain logic. */
 export class ValidationError extends AppError {
-  /**
-   * @param message - The human-readable validation failure.
-   * @param field - The request field that failed validation, if any.
-   */
   constructor(message: string, field?: string) {
     super(400, "validation_failed", message, { field });
   }
 }
 
-/** A login attempt's email or password didn't match. */
-export class InvalidCredentialsError extends AppError {
-  /** Builds the 401 `invalid_credentials` error. */
-  constructor() {
-    super(401, "invalid_credentials", "Unknown email or wrong password.");
-  }
-}
-
 /** Setup was attempted after the instance already has a first superadmin. */
 export class AlreadyInitializedError extends AppError {
-  /** Builds the 409 `already_initialized` error. */
   constructor() {
     super(409, "already_initialized", "A User already exists.");
   }
@@ -86,7 +64,6 @@ export class AlreadyInitializedError extends AppError {
 
 /** No Skill exists by the requested id. */
 export class SkillNotFoundError extends AppError {
-  /** Builds the 404 `not_found` error. */
   constructor() {
     super(404, "not_found", "No Skill by that id.");
   }
@@ -97,7 +74,6 @@ export class SkillNotFoundError extends AppError {
  * abandoned publish (spec, "Further Notes"), not a missing Skill.
  */
 export class ArtifactMissingError extends AppError {
-  /** Builds the 404 `artifact_missing` error. */
   constructor() {
     super(404, "artifact_missing", "This Skill's Artifact was never uploaded.");
   }
@@ -105,7 +81,6 @@ export class ArtifactMissingError extends AppError {
 
 /** No Token by that id exists that belongs to the caller. */
 export class TokenNotFoundError extends AppError {
-  /** Builds the 404 `not_found` error. */
   constructor() {
     super(404, "not_found", "No such Token belonging to you.");
   }
@@ -113,7 +88,6 @@ export class TokenNotFoundError extends AppError {
 
 /** No User exists by the requested id. */
 export class UserNotFoundError extends AppError {
-  /** Builds the 404 `not_found` error. */
   constructor() {
     super(404, "not_found", "No such User.");
   }
@@ -121,7 +95,6 @@ export class UserNotFoundError extends AppError {
 
 /** A User was created, or renamed via email, to an email another User already holds. */
 export class EmailTakenError extends AppError {
-  /** Builds the 409 `email_taken` error. */
   constructor() {
     super(409, "email_taken", "A User with that email already exists.", { field: "email" });
   }
@@ -132,7 +105,6 @@ export class EmailTakenError extends AppError {
  * and never reassigned, changed, or removed afterwards (docs/data-model.md).
  */
 export class SuperadminProtectedError extends AppError {
-  /** Builds the 409 `superadmin_protected` error. */
   constructor() {
     super(
       409,
@@ -148,7 +120,6 @@ export class SuperadminProtectedError extends AppError {
  * reading the caller's own record or replacing their own password.
  */
 export class PasswordChangeRequiredError extends AppError {
-  /** Builds the 403 `password_change_required` error. */
   constructor() {
     super(403, "password_change_required", "You must replace your generated password before doing anything else.");
   }
@@ -160,7 +131,6 @@ export class PasswordChangeRequiredError extends AppError {
  * differently either way — the real cause still reaches the logs via `cause`.
  */
 export class SkillDeleteFailedError extends AppError {
-  /** @param cause - The underlying error the delete failed with. */
   constructor(cause: unknown) {
     super(500, "delete_failed", "Something went wrong.", { cause });
   }
@@ -168,7 +138,6 @@ export class SkillDeleteFailedError extends AppError {
 
 /** No Tag exists by the requested id. */
 export class TagNotFoundError extends AppError {
-  /** Builds the 404 `not_found` error. */
   constructor() {
     super(404, "not_found", "No Tag by that id.");
   }
@@ -176,68 +145,26 @@ export class TagNotFoundError extends AppError {
 
 /** A rename targeted a name a different Tag already holds (ADR-0011). */
 export class TagNameConflictError extends AppError {
-  /** Builds the 409 `tag_name_conflict` error. */
   constructor() {
     super(409, "tag_name_conflict", "A Tag by that name already exists.", { field: "name" });
   }
 }
 
-/** No Identity Provider exists by the requested id or slug. */
+/** No Identity Provider exists by the requested id or kind. */
 export class IdentityProviderNotFoundError extends AppError {
-  /** Builds the 404 `not_found` error. */
   constructor() {
     super(404, "not_found", "No such Identity Provider.");
   }
 }
 
-/** A Provider was created with a slug another Provider already holds. */
-export class IdentityProviderSlugTakenError extends AppError {
-  /** Builds the 409 `slug_taken` error. */
-  constructor() {
-    super(409, "slug_taken", "An Identity Provider with that slug already exists.", { field: "slug" });
-  }
-}
-
 /**
- * Enabling a Provider was refused because it has no permitted domain or
- * tenant. With just-in-time provisioning it is the only control on who gets
- * an account (ADR-0015), so an ungated Provider is not enablable at all —
- * the database carries the same rule as a check constraint.
+ * A Provider was created for a kind that already has one. There is at most one
+ * Provider per kind (ADR-0017), so the second is a conflict rather than an
+ * addition — an Admin who meant to change the first should edit it.
  */
-export class IdentityProviderUngatedError extends AppError {
-  /** Builds the 400 `provider_ungated` error. */
+export class IdentityProviderKindTakenError extends AppError {
   constructor() {
-    super(
-      400,
-      "provider_ungated",
-      "Set a permitted domain or tenant before enabling this Identity Provider: it is what decides who may sign in.",
-      { field: "permitted_domain" },
-    );
-  }
-}
-
-/**
- * A login through an Identity Provider failed. Deliberately one error for
- * every cause — a bad nonce, an unverified email, the wrong hosted domain —
- * because the person at the other end can act no differently either way, and
- * distinguishing them would tell an attacker which check they tripped. The
- * real reason reaches the logs.
- */
-export class ExternalLoginFailedError extends AppError {
-  /** @param reason - Logged, never returned; what actually failed. */
-  constructor(readonly reason: string) {
-    super(401, "external_login_failed", "That sign-in could not be completed.");
-  }
-}
-
-/**
- * A login was started against a Provider, but the Registry does not know the
- * URL it is reached at, so it cannot build the `redirect_uri` to come back to.
- */
-export class PublicUrlNotConfiguredError extends AppError {
-  /** Builds the 500 `public_url_not_configured` error. */
-  constructor() {
-    super(500, "public_url_not_configured", "This Registry has no PUBLIC_URL configured, so it cannot complete a sign-in.");
+    super(409, "kind_taken", "An Identity Provider of that kind is already configured.", { field: "kind" });
   }
 }
 
@@ -272,4 +199,33 @@ export function registerErrorHandler(app: Hono<{ Variables: AuthVariables }>, lo
     logger.error({ err }, "Unhandled error");
     return errorResponse(c, 500, "internal_error", "Something went wrong.");
   });
+}
+
+/**
+ * A User tried to import from GitHub without a linked GitHub account. Not a
+ * failure of the request so much as a missing prerequisite: importing runs as
+ * the caller's own GitHub identity (ADR-0020), so there is nobody to run as.
+ */
+export class GitHubNotConnectedError extends AppError {
+  /** Builds the 409 `github_not_connected` error. */
+  constructor() {
+    super(
+      409,
+      "github_not_connected",
+      "Sign in with GitHub once to let the Registry read repositories you have access to.",
+    );
+  }
+}
+
+/**
+ * An import from GitHub could not be completed. Unlike an external login's
+ * refusal, the reason is safe to pass on and useful: the caller is an
+ * authenticated writer acting on their own access, so telling them the folder
+ * was missing or the token stale is what lets them fix it.
+ */
+export class GitHubImportFailedError extends AppError {
+  /** Builds the 502 `github_import_failed` error. */
+  constructor(message: string) {
+    super(502, "github_import_failed", message);
+  }
 }

@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
+import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
-import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
-import { users } from "../src/db/schema.js";
-import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
+import { users } from "../src/db/schemas/index.js";
+import { SIGN_IN_PATH, SIGN_OUT_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "./setup.js";
 
 interface ApiUser {
   id: string;
@@ -61,13 +61,14 @@ async function createUserAndLogIn(
       first_name: body.first_name,
       last_name: body.last_name,
       email: body.email,
-      password_hash: await hashPassword(body.password),
       role: body.role,
     })
     .returning();
   if (!row) throw new Error("Insert did not return the created User.");
 
-  const res = await context.app.request("/api/auth/login", {
+  await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
+
+  const res = await context.app.request(SIGN_IN_PATH, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: body.email, password: body.password }),
@@ -137,8 +138,19 @@ describe("Managing Users (ticket 11)", () => {
     expect(body.user).not.toHaveProperty("initial_password");
   });
 
+  it("marks a created User's email verified, so a Provider can sign them in later", async () => {
+    // Not cosmetic, and not really about verification: Better Auth refuses to
+    // link a Provider login to a local row whose email is unverified, so a
+    // User created here with this false could never sign in through Google —
+    // it fails with `account_not_linked`. ADR-0015 requires that a login whose
+    // verified email matches an existing User signs in as that User, whether
+    // or not they have a password, and this flag is what allows it.
+    const [row] = await context.db.select().from(users).where(eq(users.email, "grace@example.com")).limit(1);
+    expect(row?.email_verified).toBe(true);
+  });
+
   it("requires the new User to change their generated password before doing anything else", async () => {
-    const login = await context.app.request("/api/auth/login", {
+    const login = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "grace@example.com", password: "will-be-replaced" }),
@@ -159,22 +171,26 @@ describe("Managing Users (ticket 11)", () => {
     });
     const created = (await createRes.json()) as ApiUserCreated;
 
-    const margaretLogin = await context.app.request("/api/auth/login", {
+    const margaretLogin = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "margaret@example.com", password: created.initial_password }),
     });
     expect(margaretLogin.status).toBe(200);
     const margaretCookie = sessionCookie(margaretLogin);
-    expect(((await margaretLogin.json()) as ApiUser).must_change_password).toBe(true);
 
     // Blocked from everything but reading her own record.
     const blocked = await context.app.request("/api/users/me/tokens", { headers: { cookie: margaretCookie } });
     expect(blocked.status).toBe(403);
     expect(((await blocked.json()) as ApiError).error.code).toBe("password_change_required");
 
+    // Asserted here rather than on the sign-in response: that response is
+    // Better Auth's envelope around its own session user (ADR-0016), and
+    // `/users/me` is the Registry's User — the shape the interface actually
+    // reads, and the only one carrying the role.
     const readSelf = await context.app.request("/api/users/me", { headers: { cookie: margaretCookie } });
     expect(readSelf.status).toBe(200);
+    expect(((await readSelf.json()) as ApiUser).must_change_password).toBe(true);
 
     // Replacing it clears the requirement.
     const replace = await context.app.request("/api/users/me/password", {
@@ -204,18 +220,19 @@ describe("Managing Users (ticket 11)", () => {
     });
     const created = (await createRes.json()) as ApiUserCreated;
 
-    const login = await context.app.request("/api/auth/login", {
+    const login = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "bessica@example.com", password: created.initial_password }),
     });
     const cookie = sessionCookie(login);
 
-    // Without allowPendingPasswordChange on this route, a User stuck on the
-    // generated password could never end this session — even a wrong
-    // credential is un-log-out-able until the JWT's 12h expiry.
-    const logout = await context.app.request("/api/auth/logout", { method: "POST", headers: { cookie } });
-    expect(logout.status).toBe(204);
+    // Signing out is never gated on the pending password change: the gate
+    // stops a User doing anything else with the session, not giving it up.
+    // Without that, someone who mistyped a generated password would be stuck
+    // with the session until it expired on its own.
+    const logout = await context.app.request(SIGN_OUT_PATH, { method: "POST", headers: { cookie } });
+    expect(logout.status).toBe(200);
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
@@ -235,7 +252,7 @@ describe("Managing Users (ticket 11)", () => {
     });
     expect(res.status).toBe(204);
 
-    const reLogin = await context.app.request("/api/auth/login", {
+    const reLogin = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "katherine@example.com", password: "another-brand-new-password" }),

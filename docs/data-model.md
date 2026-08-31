@@ -1,8 +1,9 @@
 # Data Model
 
-Postgres 18. Eight tables, one materialized view, and one plain view. Managed with Drizzle
-migrations; the generated search column and both views are declared in hand-written SQL because
-Drizzle has no native generator for any of them (ADR-0012).
+Postgres 18. Ten tables, one materialized view, and one plain view. One table or view per file
+under `apps/api/src/db/schemas/`, managed with Drizzle migrations. Both views are created in
+hand-written SQL because Drizzle has no generator for a view (ADR-0012); everything else,
+generated columns and check constraints included, comes out of `bun run db:generate`.
 
 Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag.
 
@@ -22,7 +23,9 @@ A User of the Registry.
 | `email`                | `text`        | not null, unique                                  |
 | `first_name`           | `text`        | not null                                          |
 | `last_name`            | `text`        | not null                                          |
-| `password_hash`        | `text`        | **null** — absent for externally authenticated Users |
+| `name`                 | `text`        | not null, generated from the two halves below     |
+| `email_verified`       | `boolean`     | not null, default `false`                         |
+| `image`                | `text`        | null                                              |
 | `role`                 | `user_role`   | not null                                          |
 | `must_change_password` | `boolean`     | not null, default `false`                         |
 | `created_at`           | `timestamptz` | not null, default `now()`                         |
@@ -37,10 +40,22 @@ application rule; see "Rules the schema cannot express" below.
 Email is the identifier. It is normalised to lowercase on write so that the unique
 constraint means what a person expects it to mean.
 
-`password_hash` holds an argon2id hash from the runtime's built-in hashing; plaintext is
-never stored. It is **nullable** because a User who authenticates through an identity
-provider has no password at all (ADR-0007). A row in this table means a User exists, not
-that a password exists — every path that reads one must tolerate its absence.
+There is no `password_hash` column any more. The hash moved into `accounts` when Better Auth
+took over authentication (ADR-0016); it is still argon2id from the runtime's built-in hashing,
+and still never plaintext. A row in this table means a User exists, not that a password
+exists — a User who authenticates through an Identity Provider has no credential row at all
+(ADR-0007), so every path that reads one must tolerate its absence.
+
+`name`, `email_verified`, and `image` belong to Better Auth's user model rather than to this
+domain. `name` is **generated**, not written: Postgres derives it from `first_name` and
+`last_name`, so a rename through `PATCH /users/me` cannot leave the two out of step and there
+is no write path to keep in sync. Nothing may insert into it.
+
+`email_verified` is set on every User the Registry creates, and does not mean the address was
+challenged — nothing here sends email. It means the Registry stands behind the address, which is
+already what CONTEXT.md means by calling the email the identity. It has to be set: Better Auth
+refuses to link a Provider login to an unverified row, so a User created with it false could never
+sign in through a Provider (ADR-0016).
 
 `must_change_password` is set when an Admin creates a User with a generated password, and
 cleared when that User replaces it. While set, every route except replacing their own
@@ -328,41 +343,44 @@ and deferred — see ADR-0012.
 
 ## `identity_providers`
 
-One row per configured way to log in without a password. Several may be enabled at once, and
-every enabled one is offered on the login page.
+At most one row per kind (ADR-0017). Any number of them may be enabled, and every enabled one
+is offered on the login page.
 
 ```
-id                uuid primary key default uuidv7()
-slug              text not null unique
-kind              identity_provider_kind not null   -- 'google' | 'microsoft'
-display_name      text not null
-issuer_url        text not null
-client_id         text not null
-client_secret     text not null
-permitted_domain  text
-enabled           boolean not null default false
-created_at        timestamptz not null default now()
-updated_at        timestamptz not null default now()
-
-check (NOT enabled OR permitted_domain IS NOT NULL)
+id                       uuid primary key default uuidv7()
+kind                     identity_provider_kind not null unique  -- 'google' | 'microsoft' | 'github'
+display_name             text not null
+client_id                text not null
+client_secret            text not null
+permitted_organisations  text[] not null default '{}'
+enabled                  boolean not null default false
+created_at               timestamptz not null default now()
+updated_at               timestamptz not null default now()
 ```
 
-`issuer_url` is the provider's Issuer Identifier (`https://accounts.google.com`,
-`https://login.microsoftonline.com/{tenant}/v2.0`), not the path to its discovery document.
-Discovery runs against it and every ID token's `iss` is validated to match; pointing it at the
-document itself silently disables that check.
+`kind` is the Provider's identity, which is why it is unique and why no route changes it.
+There is no slug and no issuer URL: Better Auth knows each kind's endpoints (ADR-0016), so an
+Admin configures the credential pair and the organisations to admit, and nothing about the
+protocol.
 
-`permitted_domain` holds the Workspace domain (Google's `hd` claim) or tenant (Entra's `tid`),
-and is matched on the claim, never on the email address's suffix. The check constraint is the
-one rule here the database can express and does: because a login provisions a User just in
-time, this column is the *only* control on who gets an account, so an ungated Provider is not
-enablable at all rather than merely discouraged.
+`permitted_organisations` holds Workspace domains (Google's `hd` claim), tenant ids (Entra's
+`tid`), or GitHub organisation logins. A login is admitted if what the Provider asserts matches
+**any one** of them — a claim for the first two, a live `/user/orgs` check for GitHub, which issues
+no ID token (ADR-0018) — and never against the email address's suffix. Comparison is
+case-insensitive; the stored spelling is whatever the Admin typed.
+
+An **empty array is a configuration, not a blank**: no organisation check runs, and every account
+the provider authenticates gets a `reader` here (ADR-0021). Because a login provisions a User just
+in time, this column is the only control on who gets an account, so emptying it opens the Registry
+to everyone that provider will authenticate — for GitHub, the whole internet. A check constraint
+once made this state unreachable for an enabled Provider; ADR-0021 drops it deliberately, and the
+interface, the service, and every individual login log a warning in its place.
 
 `client_secret` is stored as given, following listmonk (ADR-0015). No response shape includes
 it — it is written and never read back, so a leaked backup is the only way it escapes.
 
 There is deliberately **no** `user_identities` table. A login is matched to a User by the
-verified email in the provider's claims and creates one if none matches, so the `users` row is
+email the provider asserts and creates one if none matches, so the `users` row is
 the identity and a person signing in through two Providers is one row, not two links. ADR-0015
 reverses ADR-0007 on this point and records what it costs: a rename in the provider creates a
 second User rather than following the first.
@@ -370,11 +388,43 @@ second User rather than following the first.
 Deleting a Provider is not a supported operation — `enabled` is how one is taken out of
 service, so nobody loses their way in to a mistyped click.
 
-## No sessions table
+## `sessions`, `accounts`, and `verifications`
 
-Web sessions are a signed token in a cookie carrying only the User's id (ADR-0005). Nothing
-is persisted, so there is no table to look for and no session to revoke — only expiry. Token
-authentication is the path that *is* revocable.
+These three belong to Better Auth (ADR-0016). Their columns are its model, mapped back to this
+repo's snake_case in `apps/api/src/auth/instance.ts` rather than letting one library's naming
+break the convention that a column, its TS key, and the wire all agree. Nothing in this
+codebase writes to them directly.
+
+`sessions` replaces the stateless JWT ADR-0005 described. A session is a row keyed by a unique
+`token`, with a `user_id` that cascades on delete — so logging out genuinely revokes, and the
+trade-off ADR-0005 accepted ("a session cannot be revoked before its JWT expires") is no longer
+paid. What has *not* changed is the half that mattered: the session says who you are and never
+what you may do, so the role is still resolved from `users` on every request.
+
+`accounts` holds one row per way a User can authenticate. `provider_id` is `credential` for a
+password — that row's `password` column is where `users.password_hash` went — or the Provider's
+kind for an external login. `issuer` says who vouched for it: the provider's own issuer, or the
+synthetic `local:credential` for a password.
+
+`access_token` on a `github` row is not incidental storage: it is a live GitHub credential carrying
+the `repo` scope, and it is what a private-repository import runs as (ADR-0020). GitHub does not
+divide that scope, so it grants read *and* write across every private repository that User can
+reach. It is encrypted at rest — Better Auth's `encryptOAuthTokens` is on — so the column holds
+AES-256-GCM ciphertext under `BETTER_AUTH_SECRET`, and anything reading it has to decrypt before
+use. `GitHubImportService` is the only reader. Treat this column as the most sensitive in the
+schema anyway: password and Token hashes are one-way, and this one is reversible by design.
+
+The three of `provider_id`, `issuer`, and `account_id` are unique together because they are what
+Better Auth matches an account on, all three at once. Writing a credential without the issuer
+does not fail — it produces a row that sign-in cannot see, so the login is refused as though the
+User did not exist. `apps/api/test/auth-schema.test.ts` checks the mapping for this reason, and
+needs no database to do it.
+
+`verifications` is Better Auth's short-lived key/value store. Here it holds the in-flight OAuth
+state — the PKCE code verifier and the CSRF nonce — which is why a login begun against one
+Better Auth instance survives that instance being rebuilt (ADR-0019).
+
+Token authentication is untouched, and still revokes the moment a Token is deleted.
 
 ## Rules the schema cannot express
 
@@ -392,9 +442,12 @@ catch them:
 - **An external login never grants a role above `reader`.** A created User is always a
   `reader` — the Provider row carries no role column for a misconfiguration to set — and
   logging in never alters the role of a User who already exists.
-- **A Provider's `slug` and `kind` never change.** The slug is what a login carries back in
-  `state` and what the callback matches against its cookie; the kind decides which claim gates
-  the domain. The update route accepts neither.
+- **A Provider's `kind` never changes.** It is the Provider's identity (ADR-0017), so changing
+  it would repoint a live configuration rather than configure a second one. The update route
+  does not accept it.
+- **The organisation gate runs on every login, not only the first.** Someone removed from the
+  permitted organisation is refused the next time they sign in, rather than keeping an account
+  because they passed the check once (ADR-0018).
 - **A Provider is never deleted.** There is no delete route to call; `enabled` is the only way
   one leaves service.
 - **Role permissions** — readers cannot publish, writers cannot delete a Skill or manage

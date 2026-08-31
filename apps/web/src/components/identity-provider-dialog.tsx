@@ -1,6 +1,7 @@
 import {
   IDENTITY_PROVIDER_GUIDANCE,
   IDENTITY_PROVIDER_KINDS,
+  isUngated,
   type IdentityProvider,
   type IdentityProviderKind,
 } from "@skill-registry/shared";
@@ -14,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,15 +23,37 @@ import { useCreateIdentityProvider, useUpdateIdentityProvider } from "@/hooks/us
 import { apiErrorMessage } from "@/lib/api";
 
 /**
+ * Splits what an Admin typed into the organisations that will be stored.
+ *
+ * @remarks
+ * Commas or newlines, because an Admin pasting a list from elsewhere should
+ * not have to care which one they got. Deduplication is left to the API, which
+ * has to do it anyway for requests that never came from this form.
+ *
+ * @param value - The raw field contents.
+ * @returns The organisations named, trimmed, with blanks dropped.
+ * @example
+ * ```ts
+ * parseOrganisations("acme, acme-labs"); // ["acme", "acme-labs"]
+ * ```
+ */
+function parseOrganisations(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+}
+
+/**
  * Configures an Identity Provider, either a new one or an existing one.
  *
  * @remarks
  * Editing differs from creating in two ways that both come straight from the
- * data model. `slug` and `kind` are shown but not editable: the slug is what a
- * login carries back in `state` and the kind decides which claim gates the
- * domain, so changing either would silently repoint a live configuration. And
- * the client secret is never filled in, because no response returns it —
- * leaving it blank keeps the stored one.
+ * data model. `kind` is shown but not editable, because it *is* the Provider's
+ * identity (ADR-0017) — changing it would silently repoint a live
+ * configuration rather than configure a second one. And the client secret is
+ * never filled in, because no response returns it; leaving it blank keeps the
+ * stored one.
  */
 export function IdentityProviderDialog({
   open,
@@ -44,12 +68,17 @@ export function IdentityProviderDialog({
   const isEdit = provider !== null;
 
   const [kind, setKind] = useState<IdentityProviderKind>(provider?.kind ?? "google");
-  const [slug, setSlug] = useState(provider?.slug ?? "");
   const [displayName, setDisplayName] = useState(provider?.display_name ?? "");
-  const [issuerUrl, setIssuerUrl] = useState(provider?.issuer_url ?? "");
   const [clientId, setClientId] = useState(provider?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
-  const [permittedDomain, setPermittedDomain] = useState(provider?.permitted_domain ?? "");
+  const [permittedOrganisations, setPermittedOrganisations] = useState(
+    (provider?.permitted_organisations ?? []).join(", "),
+  );
+
+  // Parsed on every keystroke rather than only on submit, so the chips below
+  // the field show exactly what will be stored — separators are easy to get
+  // wrong and an unnoticed empty list is the one mistake that matters here.
+  const parsedOrganisations = parseOrganisations(permittedOrganisations);
 
   const create = useCreateIdentityProvider();
   const update = useUpdateIdentityProvider();
@@ -68,17 +97,14 @@ export function IdentityProviderDialog({
   }
 
   function handleSubmit() {
-    const domain = permittedDomain.trim() === "" ? null : permittedDomain.trim();
-
     if (isEdit) {
       update.mutate(
         {
           id: provider.id,
           body: {
             display_name: displayName,
-            issuer_url: issuerUrl,
             client_id: clientId,
-            permitted_domain: domain,
+            permitted_organisations: parsedOrganisations,
             // Blank means "leave the stored secret alone" — the field starts
             // blank every time, since it can never be read back to prefill.
             ...(clientSecret === "" ? {} : { client_secret: clientSecret }),
@@ -91,23 +117,18 @@ export function IdentityProviderDialog({
 
     create.mutate(
       {
-        slug,
         kind,
         display_name: displayName,
-        issuer_url: issuerUrl,
         client_id: clientId,
         client_secret: clientSecret,
-        permitted_domain: domain,
+        permitted_organisations: parsedOrganisations,
       },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
 
   const canSubmit =
-    displayName.trim() !== "" &&
-    issuerUrl.trim() !== "" &&
-    clientId.trim() !== "" &&
-    (isEdit || (slug.trim() !== "" && clientSecret !== ""));
+    displayName.trim() !== "" && clientId.trim() !== "" && (isEdit || clientSecret !== "");
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -144,23 +165,6 @@ export function IdentityProviderDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="idp_slug">Slug</Label>
-            <Input
-              id="idp_slug"
-              value={slug}
-              onChange={(event) => setSlug(event.target.value)}
-              readOnly={isEdit}
-              disabled={isEdit || pending}
-              placeholder="google"
-            />
-            <p className="text-xs text-muted-foreground">
-              {isEdit
-                ? "Fixed once set — a login carries it back from the provider."
-                : "Lowercase letters, digits, and hyphens. Cannot be changed later."}
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
             <Label htmlFor="idp_display_name">Button label</Label>
             <Input
               id="idp_display_name"
@@ -170,20 +174,6 @@ export function IdentityProviderDialog({
               placeholder={guidance.label}
             />
             <p className="text-xs text-muted-foreground">Shown on the login page as “Continue with …”.</p>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="idp_issuer_url">Issuer URL</Label>
-            <Input
-              id="idp_issuer_url"
-              value={issuerUrl}
-              onChange={(event) => setIssuerUrl(event.target.value)}
-              disabled={pending}
-              placeholder={guidance.issuerExample}
-            />
-            <p className="text-xs text-muted-foreground">
-              The issuer itself, not the path to its discovery document.
-            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -209,17 +199,39 @@ export function IdentityProviderDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="idp_permitted_domain">{guidance.organisation}</Label>
+            <Label htmlFor="idp_permitted_organisations">{guidance.organisation}</Label>
             <Input
-              id="idp_permitted_domain"
-              value={permittedDomain}
-              onChange={(event) => setPermittedDomain(event.target.value)}
+              id="idp_permitted_organisations"
+              value={permittedOrganisations}
+              onChange={(event) => setPermittedOrganisations(event.target.value)}
               disabled={pending}
+              placeholder="Separate several with commas"
             />
+
+            {parsedOrganisations.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {parsedOrganisations.map((organisation) => (
+                  <Badge key={organisation.toLowerCase()} variant="secondary">
+                    {organisation}
+                  </Badge>
+                ))}
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
-              {guidance.organisationHint} Anyone it matches who signs in here gets an account as a reader, so
-              this Provider cannot be enabled without it.
+              {guidance.organisationHint} Anyone they match who signs in here gets an account as a reader.
             </p>
+
+            {/* The one setting on this form that can open the Registry to
+                everyone, and it does it by being left blank — which is
+                exactly how it would go unnoticed. */}
+            {isUngated(parsedOrganisations) && (
+              <p className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                Leaving this empty turns the check off entirely. Anyone who can sign in with{" "}
+                {guidance.label} — not just your organisation — will be able to create an account here as a
+                reader.
+              </p>
+            )}
           </div>
 
           {error && <p className="text-sm text-destructive">{apiErrorMessage(error)}</p>}

@@ -1,9 +1,9 @@
 import { TagListSchema, TagSchema } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
-import { listTags, renameTag, type TagsServiceDependencies } from "../services/tags.js";
+import type { TagsService } from "../services/tags.js";
 
-export interface TagRouteDependencies extends AuthDependencies, TagsServiceDependencies {}
+export type TagRouteDependencies = AuthDependencies & { tags: TagsService };
 
 /**
  * Registers the `/tags` routes: list the whole catalog, and rename a Tag.
@@ -15,11 +15,11 @@ export interface TagRouteDependencies extends AuthDependencies, TagsServiceDepen
  * Skill (ADR-0011).
  *
  * @param app - The Hono app to register the routes on.
- * @param deps - The auth and Tags-service dependencies the routes need.
+ * @param deps - The auth dependencies and the Tags service.
  */
 export function registerTagsRoutes(app: Hono<{ Variables: AuthVariables }>, deps: TagRouteDependencies): void {
   app.get("/tags", requireAuth(deps), async (c) => {
-    return c.json(TagListSchema.parse({ items: await listTags(deps) }));
+    return c.json(TagListSchema.parse({ items: await deps.tags.list() }));
   });
 
   // `admin` minimum, stricter than `PUT /skills/{id}/tags`'s `writer`: a
@@ -28,7 +28,7 @@ export function registerTagsRoutes(app: Hono<{ Variables: AuthVariables }>, deps
   // `DELETE /skills/{id}` at `admin`.
   app.patch("/tags/:id", requireAuth(deps), requireRole("admin"), async (c) => {
     const payload = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-    const tag = await renameTag(deps, c.req.param("id"), payload?.name);
+    const tag = await deps.tags.rename(c.req.param("id"), payload?.name);
     return c.json(TagSchema.parse(tag));
   });
 }

@@ -5,9 +5,9 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/skill_registry}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
       PORT: 3000
-      PUBLIC_URL: ${PUBLIC_URL:-}
+      PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL must be set}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ANALYTICS_REFRESH_CRON: ${ANALYTICS_REFRESH_CRON:-*/30 * * * * *}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-}

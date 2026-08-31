@@ -7,41 +7,33 @@ import {
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { ValidationError } from "../http/errors.js";
-import {
-  createIdentityProvider,
-  listIdentityProviders,
-  updateIdentityProvider,
-  type IdentityProvidersServiceDependencies,
-} from "../services/identity-providers.js";
+import type { IdentityProvidersService } from "../services/identity-providers.js";
 
-export interface IdentityProviderRouteDependencies
-  extends AuthDependencies,
-    IdentityProvidersServiceDependencies {}
+export type IdentityProviderRouteDependencies = AuthDependencies & {
+  identityProviders: IdentityProvidersService;
+};
 
 /**
  * Registers the `/identity-providers` routes: an Admin's view of every
  * configured Provider, and creating or changing one.
  *
  * @remarks
- * There is deliberately no delete route. Disabling a Provider is how one is
- * taken out of service (ADR-0015) — deleting one is a config mistake rather
- * than a data-lifecycle event, and would lock out everyone who signs in
- * through it over a mistyped click.
+ * No delete route. Disabling is how a Provider is taken out of service
+ * (ADR-0015); deleting one would lock out everyone who signs in through it.
  *
- * The login page's own list of Providers is not here: it is
- * `GET /auth/providers`, unauthenticated and carrying only what a button
- * needs. Keeping the two on separate paths is what stops a public response
- * ever being shaped from a row that holds a client secret.
+ * The login page's list lives at `GET /auth/providers` instead. Separate paths
+ * are what stop a public response ever being shaped from a row holding a
+ * client secret.
  *
  * @param app - The Hono app to register the routes on.
- * @param deps - The auth and Identity-Provider-service dependencies.
+ * @param deps - The auth dependencies and the Identity-Provider service.
  */
 export function registerIdentityProviderRoutes(
   app: Hono<{ Variables: AuthVariables }>,
   deps: IdentityProviderRouteDependencies,
 ): void {
   app.get("/identity-providers", requireAuth(deps), requireRole("admin"), async (c) => {
-    const providers = await listIdentityProviders(deps);
+    const providers = await deps.identityProviders.list();
     return c.json(IdentityProviderListSchema.parse({ items: providers }));
   });
 
@@ -52,7 +44,7 @@ export function registerIdentityProviderRoutes(
       throw new ValidationError(issue?.message ?? "Invalid Identity Provider.", issue?.path.join("."));
     }
 
-    const provider = await createIdentityProvider(deps, parsed.data);
+    const provider = await deps.identityProviders.create(parsed.data);
     return c.json(IdentityProviderSchema.parse(provider), 201);
   });
 
@@ -63,7 +55,7 @@ export function registerIdentityProviderRoutes(
       throw new ValidationError(issue?.message ?? "Invalid Identity Provider.", issue?.path.join("."));
     }
 
-    const provider = await updateIdentityProvider(deps, c.req.param("id"), parsed.data);
+    const provider = await deps.identityProviders.update(c.req.param("id"), parsed.data);
     return c.json(IdentityProviderSchema.parse(provider));
   });
 }

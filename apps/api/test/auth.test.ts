@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
-import { decode } from "hono/jwt";
-import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
-import { users } from "../src/db/schema.js";
-import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
+import { and, eq } from "drizzle-orm";
+import { CREDENTIAL_PROVIDER_ID } from "../src/auth/credential.js";
+import { accounts, sessions, users } from "../src/db/schemas/index.js";
+import { SIGN_IN_PATH, SIGN_OUT_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "./setup.js";
 
 interface ApiError {
   error: { code: string; message: string; field?: string };
@@ -86,15 +85,27 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   });
 
   it("stores the password hashed with argon2id, never in plaintext", async () => {
-    const [row] = await context.db.select().from(users).where(eq(users.email, "ada@example.com")).limit(1);
-    expect(row?.password_hash).toStartWith("$argon2id$");
-    expect(row?.password_hash).not.toBe("correct-horse-battery");
+    const [user] = await context.db.select().from(users).where(eq(users.email, "ada@example.com")).limit(1);
+    const [credential] = await context.db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.user_id, user!.id), eq(accounts.provider_id, CREDENTIAL_PROVIDER_ID)))
+      .limit(1);
+
+    // The column moved from users to accounts (ADR-0016); the algorithm did
+    // not, which is what keeps every pre-migration hash verifiable.
+    expect(credential?.password).toStartWith("$argon2id$");
+    expect(credential?.password).not.toBe("correct-horse-battery");
   });
 
-  it("carries only the User's id in the session — never the role", async () => {
-    const token = superadminCookie.split("=")[1]!;
-    const { payload } = decode(token);
-    expect(Object.keys(payload).sort()).toEqual(["exp", "sub"]);
+  it("carries only the User's identity in the session — never the role", async () => {
+    const [session] = await context.db.select().from(sessions).limit(1);
+
+    // ADR-0005's rule survives the move from a JWT to a row: the session says
+    // who you are and nothing about what you may do, so a demotion cannot be
+    // outrun by holding an old credential.
+    expect(session?.user_id).toBeString();
+    expect(Object.keys(session ?? {})).not.toContain("role");
   });
 
   it("reports setup as initialised once a User exists", async () => {
@@ -139,7 +150,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   });
 
   it("logs in with email and password and receives a fresh session cookie", async () => {
-    const res = await context.app.request("/api/auth/login", {
+    const res = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "ada@example.com", password: "correct-horse-battery" }),
@@ -150,7 +161,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
 
   it("refuses a wrong password and an unknown email identically, both padded to the same floor", async () => {
     const wrongPasswordStart = Date.now();
-    const wrongPassword = await context.app.request("/api/auth/login", {
+    const wrongPassword = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "ada@example.com", password: "totally-wrong-password" }),
@@ -158,7 +169,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     const wrongPasswordElapsed = Date.now() - wrongPasswordStart;
 
     const unknownEmailStart = Date.now();
-    const unknownEmail = await context.app.request("/api/auth/login", {
+    const unknownEmail = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "nobody@example.com", password: "totally-wrong-password" }),
@@ -168,22 +179,31 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     expect(wrongPassword.status).toBe(401);
     expect(unknownEmail.status).toBe(401);
     expect(await wrongPassword.json()).toEqual(await unknownEmail.json());
-    // Both must be padded up to the same floor, so a fast (no hash to verify)
-    // and a slow (real argon2id verify) path aren't distinguishable by timing.
-    expect(wrongPasswordElapsed).toBeGreaterThanOrEqual(190);
-    expect(unknownEmailElapsed).toBeGreaterThanOrEqual(190);
+
+    // Neither path may be the obviously fast one. The mechanism changed with
+    // ADR-0016 and is worth stating: instead of padding the response to a
+    // fixed floor, Better Auth hashes the supplied password anyway when there
+    // is no User or no credential to verify against. Because the configured
+    // hash is argon2id, that decoy costs what a real verify costs — so the
+    // ratio is asserted here rather than a magic millisecond count, which
+    // would only be re-measuring argon2id's speed on the test machine.
+    const ratio =
+      Math.max(wrongPasswordElapsed, unknownEmailElapsed) /
+      Math.max(1, Math.min(wrongPasswordElapsed, unknownEmailElapsed));
+    expect(ratio).toBeLessThan(5);
   }, 10_000);
 
   it("does not assume a User has a password (ADR-0007) — login fails cleanly, not with a crash", async () => {
+    // No credential row at all, which is what a User who only ever arrived
+    // through an Identity Provider looks like (ADR-0007).
     await context.db.insert(users).values({
       email: "sso-user@example.com",
       first_name: "Sso",
       last_name: "User",
-      password_hash: null,
       role: "reader",
     });
 
-    const res = await context.app.request("/api/auth/login", {
+    const res = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "sso-user@example.com", password: "anything-at-all" }),
@@ -204,22 +224,27 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     await context.db.update(users).set({ role: "superadmin" }).where(eq(users.email, "ada@example.com"));
   });
 
-  it("ends the session on logout", async () => {
-    const res = await context.app.request("/api/auth/logout", {
+  it("revokes the session on logout, not merely the cookie", async () => {
+    const res = await context.app.request(SIGN_OUT_PATH, {
       method: "POST",
       headers: { cookie: superadminCookie },
     });
-    expect(res.status).toBe(204);
-    const setCookie = res.headers.get("set-cookie");
-    expect(setCookie).toContain("Max-Age=0");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
 
-    // The browser would now stop sending the cookie the server just cleared.
-    const meRes = await context.app.request("/api/users/me");
-    expect(meRes.status).toBe(401);
+    // The part ADR-0005 could not do. Replaying the very same cookie now fails
+    // because the row behind it is gone — a session no longer outlives its
+    // logout until the token happens to expire.
+    const replayed = await context.app.request("/api/users/me", {
+      headers: { cookie: superadminCookie },
+    });
+    expect(replayed.status).toBe(401);
   });
 
-  it("refuses to log out without a session", async () => {
-    const res = await context.app.request("/api/auth/logout", { method: "POST" });
-    expect(res.status).toBe(401);
+  it("treats logging out without a session as already logged out", async () => {
+    // Not an error: there is no session to revoke and nothing for the caller
+    // to do differently, so this reports success rather than 401.
+    const res = await context.app.request(SIGN_OUT_PATH, { method: "POST" });
+    expect(res.status).toBe(200);
   });
 });

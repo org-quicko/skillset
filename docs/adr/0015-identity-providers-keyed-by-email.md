@@ -1,5 +1,17 @@
 # Identity Providers Keyed by Email, Several at Once
 
+> **Partly superseded by ADR-0016, ADR-0017, ADR-0018, and ADR-0021.** The identity model below is
+> unchanged and still governs: a login is matched by verified email, there is no
+> `user_identities` table, an auto-created User is always a `reader`, and password login stays as
+> the break-glass path. The organisation gate is still the only door, but ADR-0021 makes it a list
+> of permitted organisations and allows that list to be empty — an operator may now unlock that door
+> deliberately, and the coarse single-code refusal below is replaced by codes that name which check
+> failed. Three further mechanisms are
+> reversed. There is now one Provider per kind rather than several, so the `slug` column and
+> the `state`-carries-the-slug handshake are gone (ADR-0017). The callback path is per kind
+> rather than shared (ADR-0016). And GitHub, deferred below as "a separate feature", is in
+> scope, gated on organisation membership rather than a claim (ADR-0018).
+
 The Registry gains external login: Google Workspace and Microsoft Entra, several Providers
 enabled at once, configured by an Admin at runtime and offered on the login page beside the
 password form. The implementation follows listmonk's, deliberately including the point
@@ -53,6 +65,12 @@ a shared Skill (ADR-0002) — a larger grant than a domain match is meant to car
 and no pre-existing User required, `hd` for Google and `tid` for Entra are what stand between
 the public internet and a User row. They are not defence in depth here; they are the door. A
 Provider with no gate configured must not be enablable.
+
+> ADR-0021 keeps every sentence of that paragraph except its last one. A Provider with no gate *is*
+> now enablable, on the operator's explicit choice, and the consequence the paragraph describes is
+> exactly what happens when they make it: nothing stands between the public internet and a `reader`
+> row. The check constraint that enforced the last sentence is dropped; four separate warnings take
+> its place.
 
 **Every enabled Provider can log into every account.** Email is an assertion, not an identity,
 so the weakest enabled Provider defines who can reach any given User. This is safe only while

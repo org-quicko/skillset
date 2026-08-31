@@ -27,7 +27,7 @@ _Avoid_: Label, category, topic
 **User**:
 A person with access to the Registry, identified by their email address and described by
 a first and last name. The email address is the identity: two logins asserting the same
-verified address are the same User, whichever Identity Provider asserted it.
+address are the same User, whichever Identity Provider asserted it.
 _Avoid_: Account, member, person
 
 **Admin**:
@@ -76,8 +76,20 @@ user-level directory.
 _Avoid_: Target, location, level, destination
 
 **Identity Provider**:
-A configured, named way for a User to prove who they are without a password, offered on the login
-page beside the password form. Several can be enabled at once and a User may sign in through any
-of them. A Provider vouches for a verified email address and for the organisation that address
-belongs to; the Registry trusts it for nothing else.
+A configured way for a User to prove who they are without a password, offered on the login page
+beside the password form. There are three kinds — Google Workspace, Microsoft Entra, and GitHub —
+and at most one Provider of each kind, any number of which may be enabled at once. A Provider
+vouches for an email address and for the Permitted Organisations that address belongs to;
+the Registry trusts it for nothing else.
 _Avoid_: SSO, social login, connection, OIDC provider (as the domain term)
+
+**Permitted Organisation**:
+One value a Provider admits people from: a Workspace domain for Google, a tenant id for
+Microsoft, an organisation login for GitHub. A Provider holds a list of them and admits a login
+matching any one. Always matched against what the Provider asserts — a claim, or a live membership
+check — and never inferred from an email address's suffix.
+
+They are the only control on who gets an account, and a Provider may be enabled with none listed,
+which turns the check off and admits everyone that provider authenticates (ADR-0021). An
+_ungated_ Provider is the term for that state.
+_Avoid_: Allowed domain, whitelist, tenant (as the general term), hosted domain

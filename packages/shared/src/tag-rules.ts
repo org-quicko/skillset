@@ -23,11 +23,6 @@ export class TagValidationError extends Error {
   readonly rule: TagRule;
   readonly field: string | undefined;
 
-  /**
-   * @param rule - The specific rule that was broken.
-   * @param message - A human-readable description of the failure.
-   * @param field - The request field the failure relates to, if any.
-   */
   constructor(rule: TagRule, message: string, field?: string) {
     super(message);
     this.name = "TagValidationError";

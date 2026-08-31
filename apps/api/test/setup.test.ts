@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { users } from "../src/db/schema.js";
+import { users } from "../src/db/schemas/index.js";
 import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
 
 /**

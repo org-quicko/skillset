@@ -81,11 +81,11 @@
         }
       }
     },
-    "/auth/login": {
+    "/auth/sign-in/email": {
       "post": {
         "tags": ["auth"],
-        "summary": "Log in",
-        "description": "Issues a session and sets its cookie. Nothing is persisted — the session is a signed token carrying only the User's id (ADR-0005), so there is no session record anywhere to read or delete.\n\nIf the returned User has `must_change_password` set, every route except reading and replacing their own password will be refused until it is done.",
+        "summary": "Sign in with an email address and password",
+        "description": "Served by Better Auth (ADR-0016) rather than by a route in this codebase, and documented here because it is how the interface logs in. Issues a session and sets its cookie; the session is a row, so it can be revoked (ADR-0005's trade-off no longer applies).\n\nAn unknown email and a wrong password are refused identically, and both run an argon2id hash — the decoy for an unknown email costs what a real verify costs — so the two cannot be told apart by timing either.\n\nIf the User has `must_change_password` set, every route except reading and replacing their own password will be refused until it is done.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -104,25 +104,21 @@
         },
         "responses": {
           "200": {
-            "description": "Logged in",
-            "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } },
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+            "description": "Signed in",
+            "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } }
           },
-          "401": {
-            "description": "Unknown email or wrong password. Deliberately does not distinguish the two.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
-          }
+          "401": { "description": "Unknown email or wrong password. Deliberately does not distinguish the two." }
         }
       }
     },
-    "/auth/logout": {
+    "/auth/sign-out": {
       "post": {
         "tags": ["auth"],
-        "summary": "Log out",
-        "description": "Clears the session cookie. Because the session is a signed token rather than a stored record, the token itself remains valid until it expires (ADR-0005) — clearing the cookie is what ends the session for this browser. Tokens are the credential that can actually be revoked.",
+        "summary": "Sign out",
+        "description": "Served by Better Auth (ADR-0016). Deletes the session row and clears the cookie, so replaying the cookie fails rather than working until the token would have expired.\n\nSigning out with no session reports success rather than an error: there is nothing to revoke, and nothing the caller could do differently.",
+        "security": [],
         "responses": {
-          "204": { "description": "Session ended" },
-          "401": { "$ref": "#/components/responses/Unauthenticated" }
+          "200": { "description": "Signed out" }
         }
       }
     },
@@ -150,40 +146,53 @@
         }
       }
     },
-    "/auth/providers/{slug}/start": {
-      "get": {
+    "/auth/sign-in/social": {
+      "post": {
         "tags": ["auth"],
         "summary": "Begin a login through an Identity Provider",
-        "description": "Redirects to the provider's authorization endpoint and sets a short-lived `SameSite=Lax` cookie holding this login's nonce, the Provider it was begun against, and where to land afterwards. That cookie — not the `state` travelling through the provider — is what the callback trusts. `Lax` rather than `Strict` because the callback arrives as a top-level navigation from another origin, which a `Strict` cookie would not be sent with.",
+        "description": "Served by Better Auth (ADR-0016). Answers with the provider's authorization URL for the browser to navigate to, and persists this login's PKCE verifier and CSRF nonce as a `verifications` row — server-side, not in memory, which is why a login survives the auth instance being rebuilt (ADR-0019).",
         "security": [],
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "required": true,
-            "description": "The Provider to sign in through. Must be enabled.",
-            "schema": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" }
-          },
-          {
-            "name": "destination",
-            "in": "query",
-            "required": false,
-            "description": "Where to land after signing in. Narrowed to a path within this Registry — anything else, including a protocol-relative value, becomes `/`.",
-            "schema": { "type": "string" }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["provider"],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": ["google", "microsoft", "github"],
+                    "description": "The Provider's kind, which is its identity (ADR-0017). Must be configured and enabled."
+                  },
+                  "callbackURL": {
+                    "type": "string",
+                    "description": "Where to land after signing in, as a path within this Registry."
+                  }
+                }
+              }
+            }
           }
-        ],
+        },
         "responses": {
-          "302": { "$ref": "#/components/responses/ExternalLoginRedirect" }
+          "200": { "description": "The authorization URL to navigate to" }
         }
       }
     },
-    "/auth/callback": {
+    "/auth/callback/{kind}": {
       "get": {
         "tags": ["auth"],
         "summary": "Complete a login an Identity Provider has returned",
-        "description": "One callback path for every Provider, so a deployment registers a single redirect URI per provider console. Which Provider a response belongs to is carried in `state` and checked against the flow cookie before a token is exchanged. Then the ID token's nonce must match the cookie's, the email claim must be verified, and the organisation claim (`hd` for Google, `tid` for Entra) must equal the Provider's permitted one — matched on the claim, never on the email address's suffix. A verified email matching an existing User signs into them; one matching none creates a reader with no password.",
+        "description": "Served by Better Auth (ADR-0016). One path per kind rather than the single shared callback earlier versions used, so each provider console registers `<PUBLIC_URL>/api/auth/callback/<kind>`.\n\nBefore any claim is trusted, the returned state must match what was stored for this flow. The login is then refused unless the Provider is enabled and the organisation matches the Provider's permitted one — Google's `hd` claim, Entra's `tid` claim, or, for GitHub, membership returned by `/user/orgs`, since it issues no ID token (ADR-0018). Matched on what the Provider asserts, never on the email address's suffix.\n\nAn email matching an existing User signs into them, whatever role they hold; one matching none creates a reader with no password. Every refusal redirects back to the login page with the same coarse reason — which check failed goes to the logs and only there.",
         "security": [],
         "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "description": "The Provider that returned this login.",
+            "schema": { "type": "string", "enum": ["google", "microsoft", "github"] }
+          },
           { "name": "code", "in": "query", "required": false, "schema": { "type": "string" } },
           { "name": "state", "in": "query", "required": false, "schema": { "type": "string" } }
         ],
@@ -814,6 +823,74 @@
         }
       }
     },
+    "/github/skill-files": {
+      "post": {
+        "tags": ["skills"],
+        "summary": "Read a Skill's files from a GitHub repository the caller can see",
+        "description": "Requires at least the writer role. Fetches a folder from a GitHub repository — **private ones included** — using the calling writer's own GitHub OAuth token, and returns its files for the browser to publish through the usual pipeline (ADR-0020).\n\nThe body carries the repository's parts and deliberately **no URL**: the server builds every GitHub request itself from these fields, so this route cannot be aimed at another host. The browser parses the pasted URL and sends the result; every part is re-validated here.\n\nPublic repositories do not need this. The browser fetches those anonymously and always has (ADR-0010); the interface only falls back to this route when the anonymous attempt cannot see the repository. Nothing here writes to GitHub — every request it makes is a `GET`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["owner", "repo", "ref", "path"],
+                "properties": {
+                  "owner": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+                  "repo": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+                  "ref": {
+                    "type": ["string", "null"],
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "description": "Branch, tag, or commit. `null` uses the repository's default branch."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "The folder within the repository, `\"\"` for its root. No leading or trailing slash, and no `.` or `..` segment."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The folder's files, at paths relative to the folder itself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["path", "content_base64"],
+                        "properties": {
+                          "path": { "type": "string" },
+                          "content_base64": { "type": "string", "description": "The file's bytes, base64-encoded." }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "description": "The caller is a reader; importing exists to publish" },
+          "409": {
+            "description": "The caller has no linked GitHub account (`github_not_connected`) — they should sign in with GitHub once",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "502": {
+            "description": "GitHub refused the request, the folder is empty or invisible to that writer, or it is larger than a Skill may be (`github_import_failed`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
     "/identity-providers": {
       "get": {
         "tags": ["identity-providers"],
@@ -841,30 +918,28 @@
       "post": {
         "tags": ["identity-providers"],
         "summary": "Configure an Identity Provider",
-        "description": "Requires at least the admin role. A Provider may be created enabled, but only with a permitted domain or tenant set — with just-in-time provisioning that gate is the only control on who gets an account (ADR-0015).",
+        "description": "Requires at least the admin role. At most one Provider per kind (ADR-0017). A Provider may be created enabled, but only with a permitted organisation set — with just-in-time provisioning that gate is the only control on who gets an account (ADR-0015).\n\nThere is no issuer URL to supply: Better Auth knows each kind's endpoints (ADR-0016), so what an Admin configures is the credential pair and the organisation to admit.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["slug", "kind", "display_name", "issuer_url", "client_id", "client_secret"],
+                "required": ["kind", "display_name", "client_id", "client_secret"],
                 "properties": {
-                  "slug": {
+                  "kind": {
                     "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
-                    "description": "Immutable after creation."
+                    "enum": ["google", "microsoft", "github"],
+                    "description": "The Provider's identity, and immutable after creation (ADR-0017)."
                   },
-                  "kind": { "type": "string", "enum": ["google", "microsoft"] },
                   "display_name": { "type": "string", "minLength": 1 },
-                  "issuer_url": { "type": "string", "format": "uri" },
                   "client_id": { "type": "string", "minLength": 1 },
                   "client_secret": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Stored as given, and never returned by any response."
                   },
-                  "permitted_domain": { "type": ["string", "null"] },
+                  "permitted_organisations": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 50, "description": "Organisations this Provider admits — Workspace domains, Entra tenant ids, or GitHub organisation logins by kind. A login is admitted if it matches any one of them, case-insensitively. An empty array means no organisation check runs at all and everyone the provider authenticates gets a reader account (ADR-0021)." },
                   "enabled": { "type": "boolean", "default": false }
                 }
               }
@@ -880,7 +955,7 @@
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": { "$ref": "#/components/responses/AdminOnly" },
           "409": {
-            "description": "Another Identity Provider already holds that slug",
+            "description": "An Identity Provider of that kind is already configured (`kind_taken`)",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -891,7 +966,7 @@
       "patch": {
         "tags": ["identity-providers"],
         "summary": "Change an Identity Provider's configuration",
-        "description": "Requires at least the admin role, and is also how a Provider is enabled and disabled. `slug` and `kind` cannot be changed: the slug is what a login carries back in `state`, and the kind decides which claim gates the domain, so altering either would silently repoint a live configuration rather than create a new one. Omitting `client_secret` leaves the stored one untouched, which is what lets a Provider be edited without its secret ever being read back.\n\nThere is deliberately no delete route. Disabling is how a Provider is taken out of service — deleting one would lock out everyone who signs in through it over a mistyped click.",
+        "description": "Requires at least the admin role, and is also how a Provider is enabled and disabled. `kind` cannot be changed: it is the Provider's identity (ADR-0017), so altering it would silently repoint a live configuration rather than configure a second one. Omitting `client_secret` leaves the stored one untouched, which is what lets a Provider be edited without its secret ever being read back.\n\nChanges reach logins by two routes, and the difference matters (ADR-0019): `enabled` and `permitted_organisations` are read on every login and take effect immediately, while new credentials take effect once the auth instance is rebuilt on the next request to its routes. A stale instance can therefore fail a login through a Provider added moments ago, but can never admit someone a disabled Provider should have refused.\n\nThere is deliberately no delete route. Disabling is how a Provider is taken out of service — deleting one would lock out everyone who signs in through it over a mistyped click.",
         "requestBody": {
           "required": true,
           "content": {
@@ -901,10 +976,9 @@
                 "minProperties": 1,
                 "properties": {
                   "display_name": { "type": "string", "minLength": 1 },
-                  "issuer_url": { "type": "string", "format": "uri" },
                   "client_id": { "type": "string", "minLength": 1 },
                   "client_secret": { "type": "string", "minLength": 1 },
-                  "permitted_domain": { "type": ["string", "null"] },
+                  "permitted_organisations": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 50, "description": "Organisations this Provider admits — Workspace domains, Entra tenant ids, or GitHub organisation logins by kind. A login is admitted if it matches any one of them, case-insensitively. An empty array means no organisation check runs at all and everyone the provider authenticates gets a reader account (ADR-0021)." },
                   "enabled": { "type": "boolean" }
                 }
               }
@@ -917,7 +991,7 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IdentityProvider" } } }
           },
           "400": {
-            "description": "Invalid, or the result would be an enabled Provider with no permitted domain or tenant (`provider_ungated`)",
+            "description": "Invalid request body",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
@@ -1237,14 +1311,13 @@
       "PublicIdentityProvider": {
         "type": "object",
         "description": "What an unauthenticated visitor sees on the login page: enough to draw a button and start a flow, and nothing else. Must never grow a field that could carry a credential.",
-        "required": ["slug", "kind", "display_name"],
+        "required": ["kind", "display_name"],
         "properties": {
-          "slug": {
+          "kind": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
-            "description": "Immutable, and what a login carries back in `state`."
+            "enum": ["google", "microsoft", "github"],
+            "description": "The Provider's identity, and what a login is started against (ADR-0017)."
           },
-          "kind": { "type": "string", "enum": ["google", "microsoft"] },
           "display_name": { "type": "string", "description": "Shown on the login page as \"Continue with …\"." }
         }
       },
@@ -1253,30 +1326,23 @@
         "description": "An Admin's view of a configured Identity Provider. `client_secret` is deliberately absent from this and every other response: it is written and never read back, so no response can leak it, not even to the Admin who set it.",
         "required": [
           "id",
-          "slug",
           "kind",
           "display_name",
-          "issuer_url",
           "client_id",
-          "permitted_domain",
+          "permitted_organisations",
           "enabled",
           "created_at",
           "updated_at"
         ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
-          "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" },
-          "kind": { "type": "string", "enum": ["google", "microsoft"] },
+          "kind": { "type": "string", "enum": ["google", "microsoft", "github"] },
           "display_name": { "type": "string" },
-          "issuer_url": {
-            "type": "string",
-            "format": "uri",
-            "description": "The provider's Issuer Identifier, not the path to its discovery document. Discovery runs against it, and every ID token's `iss` is validated to match — pointing it at the document itself would silently disable that check."
-          },
           "client_id": { "type": "string" },
-          "permitted_domain": {
-            "type": ["string", "null"],
-            "description": "The Workspace domain (Google `hd`) or tenant (Entra `tid`) allowed to sign in, matched on the claim rather than on the email address's suffix. With just-in-time provisioning this is the only control on who gets an account, so a Provider cannot be enabled without it."
+          "permitted_organisations": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The organisations allowed to sign in: Workspace domains (Google `hd`), tenant ids (Entra `tid`), or GitHub organisation logins. A login is admitted if what the Provider asserts matches any one of them, case-insensitively — a claim for the first two, a live `/user/orgs` check for GitHub, which issues no ID token (ADR-0018) — and never against the email address's suffix. An empty array is a configuration rather than a blank: no check runs, and everyone the provider authenticates gets a reader account here (ADR-0021)."
           },
           "enabled": {
             "type": "boolean",

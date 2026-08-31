@@ -1,4 +1,10 @@
-import { parseGitHubSkillUrl, type SkillFile } from "@skill-registry/shared";
+import {
+  GitHubSkillFilesSchema,
+  parseGitHubSkillUrl,
+  type GitHubSkillLocation,
+  type SkillFile,
+} from "@skill-registry/shared";
+import { apiFetch } from "@/lib/api";
 
 /** The subset of GitHub's Contents API entry shape this module reads. */
 interface GitHubContentsEntry {
@@ -14,6 +20,13 @@ interface GitHubContentsEntry {
 class GitHubFetchError extends Error {}
 
 /**
+ * The repository or folder is not visible anonymously — which is what a
+ * private one looks like from the browser, and so the one failure worth
+ * retrying with the writer's own access (ADR-0020).
+ */
+class GitHubNotFoundError extends GitHubFetchError {}
+
+/**
  * Issues a GitHub API `GET` and parses its JSON body, translating the
  * response codes a writer is actually likely to hit into a plain sentence.
  *
@@ -27,8 +40,8 @@ class GitHubFetchError extends Error {}
 async function githubJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { accept: "application/vnd.github+json" } });
   if (res.status === 404) {
-    throw new GitHubFetchError(
-      "Couldn't find that repository or folder. Only public repositories can be published from a URL.",
+    throw new GitHubNotFoundError(
+      "Couldn't find that repository or folder. If it's private, sign in with GitHub and try again.",
     );
   }
   if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
@@ -109,14 +122,50 @@ async function walkGitHubFolder(
  */
 export async function fetchGitHubSkillFiles(url: string): Promise<SkillFile[]> {
   const location = parseGitHubSkillUrl(url);
-  const ref =
-    location.ref ??
-    (await githubJson<{ default_branch: string }>(`https://api.github.com/repos/${location.owner}/${location.repo}`))
-      .default_branch;
 
-  const files = await walkGitHubFolder(location.owner, location.repo, ref, location.path, location.path.length);
-  if (files.length === 0) {
-    throw new GitHubFetchError("That folder is empty, or doesn't exist at that ref.");
+  try {
+    const ref =
+      location.ref ??
+      (await githubJson<{ default_branch: string }>(`https://api.github.com/repos/${location.owner}/${location.repo}`))
+        .default_branch;
+
+    const files = await walkGitHubFolder(location.owner, location.repo, ref, location.path, location.path.length);
+    if (files.length === 0) {
+      throw new GitHubFetchError("That folder is empty, or doesn't exist at that ref.");
+    }
+    return files;
+  } catch (error) {
+    // A repository the browser cannot see anonymously is the one case worth a
+    // second attempt: it is what a private repository looks like from here
+    // (ADR-0020). Every other failure — rate limit, empty folder, a bad ref —
+    // would fail the same way server-side, so it is reported as it is.
+    if (!(error instanceof GitHubNotFoundError)) throw error;
+    return fetchPrivateGitHubSkillFiles(location);
   }
-  return files;
+}
+
+/**
+ * Asks the Registry to fetch the folder using the signed-in writer's own
+ * GitHub access (ADR-0020).
+ *
+ * @remarks
+ * Sends the parsed parts rather than the URL, because that is what the API
+ * accepts — it builds the GitHub request itself so that it cannot be aimed
+ * anywhere else.
+ *
+ * @param location - The repository, ref, and folder, already parsed.
+ * @returns The folder's files, shaped exactly as the anonymous path returns them.
+ * @throws ApiError if the writer has no linked GitHub account, cannot see the
+ * repository, or the import fails.
+ */
+async function fetchPrivateGitHubSkillFiles(location: GitHubSkillLocation): Promise<SkillFile[]> {
+  const { items } = await apiFetch("/github/skill-files", GitHubSkillFilesSchema, {
+    method: "POST",
+    body: JSON.stringify(location),
+  });
+
+  return items.map((item) => ({
+    path: item.path,
+    bytes: Uint8Array.from(atob(item.content_base64), (character) => character.charCodeAt(0)),
+  }));
 }

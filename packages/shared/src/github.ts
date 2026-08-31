@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /**
  * Where a Skill's files live within a public GitHub repository, resolved
  * from a URL a writer pasted on the publish screen (ticket 20).
@@ -69,3 +71,65 @@ export function parseGitHubSkillUrl(url: string): GitHubSkillLocation {
 
   throw invalid();
 }
+
+/**
+ * Owner, repository, and ref names, as this Registry will accept them.
+ *
+ * @remarks
+ * Deliberately narrower than GitHub allows. These values are interpolated
+ * into an `api.github.com` URL by the server (ADR-0020), so the pattern is
+ * what stops a `/`, a `..`, or a `@` turning a repository path into a request
+ * somewhere else. A ref containing `/` is already unsupported by
+ * `parseGitHubSkillUrl`, so nothing legitimate is lost.
+ */
+export const GITHUB_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+const GitHubName = z.string().min(1).max(100).regex(GITHUB_NAME_PATTERN);
+
+/**
+ * A folder path within a repository: forward slashes only, no leading or
+ * trailing slash, and no `.` or `..` segment — a traversal would otherwise
+ * climb out of the repository path and address a different API route.
+ */
+const GitHubPath = z
+  .string()
+  .max(1024)
+  .refine(
+    (value) =>
+      value === "" ||
+      (!value.startsWith("/") &&
+        !value.endsWith("/") &&
+        value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")),
+    { message: "Not a folder path within the repository." },
+  );
+
+/**
+ * `POST /github/skill-files` request body — where to read a Skill from.
+ *
+ * @remarks
+ * Parts, never a URL. The server builds the GitHub request from these fields
+ * and will not follow anything a caller hands it, which is what keeps a
+ * server-side fetch from being a request-forgery surface (ADR-0020). The
+ * browser parses the pasted URL with `parseGitHubSkillUrl` and sends the
+ * result.
+ */
+export const GitHubImportRequestSchema = z.object({
+  owner: GitHubName,
+  repo: GitHubName,
+  /** `null` to use the repository's default branch. */
+  ref: GitHubName.nullable(),
+  path: GitHubPath,
+});
+export type GitHubImportRequest = z.infer<typeof GitHubImportRequestSchema>;
+
+/** One fetched file. Base64 because bytes have to cross JSON to reach the browser. */
+export const GitHubSkillFileSchema = z.object({
+  path: z.string(),
+  content_base64: z.string(),
+});
+
+/** `POST /github/skill-files` response — the folder's files, ready to publish. */
+export const GitHubSkillFilesSchema = z.object({
+  items: z.array(GitHubSkillFileSchema),
+});
+export type GitHubSkillFiles = z.infer<typeof GitHubSkillFilesSchema>;

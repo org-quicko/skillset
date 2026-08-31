@@ -1,4 +1,4 @@
-import type { PublicIdentityProvider } from "@skill-registry/shared";
+import { loginRefusalMessage, type PublicIdentityProvider } from "@skill-registry/shared";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,27 +7,17 @@ import { Label } from "@/components/ui/label";
 import { useLogin } from "@/hooks/use-auth";
 import { useLoginProviders } from "@/hooks/use-identity-providers";
 import { ApiError } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
 import { useRouter } from "@/lib/use-router";
 
 /**
- * Every failure of an external login lands here with the same message. The API
- * does not say which check failed, so neither does this — the person can act
- * no differently either way, and the reason is in the server's logs.
+ * Starts an external login. Better Auth answers with the provider's
+ * authorization URL and the browser leaves the app for it — a top-level
+ * navigation, not a client-side route change, because the provider is a
+ * different origin.
  */
-const EXTERNAL_LOGIN_MESSAGE: Record<string, string> = {
-  public_url_not_configured:
-    "This Registry is not configured for external sign-in yet. Ask an admin to set PUBLIC_URL.",
-};
-
-const DEFAULT_EXTERNAL_LOGIN_MESSAGE = "That sign-in could not be completed. Try again, or use your password.";
-
-/**
- * Starts an external login by leaving the app entirely: the browser has to
- * make a top-level navigation to the provider, so this is a full page load
- * rather than a client-side route change.
- */
-function startExternalLogin(slug: string): void {
-  window.location.assign(`/api/auth/providers/${encodeURIComponent(slug)}/start`);
+function startExternalLogin(kind: string): void {
+  void authClient.signIn.social({ provider: kind, callbackURL: "/" });
 }
 
 export function LoginForm() {
@@ -37,7 +27,10 @@ export function LoginForm() {
   const providers = useLoginProviders();
   const { search } = useRouter();
 
-  // Set by the API when it bounces a failed external login back here.
+  // Set by the API when it bounces a failed external login back here. The code
+  // names which check refused it, so the message can be the one that helps —
+  // an unapproved OAuth app and a wrong organisation look identical to the
+  // person hitting them but are fixed in completely different places.
   const externalError = search.get("error");
 
   function handleSubmit(event: FormEvent) {
@@ -55,9 +48,7 @@ export function LoginForm() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {externalError && (
-          <p className="text-sm text-destructive">
-            {EXTERNAL_LOGIN_MESSAGE[externalError] ?? DEFAULT_EXTERNAL_LOGIN_MESSAGE}
-          </p>
+          <p className="text-sm text-destructive">{loginRefusalMessage(externalError)}</p>
         )}
 
         {/* Above the password form, and the password form is always present:
@@ -67,7 +58,7 @@ export function LoginForm() {
           <>
             <div className="flex flex-col gap-2">
               {items.map((provider) => (
-                <ProviderButton key={provider.slug} provider={provider} />
+                <ProviderButton key={provider.kind} provider={provider} />
               ))}
             </div>
             <div className="flex items-center gap-3">
@@ -115,7 +106,7 @@ export function LoginForm() {
 
 function ProviderButton({ provider }: { provider: PublicIdentityProvider }) {
   return (
-    <Button type="button" variant="outline" onClick={() => startExternalLogin(provider.slug)}>
+    <Button type="button" variant="outline" onClick={() => startExternalLogin(provider.kind)}>
       Continue with {provider.display_name}
     </Button>
   );

@@ -1,0 +1,509 @@
+import { ORGANISATION_CLAIM, isUngated, type IdentityProviderKind } from "@skill-registry/shared";
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { count, eq, max } from "drizzle-orm";
+import type { Database } from "../db/client.js";
+import {
+  accounts,
+  identityProviders,
+  sessions,
+  users,
+  verifications,
+  type IdentityProviderRow,
+} from "../db/schemas/index.js";
+import type { Logger } from "../logger.js";
+import { GITHUB_SCOPES, fetchGitHubIdentity } from "./github.js";
+import { hashPassword, verifyPassword } from "./password.js";
+
+export interface BetterAuthDependencies {
+  db: Database;
+  /** Signing secret. The app refuses to boot without one (ADR-0005, ADR-0016). */
+  secret: string;
+  /** Absolute base URL this Registry is reached at. Required (ADR-0016). */
+  publicUrl: string;
+  /** Where a refused login's reason goes — the only place it is ever told. */
+  logger: Logger;
+}
+
+/** Better Auth's routes are mounted under this path, inside the `/api` app. */
+export const AUTH_BASE_PATH = "/api/auth";
+
+// Sessions are rows and revoke on logout, so the short expiry ADR-0005 needed
+// to bound an unrevokable JWT no longer applies.
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+const SESSION_REFRESH_SECONDS = 60 * 60 * 24;
+
+/**
+ * The refusal codes the login page knows how to explain.
+ *
+ * @remarks
+ * Once a single opaque code for every refusal, on the reasoning that naming the
+ * failed check tells an attacker which one they tripped. That held while every
+ * refusal had the same remedy — it does not. `oauth_app_not_approved` in
+ * particular is indistinguishable from plain non-membership to the person
+ * hitting it, and is fixed by an org owner in five minutes once named
+ * (ADR-0018, ADR-0021).
+ *
+ * None of these names the expected organisation. Which check failed is public;
+ * what would have passed it stays in the logs.
+ */
+const REFUSED = {
+  generic: "external_login_failed",
+  providerNotConfigured: "provider_not_configured",
+  providerDisabled: "provider_disabled",
+  notPermitted: "organisation_not_permitted",
+  oauthAppNotApproved: "oauth_app_not_approved",
+  noEmail: "no_email_from_provider",
+} as const;
+
+/**
+ * Splits a provider's claims into the two halves this Registry stores.
+ *
+ * @remarks
+ * Preserved from the implementation Better Auth replaced, so an existing
+ * User's name does not change shape on their next login.
+ *
+ * @param claims - The provider's claims.
+ * @param email - Fallback source for a given name when no claim supplies one.
+ * @returns `[first_name, last_name]`.
+ * @example
+ * ```ts
+ * const [first, last] = namesFrom({ name: "Ada Lovelace" }, "ada@example.com");
+ * ```
+ */
+function namesFrom(claims: Record<string, unknown>, email: string): [string, string] {
+  const given = typeof claims.given_name === "string" ? claims.given_name : undefined;
+  const family = typeof claims.family_name === "string" ? claims.family_name : undefined;
+  if (given && family) return [given, family];
+
+  const full = typeof claims.name === "string" ? claims.name : undefined;
+  if (full) {
+    const parts = full.split(/\s+/).filter(Boolean);
+    if (parts.length > 1) return [parts.slice(0, -1).join(" "), parts.at(-1) as string];
+    if (parts.length === 1) return [parts[0] as string, ""];
+  }
+
+  return [given ?? (email.split("@")[0] as string), family ?? ""];
+}
+
+/**
+ * Turns the configured Providers into Better Auth's `socialProviders`.
+ *
+ * @remarks
+ * Credentials only. The organisation gate is read from the row on every login
+ * instead, because this object is captured at construction and would go stale
+ * (ADR-0019). Microsoft is the exception only because its tenant forms part of
+ * the endpoint URL; its `tid` claim is still checked per login like the others.
+ *
+ * @param providers - The enabled Providers to configure.
+ * @returns Better Auth's `socialProviders` config.
+ * @example
+ * ```ts
+ * const config = socialProvidersFor(enabledProviders);
+ * ```
+ */
+function socialProvidersFor(providers: IdentityProviderRow[]): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+
+  for (const provider of providers) {
+    const credentials = { clientId: provider.client_id, clientSecret: provider.client_secret };
+
+    if (provider.kind === "google") {
+      config.google = credentials;
+    } else if (provider.kind === "microsoft") {
+      // Microsoft is the one kind whose organisation is part of the endpoint
+      // URL rather than only a claim, so a list cannot be expressed here.
+      // Exactly one permitted tenant still pins the endpoint to it; several,
+      // or none, fall back to a multi-tenant endpoint and lean on the `tid`
+      // check, which runs per login either way. `organizations` rather than
+      // `common` for several, so personal accounts are turned away by
+      // Microsoft instead of travelling all the way here to be refused.
+      const tenants = provider.permitted_organisations;
+      config.microsoft = {
+        ...credentials,
+        tenantId: tenants.length === 1 ? tenants[0] : tenants.length > 1 ? "organizations" : "common",
+      };
+    } else if (provider.kind === "github") {
+      config.github = {
+        ...credentials,
+        scope: GITHUB_SCOPES,
+        // GitHub's `/user` reports only the publicly-visible address — null for
+        // a private one — and no organisations at all. This substitutes the
+        // primary address and the membership list so the gate has something to
+        // check.
+        getUserInfo: async (tokens: { accessToken?: string | undefined }) => {
+          if (!tokens.accessToken) return null;
+          const identity = await fetchGitHubIdentity(tokens.accessToken);
+          if (!identity.email) return null;
+          return {
+            user: {
+              id: String(identity.id),
+              name: identity.name ?? identity.login,
+              email: identity.email,
+              // Asserted so Better Auth links this login to an existing User
+              // (ADR-0016). It records the Registry trusting the organisation,
+              // not GitHub having challenged the address (ADR-0018).
+              emailVerified: true,
+              image: identity.avatar_url ?? undefined,
+            },
+            data: identity,
+          };
+        },
+      };
+    }
+  }
+
+  return config;
+}
+
+/** The shape `validateUserInfo` reports a sign-in's origin in. */
+export interface GateSource {
+  method: string;
+  oauth?: { providerId: string; profile?: Record<string, unknown> | undefined } | undefined;
+}
+
+/**
+ * The organisation gate: the only control on who gets an account (ADR-0015),
+ * and skippable, which is the whole of ADR-0021.
+ *
+ * @remarks
+ * A Provider admits a login if the organisation it asserts is any one of the
+ * Provider's `permitted_organisations`. If that list is empty the check does
+ * not run at all and every account the provider authenticates is admitted —
+ * deliberate, configurable, and logged loudly every time it happens.
+ *
+ * Runs on `create-user`, `link-account`, and `sign-in` alike, so someone
+ * removed from the organisation is refused on their next login rather than
+ * keeping an account they passed the check for once (ADR-0018).
+ *
+ * The Provider is re-read per call rather than closed over, so disabling one or
+ * changing the organisations it admits takes effect immediately (ADR-0019).
+ *
+ * Exported so the rules can be tested as decisions about claims, without
+ * standing up an authorization server to reach them.
+ *
+ * The caller is told which check failed, but never what would have passed it:
+ * the codes distinguish an unapproved OAuth app from plain non-membership,
+ * because those have different remedies, while the permitted organisations
+ * themselves appear only in the log line.
+ *
+ * @param db - The database to read the Provider's current gate from.
+ * @param logger - Where a refusal's reason, and every ungated admission, is recorded.
+ * @returns A `validateUserInfo` handler: nothing to admit, `{ error }` to refuse.
+ * @example
+ * ```ts
+ * const gate = organisationGate(db, logger);
+ * await gate({ source: { method: "oauth", oauth: { providerId: "google", profile } } });
+ * ```
+ */
+export function organisationGate(db: Database, logger: Logger) {
+  return async ({ source }: { source: GateSource }): Promise<void | { error: string }> => {
+    // A password sign-in has no organisation to check, and is only reachable by
+    // a User an Admin already created.
+    if (source.method !== "oauth" || !source.oauth) return;
+
+    const kind = source.oauth.providerId as IdentityProviderKind;
+
+    /** Records why, then returns the code the login page will explain. */
+    const refuse = (code: string, reason: string, details: Record<string, unknown> = {}) => {
+      logger.warn({ kind, code, reason, ...details }, "external login refused");
+      return { error: code };
+    };
+
+    const [provider] = await db
+      .select()
+      .from(identityProviders)
+      .where(eq(identityProviders.kind, kind))
+      .limit(1);
+
+    if (!provider) {
+      return refuse(REFUSED.providerNotConfigured, "no provider configured for this kind");
+    }
+    if (!provider.enabled) {
+      return refuse(REFUSED.providerDisabled, "provider is disabled");
+    }
+
+    const permitted = provider.permitted_organisations.map((organisation) =>
+      organisation.trim().toLowerCase(),
+    );
+    const profile = source.oauth.profile ?? {};
+    const claim = ORGANISATION_CLAIM[kind];
+
+    // An empty list is a deliberate configuration meaning "admit anyone this
+    // provider authenticates" (ADR-0021). It is the one branch here that lets
+    // someone in without checking anything, so it says so every single time
+    // rather than passing quietly.
+    if (isUngated(permitted)) {
+      logger.warn(
+        { kind, email: profile.email },
+        "external login admitted without an organisation check — this Provider has no permitted organisations, " +
+          "so anyone the provider authenticates can obtain a reader account here",
+      );
+      return;
+    }
+
+    if (claim) {
+      // Google and Microsoft: matched on the claim, never on the email
+      // address's suffix, which anybody can make look like anything.
+      //
+      // No `email_verified` check: the claim already proves the token was
+      // issued for the permitted tenant, and inside a tenant the address is
+      // provisioned by its administrator. Entra never emits `email_verified`,
+      // so requiring it refused every Microsoft login.
+      const asserted = profile[claim];
+      if (typeof asserted !== "string") {
+        return refuse(REFUSED.notPermitted, `profile carries no ${claim} claim`, { permitted });
+      }
+      if (!permitted.includes(asserted.toLowerCase())) {
+        return refuse(REFUSED.notPermitted, `${claim} claim is not a permitted organisation`, {
+          permitted,
+          asserted,
+        });
+      }
+      return;
+    }
+
+    // GitHub: no claim to read, so live membership is the whole gate. An
+    // address is required but not otherwise judged (ADR-0018).
+    const organisations = profile.organisations;
+    if (typeof profile.email !== "string") {
+      return refuse(REFUSED.noEmail, "github reported no email address");
+    }
+    if (!Array.isArray(organisations) || organisations.length === 0) {
+      // Told apart from plain non-membership on purpose: an empty list is what
+      // an organisation that restricts third-party application access looks
+      // like until an owner approves the OAuth app, and it refuses every
+      // member with no other symptom (ADR-0018).
+      return refuse(
+        REFUSED.oauthAppNotApproved,
+        "github returned no organisations at all — the OAuth app is likely not approved by the organisation",
+        { permitted },
+      );
+    }
+    if (!organisations.some((organisation) => permitted.includes(String(organisation).toLowerCase()))) {
+      return refuse(
+        REFUSED.notPermitted,
+        "github account is not a member of any permitted organisation",
+        { permitted, organisations },
+      );
+    }
+  };
+}
+
+/**
+ * Builds the Better Auth instance that owns sessions, password
+ * authentication, and external login (ADR-0016).
+ *
+ * @remarks
+ * Every `fields` map below maps Better Auth's camelCase to this repo's
+ * snake_case convention, where a column, its TS key, and the wire all agree
+ * (docs/data-model.md).
+ *
+ * @param deps - The database, signing secret, and public URL.
+ * @param providers - The enabled Providers whose credentials to configure.
+ * @returns The configured Better Auth instance.
+ * @example
+ * ```ts
+ * const auth = createAuth({ db, secret, publicUrl }, enabledProviders);
+ * ```
+ */
+export function createAuth(deps: BetterAuthDependencies, providers: IdentityProviderRow[]) {
+  return betterAuth({
+    appName: "Skill Registry",
+    secret: deps.secret,
+    baseURL: deps.publicUrl,
+    basePath: AUTH_BASE_PATH,
+    database: drizzleAdapter(deps.db, {
+      provider: "pg",
+      schema: { users, sessions, accounts, verifications },
+    }),
+    socialProviders: socialProvidersFor(providers),
+    emailAndPassword: {
+      enabled: true,
+      // Users come from /setup or from an Admin, and both fix the role. Better
+      // Auth's own sign-up would bypass each of them.
+      disableSignUp: true,
+      // Matches the floor PasswordReplaceSchema enforces on replacement.
+      minPasswordLength: 12,
+      // argon2id via the runtime's own implementation rather than Better
+      // Auth's scrypt, so hashes written before this migration stay verifiable
+      // (ADR-0016). Getting it wrong locks out the Superadmin, the only User
+      // able to configure a Provider.
+      password: {
+        hash: hashPassword,
+        verify: ({ hash, password }) => verifyPassword(password, hash),
+      },
+    },
+    session: {
+      modelName: "sessions",
+      expiresIn: SESSION_TTL_SECONDS,
+      updateAge: SESSION_REFRESH_SECONDS,
+      fields: {
+        expiresAt: "expires_at",
+        ipAddress: "ip_address",
+        userAgent: "user_agent",
+        userId: "user_id",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+    },
+    user: {
+      modelName: "users",
+      fields: {
+        emailVerified: "email_verified",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+      validateUserInfo: organisationGate(deps.db, deps.logger),
+      // Declared so Better Auth carries them on the session's user.
+      // `input: false` refuses them structurally from anything a client sends
+      // — for `role` that is the ADR-0015 invariant that no login can produce
+      // or alter one.
+      additionalFields: {
+        first_name: { type: "string", required: false, input: false },
+        last_name: { type: "string", required: false, input: false },
+        role: { type: "string", required: false, input: false },
+        must_change_password: { type: "boolean", required: false, input: false },
+      },
+    },
+    account: {
+      modelName: "accounts",
+      // A GitHub token here carries the `repo` scope — read and write across
+      // every private repository its owner can reach (ADR-0020) — so this is
+      // the most dangerous column in the schema, and the only credential the
+      // Registry stores that is not one-way. Encrypted at rest with
+      // AES-256-GCM under `BETTER_AUTH_SECRET`.
+      //
+      // Turning this on does not strand tokens written before it: Better Auth
+      // checks whether a stored value even looks encrypted and returns it
+      // untouched when it does not, so plaintext rows keep working and are
+      // re-encrypted the next time they are written.
+      encryptOAuthTokens: true,
+      fields: {
+        accountId: "account_id",
+        providerId: "provider_id",
+        userId: "user_id",
+        accessToken: "access_token",
+        refreshToken: "refresh_token",
+        idToken: "id_token",
+        accessTokenExpiresAt: "access_token_expires_at",
+        refreshTokenExpiresAt: "refresh_token_expires_at",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+    },
+    verification: {
+      modelName: "verifications",
+      fields: {
+        expiresAt: "expires_at",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          // The only path that creates a User outside this Registry's own
+          // services. `role` is pinned to `reader` rather than taken from
+          // anything the Provider said (ADR-0015).
+          before: async (user) => {
+            const claims = user as unknown as Record<string, unknown>;
+            const [first, last] = namesFrom(claims, String(user.email ?? ""));
+            // `name` is dropped rather than written: the column is generated
+            // from these two halves, so Postgres refuses an insert into it.
+            const { name: _name, ...rest } = user;
+            return {
+              data: {
+                ...rest,
+                first_name: first,
+                last_name: last,
+                role: "reader",
+                must_change_password: false,
+              },
+            };
+          },
+        },
+      },
+    },
+    advanced: {
+      database: {
+        // Postgres generates every id in this schema with uuidv7(). `false`,
+        // not "uuid" — that would be gen_random_uuid(), the v4 function this
+        // schema moved away from.
+        generateId: false,
+      },
+    },
+    trustedOrigins: [deps.publicUrl],
+  });
+}
+
+/** The Better Auth instance's type, for the dependencies that carry one. */
+export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Holds the Better Auth instance and rebuilds it when a Provider's
+ * credentials change (ADR-0019).
+ *
+ * @remarks
+ * `current` and `fresh` differ only in whether they check the version key.
+ * Validating a session does not depend on which Providers are configured, so
+ * ordinary requests serve from the cache and pay nothing for the table; only
+ * Better Auth's own routes need the round-trip.
+ *
+ * A cached instance can be stale in its credentials and nothing else — the
+ * organisation gate and the enabled flag are read per login — so the worst it
+ * can do is fail a login through a just-added Provider. It can never admit
+ * someone a disabled Provider should have refused.
+ */
+export interface AuthRegistry {
+  /** The cached instance, built on first use. No freshness check. */
+  current(): Promise<Auth>;
+  /** The instance for the current Provider configuration, rebuilt if stale. */
+  fresh(): Promise<Auth>;
+}
+
+/**
+ * Creates the registry that owns the Better Auth instance's lifecycle.
+ *
+ * @param deps - The database, signing secret, and public URL.
+ * @returns An `AuthRegistry`.
+ * @example
+ * ```ts
+ * const registry = createAuthRegistry({ db, secret, publicUrl });
+ * const auth = await registry.fresh();
+ * ```
+ */
+export function createAuthRegistry(deps: BetterAuthDependencies): AuthRegistry {
+  let cached: { key: string; auth: Auth } | null = null;
+
+  // Row count and latest edit together cover every way the table can change:
+  // adding a Provider moves the count, editing or disabling one moves the
+  // timestamp. There is no delete route (ADR-0015).
+  async function version(): Promise<string> {
+    const [row] = await deps.db
+      .select({ total: count(), latest: max(identityProviders.updated_at) })
+      .from(identityProviders);
+    return `${row?.total ?? 0}:${row?.latest?.getTime() ?? 0}`;
+  }
+
+  async function build(key: string): Promise<Auth> {
+    const providers = await deps.db
+      .select()
+      .from(identityProviders)
+      .where(eq(identityProviders.enabled, true));
+    const auth = createAuth(deps, providers);
+    cached = { key, auth };
+    return auth;
+  }
+
+  return {
+    async current() {
+      return cached?.auth ?? (await build(await version()));
+    },
+    async fresh() {
+      const key = await version();
+      if (cached?.key === key) return cached.auth;
+      return build(key);
+    },
+  };
+}

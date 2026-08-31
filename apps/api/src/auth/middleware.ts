@@ -1,16 +1,15 @@
 import { roleMeets, type Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
-import { getCookie } from "hono/cookie";
 import type { Database } from "../db/client.js";
-import { tokens, users, type UserRow } from "../db/schema.js";
+import { tokens, users, type UserRow } from "../db/schemas/index.js";
 import { ForbiddenError, PasswordChangeRequiredError, UnauthenticatedError } from "../http/errors.js";
-import { SESSION_COOKIE_NAME, verifySession } from "./session.js";
+import type { AuthRegistry } from "./instance.js";
 import { digestsMatch, hashTokenSecret } from "./token.js";
 
 export interface AuthDependencies {
   db: Database;
-  jwtSecret: string;
+  auth: AuthRegistry;
 }
 
 export type AuthVariables = { user: UserRow };
@@ -18,21 +17,21 @@ export type AuthVariables = { user: UserRow };
 const BEARER_PREFIX = "Bearer ";
 
 /**
- * Authentication resolves a request to a User without regard to which
- * credential produced it (spec, "Access control"): a session cookie or a
- * Token's `Authorization: Bearer` header, tried in that order. Authorisation
- * reads the User's role separately, from the row this attaches to context —
- * resolved fresh on every request from the database, never from the session
- * or the Token itself (ADR-0005), so a Token grants no more than its owner's
- * *current* role and a demotion or revocation takes effect on the next
+ * Resolves a request to a User, from a session cookie or a Bearer Token, in
+ * that order.
+ *
+ * @remarks
+ * Authentication does not care which credential produced the request (spec,
+ * "Access control"). Authorisation reads the role separately, from the row
+ * this attaches to context — resolved from the database on every request,
+ * never from the session or Token (ADR-0005) — so a Token grants no more than
+ * its owner's current role, and a demotion or revocation lands on the next
  * request.
  *
- * @param deps - The database and JWT secret needed to resolve a credential.
- * @param options - `allowPendingPasswordChange`: lets the request through
- * even while the resolved User's `must_change_password` is set. Reserved
- * for the two routes that resolve it (docs/data-model.md): reading and
- * replacing their own password. Every other route refuses such a User with
- * a `PasswordChangeRequiredError`.
+ * @param deps - The database and Better Auth instance needed to resolve a credential.
+ * @param options - `allowPendingPasswordChange` lets the request through while
+ * the resolved User's `must_change_password` is set. Reserved for the two
+ * routes that resolve it (docs/data-model.md).
  * @returns A Hono middleware handler that sets `user` in context on success.
  * @throws UnauthenticatedError if neither a session cookie nor a Bearer
  * Token resolves to a User.
@@ -59,14 +58,17 @@ export function requireAuth(
   };
 }
 
+// Better Auth hands back the User the session belongs to, but the row is
+// re-read rather than trusted from that payload: the role is resolved from
+// Postgres on every request (ADR-0005).
 async function resolveSessionUser(c: Context, deps: AuthDependencies): Promise<UserRow | null> {
-  const cookie = getCookie(c, SESSION_COOKIE_NAME);
-  if (!cookie) return null;
+  // `current`, not `fresh`: validating a session does not depend on which
+  // Providers are configured (ADR-0019).
+  const auth = await deps.auth.current();
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) return null;
 
-  const userId = await verifySession(cookie, deps.jwtSecret);
-  if (!userId) return null;
-
-  const [user] = await deps.db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await deps.db.select().from(users).where(eq(users.id, session.user.id)).limit(1);
   return user ?? null;
 }
 
@@ -89,13 +91,23 @@ async function resolveTokenUser(c: Context, deps: AuthDependencies): Promise<Use
 }
 
 /**
+ * Refuses a request whose User does not meet a minimum role.
+ *
+ * @remarks
  * Authorisation, kept separate from authentication: this reads the role off
- * the User row `requireAuth` resolved for *this* request, so a demotion — or
- * a credential belonging to a demoted User — is refused on the next request
- * rather than whenever a credential expires (ADR-0005). Always mounted after
- * `requireAuth`, which is what puts the row on the context. `roleMeets`
- * (shared) is the same rank check the web interface uses to decide what to
- * offer a User, so the two never drift.
+ * the row `requireAuth` resolved for this request, so a demotion is refused on
+ * the next request rather than whenever a credential expires (ADR-0005).
+ * Always mounted after `requireAuth`, which is what puts the row on the
+ * context. `roleMeets` is the same rank check the web interface uses to decide
+ * what to offer a User, so the two cannot drift.
+ *
+ * @param minimum - The lowest role allowed through.
+ * @returns A Hono middleware handler.
+ * @throws ForbiddenError if the User's role ranks below `minimum`.
+ * @example
+ * ```ts
+ * app.delete("/skills/:id", requireAuth(deps), requireRole("admin"), handler);
+ * ```
  */
 export function requireRole(minimum: Role): MiddlewareHandler<{ Variables: AuthVariables }> {
   return async (c, next) => {

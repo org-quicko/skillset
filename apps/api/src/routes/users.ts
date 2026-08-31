@@ -13,31 +13,20 @@ import {
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { ValidationError } from "../http/errors.js";
-import {
-  createUser,
-  deleteToken,
-  deleteUser,
-  listTokens,
-  listUsers,
-  mintToken,
-  replaceOwnPassword,
-  updateOwnName,
-  updateUserRole,
-  type UsersServiceDependencies,
-} from "../services/users.js";
+import type { UsersService } from "../services/users.js";
 
-export interface UsersRouteDependencies extends AuthDependencies, UsersServiceDependencies {}
+export type UsersRouteDependencies = AuthDependencies & { users: UsersService };
 
 /**
  * Registers the `/users` routes: Admin management of every User, and each
  * User's own profile, password, and Tokens (list, mint, delete).
  *
  * @param app - The Hono app to register the routes on.
- * @param deps - The auth and Users-service dependencies the routes need.
+ * @param deps - The auth dependencies and the Users service.
  */
 export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, deps: UsersRouteDependencies): void {
   app.get("/users", requireAuth(deps), requireRole("admin"), async (c) => {
-    return c.json(UserPageSchema.parse(await listUsers(deps, c.req.query("page"))));
+    return c.json(UserPageSchema.parse(await deps.users.list(c.req.query("page"))));
   });
 
   app.post("/users", requireAuth(deps), requireRole("admin"), async (c) => {
@@ -46,7 +35,7 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
       throw new ValidationError("first_name, last_name, email, and role are required.");
     }
 
-    const result = await createUser(deps, parsed.data);
+    const result = await deps.users.create(parsed.data);
     return c.json(UserCreatedSchema.parse(result), 201);
   });
 
@@ -69,7 +58,7 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
       throw new ValidationError("first_name or last_name is required.");
     }
 
-    const updated = await updateOwnName(deps, c.get("user"), parsed.data);
+    const updated = await deps.users.updateOwnName(c.get("user"), parsed.data);
     return c.json(UserSchema.parse(updated));
   });
 
@@ -84,7 +73,7 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
         throw new ValidationError("current_password and new_password (at least 12 characters) are required.");
       }
 
-      await replaceOwnPassword(deps, c.get("user"), parsed.data);
+      await deps.users.replaceOwnPassword(c.get("user"), parsed.data);
       return c.body(null, 204);
     },
   );
@@ -94,7 +83,7 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
   // User's id, never by a Token id alone.
 
   app.get("/users/me/tokens", requireAuth(deps), async (c) => {
-    const rows = await listTokens(deps, c.get("user"));
+    const rows = await deps.users.listTokens(c.get("user"));
     return c.json(rows.map((row) => TokenSchema.parse(row)));
   });
 
@@ -104,12 +93,12 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
       throw new ValidationError("name is required.", "name");
     }
 
-    const { token, secret } = await mintToken(deps, c.get("user"), parsed.data.name);
+    const { token, secret } = await deps.users.mintToken(c.get("user"), parsed.data.name);
     return c.json(TokenCreatedSchema.parse({ ...token, secret }), 201);
   });
 
   app.delete("/users/me/tokens/:token_id", requireAuth(deps), async (c) => {
-    await deleteToken(deps, c.get("user"), c.req.param("token_id"));
+    await deps.users.deleteToken(c.get("user"), c.req.param("token_id"));
     return c.body(null, 204);
   });
 
@@ -119,12 +108,12 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
       throw new ValidationError("role is required.", "role");
     }
 
-    const updated = await updateUserRole(deps, c.get("user"), c.req.param("user_id"), parsed.data.role);
+    const updated = await deps.users.updateRole(c.get("user"), c.req.param("user_id"), parsed.data.role);
     return c.json(UserSchema.parse(updated));
   });
 
   app.delete("/users/:user_id", requireAuth(deps), requireRole("admin"), async (c) => {
-    await deleteUser(deps, c.get("user"), c.req.param("user_id"));
+    await deps.users.remove(c.get("user"), c.req.param("user_id"));
     return c.body(null, 204);
   });
 }

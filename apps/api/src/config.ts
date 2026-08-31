@@ -3,13 +3,14 @@ import cron from "node-cron";
 export interface Config {
   port: number;
   databaseUrl: string;
-  jwtSecret: string;
+  betterAuthSecret: string;
   /**
-   * Absolute base URL this Registry is reached at, used to build the
-   * `redirect_uri` a login is returned to. Optional: only an Identity
-   * Provider needs it, so an instance with none configured is unaffected.
+   * Absolute base URL this Registry is reached at. Required: Better Auth
+   * builds every callback and cookie boundary from it (ADR-0016), so unlike
+   * the optional `PUBLIC_URL` this replaces, an instance cannot start without
+   * one even with no Identity Provider configured.
    */
-  publicUrl: string | undefined;
+  publicUrl: string;
   /** Cron expression governing how often `skill_analytics` is refreshed (ADR-0012). */
   analyticsRefreshCron: string;
   storage: {
@@ -33,7 +34,7 @@ export interface Config {
  * @param env - The environment to read from. Defaults to `process.env`;
  * overridable for tests.
  * @returns `Config`
- * @throws Error if `JWT_SECRET`, `DATABASE_URL`, or `STORAGE_BUCKET` is
+ * @throws Error if `BETTER_AUTH_SECRET`, `DATABASE_URL`, `PUBLIC_URL`, or `STORAGE_BUCKET` is
  * missing, if `PORT` is set to something other than a valid port number, if
  * `PUBLIC_URL` is set to something that is not an absolute http(s) URL, or if
  * `ANALYTICS_REFRESH_CRON` is set to something `node-cron` cannot parse as a
@@ -51,10 +52,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
-  const jwtSecret = env.JWT_SECRET;
-  if (!jwtSecret) {
+  const betterAuthSecret = env.BETTER_AUTH_SECRET;
+  if (!betterAuthSecret) {
     throw new Error(
-      "Missing required environment variable JWT_SECRET: refusing to start without a signing secret.",
+      "Missing required environment variable BETTER_AUTH_SECRET: refusing to start without a signing secret.",
     );
   }
 
@@ -74,7 +75,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // Validated at startup rather than where a login uses it, so a typo
   // surfaces on boot instead of halfway through someone's first sign-in.
   const publicUrl = env.PUBLIC_URL?.replace(/\/+$/, "");
-  if (publicUrl !== undefined && (!URL.canParse(publicUrl) || !/^https?:$/.test(new URL(publicUrl).protocol))) {
+  if (!publicUrl) {
+    throw new Error("Missing required environment variable PUBLIC_URL.");
+  }
+  if (!URL.canParse(publicUrl) || !/^https?:$/.test(new URL(publicUrl).protocol)) {
     throw new Error(`Invalid environment variable PUBLIC_URL: "${publicUrl}" is not an absolute http(s) URL.`);
   }
 
@@ -87,7 +91,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     port,
     databaseUrl,
-    jwtSecret,
+    betterAuthSecret,
     publicUrl,
     analyticsRefreshCron,
     storage: {

@@ -59,11 +59,6 @@ export class SkillValidationError extends Error {
   readonly rule: SkillRule;
   readonly field: string | undefined;
 
-  /**
-   * @param rule - The specific rule that was broken.
-   * @param message - A human-readable description of the failure.
-   * @param field - The request field or file the failure relates to, if any.
-   */
   constructor(rule: SkillRule, message: string, field?: string) {
     super(message);
     this.name = "SkillValidationError";

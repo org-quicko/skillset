@@ -4,7 +4,7 @@ import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations, waitForDatabase } from "./db/migrate.js";
 import { createLogger } from "./logger.js";
-import { refreshInstallCounts } from "./services/analytics.js";
+import { AnalyticsService } from "./services/analytics.js";
 import { S3StorageAdapter } from "./storage/s3.js";
 import { createApp } from "./app.js";
 
@@ -34,7 +34,7 @@ async function main() {
     db,
     storage,
     webRoot,
-    jwtSecret: config.jwtSecret,
+    betterAuthSecret: config.betterAuthSecret,
     publicUrl: config.publicUrl,
     logger,
   });
@@ -42,8 +42,9 @@ async function main() {
   // Only wired here, never inside createApp — a test app built via
   // startTestContext() must never start a real background timer (ADR-0012);
   // tests call refreshInstallCounts directly instead.
+  const analytics = new AnalyticsService(db, logger);
   cron.schedule(config.analyticsRefreshCron, () => {
-    refreshInstallCounts({ db }).catch((error) => {
+    analytics.refreshInstallCounts().catch((error) => {
       logger.error({ err: error }, "failed to refresh skill_analytics");
     });
   });

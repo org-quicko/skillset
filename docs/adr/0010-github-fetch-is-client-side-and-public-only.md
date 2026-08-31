@@ -1,5 +1,12 @@
 # GitHub Fetch Is Client-Side and Public-Only
 
+> **Partly superseded by ADR-0020.** Private repositories are reachable now, through a server-side
+> fetch using the signed-in writer's own GitHub token — so the two things this ADR rejected, a
+> stored GitHub credential and a server-side fetch, both exist. ADR-0020 answers the two questions
+> the last paragraph below demanded of anyone reopening it. The rest of this ADR stands and is still
+> the live path for **public** repositories: anonymous, client-side, no credential, no server in the
+> loop.
+
 Publishing from a GitHub URL fetches the folder's files straight from the browser, anonymously,
 through GitHub's own public REST API and `raw.githubusercontent.com`. The API never sees the URL
 and never talks to GitHub; the fetched files are handed to the same `buildSkillBundle` pipeline a

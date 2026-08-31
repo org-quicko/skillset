@@ -1,4 +1,4 @@
-import { IDENTITY_PROVIDER_GUIDANCE, type IdentityProvider } from "@skill-registry/shared";
+import { IDENTITY_PROVIDER_GUIDANCE, isUngated, type IdentityProvider } from "@skill-registry/shared";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -35,8 +35,9 @@ export function IdentityProvidersCard() {
       <CardHeader>
         <CardTitle>External login</CardTitle>
         <CardDescription>
-          Anyone whose account is in a Provider’s permitted organisation can sign in and gets a reader account
-          on their first login. Promote them from Users.
+          Anyone whose account is in one of a Provider’s permitted organisations can sign in, and gets a reader
+          account on their first login. Promote them from Users. A Provider with no organisations listed admits
+          everyone that provider will authenticate.
         </CardDescription>
         <CardAction>
           <Button onClick={() => openDialog(null)}>Add Provider</Button>
@@ -58,7 +59,7 @@ export function IdentityProvidersCard() {
               <TableRow>
                 <TableHead>Provider</TableHead>
                 <TableHead>Kind</TableHead>
-                <TableHead>Permitted organisation</TableHead>
+                <TableHead>Permitted organisations</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead />
               </TableRow>
@@ -70,12 +71,24 @@ export function IdentityProvidersCard() {
                   <TableRow key={provider.id}>
                     <TableCell>
                       <span className="font-medium">{provider.display_name}</span>
-                      <span className="text-muted-foreground"> /{provider.slug}</span>
                     </TableCell>
                     <TableCell>{IDENTITY_PROVIDER_GUIDANCE[provider.kind].label}</TableCell>
                     <TableCell>
-                      {provider.permitted_domain ?? (
-                        <span className="text-muted-foreground">Not set — cannot be enabled</span>
+                      {isUngated(provider.permitted_organisations) ? (
+                        // An enabled Provider with no gate is the one row state
+                        // worth an alarm: it admits everyone, and it looks
+                        // identical to a half-finished one unless it says so.
+                        <span className={provider.enabled ? "font-medium text-destructive" : "text-muted-foreground"}>
+                          {provider.enabled ? "Anyone — no check" : "None set"}
+                        </span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {provider.permitted_organisations.map((organisation) => (
+                            <Badge key={organisation.toLowerCase()} variant="secondary">
+                              {organisation}
+                            </Badge>
+                          ))}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>

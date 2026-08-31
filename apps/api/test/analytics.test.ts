@@ -2,11 +2,17 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
+import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
-import { SESSION_COOKIE_NAME } from "../src/auth/session.js";
-import { skillInstallEvents, users } from "../src/db/schema.js";
-import { refreshInstallCounts } from "../src/services/analytics.js";
-import { startTestContext, stopTestContext, type TestContext } from "./setup.js";
+import { skillInstallEvents, users } from "../src/db/schemas/index.js";
+import {
+  refreshInstallCounts,
+  SIGN_IN_PATH,
+  startTestContext,
+  stopTestContext,
+  type TestContext,
+  SESSION_COOKIE_NAME,
+} from "./setup.js";
 
 interface ApiSkill {
   id: string;
@@ -46,13 +52,14 @@ async function createUserAndLogIn(
       first_name: body.first_name,
       last_name: body.last_name,
       email: body.email,
-      password_hash: await hashPassword(body.password),
       role: body.role,
     })
     .returning();
   if (!row) throw new Error("Insert did not return the created User.");
 
-  const res = await context.app.request("/api/auth/login", {
+  await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
+
+  const res = await context.app.request(SIGN_IN_PATH, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: body.email, password: body.password }),

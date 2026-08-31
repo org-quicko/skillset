@@ -7,7 +7,8 @@ import {
   type User,
 } from "@skill-registry/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
 import { discardSessionState, meQueryKey } from "@/lib/query-keys";
 import { LOGIN_PATH } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
@@ -47,11 +48,30 @@ export function useSignup() {
   });
 }
 
+/**
+ * Signs in with a password through Better Auth, then reads the User back from
+ * the Registry.
+ *
+ * @remarks
+ * The second step is not redundant. Better Auth's response describes its own
+ * session user, which carries no role; `/users/me` is what the rest of the
+ * interface consumes, and its role is resolved from the database on every
+ * request (ADR-0005). So this signs in, then asks the Registry who that turned
+ * out to be.
+ */
 export function useLogin() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: Login) =>
-      apiFetch("/auth/login", UserSchema, { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: async (body: Login): Promise<User> => {
+      const { error } = await authClient.signIn.email({
+        email: body.email,
+        password: body.password,
+      });
+      if (error) {
+        throw new ApiError("invalid_credentials", "Email or password is incorrect.");
+      }
+      return apiFetch("/users/me", UserSchema, { suppressAuthReset: true });
+    },
     onSuccess: (user) => {
       queryClient.setQueryData(meQueryKey, user);
     },
@@ -62,7 +82,9 @@ export function useLogout() {
   const queryClient = useQueryClient();
   const { navigate } = useRouter();
   return useMutation({
-    mutationFn: () => apiFetch("/auth/logout", null, { method: "POST" }),
+    // Revokes the session server-side rather than only clearing a cookie —
+    // sessions are rows now (ADR-0016).
+    mutationFn: () => authClient.signOut(),
     onSuccess: () => {
       discardSessionState(queryClient);
       navigate(LOGIN_PATH);
