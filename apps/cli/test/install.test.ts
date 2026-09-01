@@ -1,8 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, lstat, mkdtemp, readFile, readlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentId, Scope } from "@skill-registry/shared";
 import { installSkill, sanitizeSkillDirectoryName } from "../src/install.js";
 
 const encoder = new TextEncoder();
@@ -33,60 +32,45 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** The shared `.agents/skills` directory at project Scope (ADR-0006), reported for all four. */
-const SHARES_AGENTS_DIR: AgentId[] = ["codex", "github-copilot", "opencode", "generic"];
-
-interface Case {
-  agent: AgentId;
-  scope: Scope;
-  /** Path segments below the project root ("project") or the home directory ("user"). */
-  segments: string[];
-  serves: AgentId[];
-}
-
-// Every Agent at every Scope — the whole table, since a wrong path here writes to a real
-// directory nothing reads and the Skill simply never loads (ADR-0006).
-const cases: Case[] = [
-  { agent: "claude-code", scope: "project", segments: [".claude", "skills"], serves: ["claude-code"] },
-  { agent: "claude-code", scope: "user", segments: [".claude", "skills"], serves: ["claude-code"] },
-  { agent: "codex", scope: "project", segments: [".agents", "skills"], serves: SHARES_AGENTS_DIR },
-  { agent: "codex", scope: "user", segments: [".codex", "skills"], serves: ["codex"] },
-  { agent: "github-copilot", scope: "project", segments: [".agents", "skills"], serves: SHARES_AGENTS_DIR },
-  { agent: "github-copilot", scope: "user", segments: [".copilot", "skills"], serves: ["github-copilot"] },
-  { agent: "opencode", scope: "project", segments: [".agents", "skills"], serves: SHARES_AGENTS_DIR },
-  { agent: "opencode", scope: "user", segments: [".config", "opencode", "skills"], serves: ["opencode"] },
-  // pi is the one Agent whose two Scopes use different suffixes (ADR-0006).
-  { agent: "pi", scope: "project", segments: [".pi", "skills"], serves: ["pi"] },
-  { agent: "pi", scope: "user", segments: [".pi", "agent", "skills"], serves: ["pi"] },
-  { agent: "generic", scope: "project", segments: [".agents", "skills"], serves: SHARES_AGENTS_DIR },
-  { agent: "generic", scope: "user", segments: [".config", "agents", "skills"], serves: ["generic"] },
-];
-
-describe("installSkill — every Agent and Scope", () => {
-  for (const { agent, scope, segments, serves } of cases) {
-    it(`${agent} at ${scope} scope writes to ${segments.join("/")} and reports ${serves.join(", ")}`, async () => {
-      await withTempRoots(async ({ cwd, homeDir }) => {
-        const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, scope, agent);
-
-        const base = scope === "project" ? cwd : homeDir;
-        const expectedDir = join(base, ...segments, "code-review");
-        expect(report).toEqual({ directory: expectedDir, agents: serves });
-        expect(await readFile(join(expectedDir, "SKILL.md"), "utf8")).toContain("code-review");
-        expect(await readFile(join(expectedDir, "scripts", "run.sh"), "utf8")).toBe("echo hi");
+describe("installSkill — canonical directory (ADR-0022)", () => {
+  it("always writes the Skill's files into .agents/skills, whichever Agent is chosen", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code", {
+        copy: false,
       });
+
+      const canonical = join(cwd, ".agents", "skills", "code-review");
+      expect(report.skillDirectory).toBe(canonical);
+      expect(await readFile(join(canonical, "SKILL.md"), "utf8")).toContain("code-review");
+      expect(await readFile(join(canonical, "scripts", "run.sh"), "utf8")).toBe("echo hi");
     });
-  }
+  });
+
+  it("a universal Agent reads .agents/skills directly — no second link", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", {
+        copy: false,
+      });
+
+      expect(report.link).toEqual({ kind: "canonical" });
+      expect(await exists(join(cwd, ".codex"))).toBe(false);
+    });
+  });
 });
 
-describe("installSkill", () => {
-  it("writes only where the chosen Agent reads, never into another Agent's directory", async () => {
+describe("installSkill — non-universal Agents get a symlink", () => {
+  it("symlinks .claude/skills/<name> at the canonical copy at project scope", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
-      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code");
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code", {
+        copy: false,
+      });
 
-      expect(await exists(join(cwd, ".claude", "skills", "code-review"))).toBe(true);
-      expect(await exists(join(cwd, ".agents"))).toBe(false);
-      expect(await exists(join(cwd, ".pi"))).toBe(false);
-      expect(await exists(join(homeDir, ".claude"))).toBe(false);
+      const linkPath = join(cwd, ".claude", "skills", "code-review");
+      expect(report.link).toEqual({ kind: "symlink", path: linkPath });
+      expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+      expect(await readlink(linkPath)).toBe(join("..", "..", ".agents", "skills", "code-review"));
+      // The link resolves to the real files.
+      expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toContain("code-review");
     });
   });
 
@@ -99,31 +83,96 @@ describe("installSkill", () => {
         files,
         "user",
         "claude-code",
+        { copy: false },
       );
 
-      expect(report.directory).toBe(join(custom, "skills", "code-review"));
+      expect(report.skillDirectory).toBe(join(homeDir, ".agents", "skills", "code-review"));
+      expect(report.link).toEqual({ kind: "symlink", path: join(custom, "skills", "code-review") });
+      expect(await readFile(join(custom, "skills", "code-review", "SKILL.md"), "utf8")).toContain("code-review");
       expect(await exists(join(homeDir, ".claude"))).toBe(false);
     });
   });
 
+  it("pi is asymmetric — .pi/skills at project, .pi/agent/skills at user", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const projectReport = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "pi", {
+        copy: false,
+      });
+      expect(projectReport.link).toEqual({ kind: "symlink", path: join(cwd, ".pi", "skills", "code-review") });
+
+      const userReport = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "user", "pi", {
+        copy: false,
+      });
+      expect(userReport.link).toEqual({ kind: "symlink", path: join(homeDir, ".pi", "agent", "skills", "code-review") });
+    });
+  });
+});
+
+describe("installSkill — --copy", () => {
+  it("writes a real directory into the Agent's own path instead of a symlink", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code", {
+        copy: true,
+      });
+
+      const linkPath = join(cwd, ".claude", "skills", "code-review");
+      expect(report.link).toEqual({ kind: "copy", path: linkPath, reason: "requested" });
+      expect((await lstat(linkPath)).isSymbolicLink()).toBe(false);
+      expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toContain("code-review");
+      // The canonical copy still exists too.
+      expect(await exists(join(cwd, ".agents", "skills", "code-review", "SKILL.md"))).toBe(true);
+    });
+  });
+});
+
+describe("installSkill — user scope for an Agent with no user directory", () => {
+  it("refuses rather than guessing a location", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      await expect(
+        installSkill({ cwd, env: {}, homeDir }, "code-review", files, "user", "eve", { copy: false }),
+      ).rejects.toThrow(/no user-level skills directory/);
+    });
+  });
+});
+
+describe("installSkill — housekeeping", () => {
   it("sanitises the Skill's name before using it as a directory name", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
-      const report = await installSkill({ cwd, env: {}, homeDir }, "../../Escape Me", files, "project", "generic");
+      const report = await installSkill({ cwd, env: {}, homeDir }, "../../Escape Me", files, "project", "codex", {
+        copy: false,
+      });
 
-      expect(report.directory).toBe(join(cwd, ".agents", "skills", "escape-me"));
+      expect(report.skillDirectory).toBe(join(cwd, ".agents", "skills", "escape-me"));
       expect(await exists(join(cwd, "..", "..", "SKILL.md"))).toBe(false);
     });
   });
 
   it("re-running for the same Skill overwrites cleanly", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
-      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "generic");
+      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", { copy: false });
 
-      const secondFiles = [{ path: "SKILL.md", bytes: encoder.encode("---\nname: code-review\ndescription: Updated.\n---\nNew body.\n") }];
-      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", secondFiles, "project", "generic");
+      const secondFiles = [
+        { path: "SKILL.md", bytes: encoder.encode("---\nname: code-review\ndescription: Updated.\n---\nNew body.\n") },
+      ];
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", secondFiles, "project", "codex", {
+        copy: false,
+      });
 
-      expect(await readFile(join(report.directory, "SKILL.md"), "utf8")).toContain("Updated.");
-      expect(await exists(join(report.directory, "scripts", "run.sh"))).toBe(false);
+      expect(await readFile(join(report.skillDirectory, "SKILL.md"), "utf8")).toContain("Updated.");
+      expect(await exists(join(report.skillDirectory, "scripts", "run.sh"))).toBe(false);
+    });
+  });
+
+  it("re-running switches a stale symlink for the fresh one", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code", { copy: false });
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code", {
+        copy: false,
+      });
+
+      const linkPath = join(cwd, ".claude", "skills", "code-review");
+      expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+      expect(report.link).toEqual({ kind: "symlink", path: linkPath });
     });
   });
 });

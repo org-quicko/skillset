@@ -1,5 +1,11 @@
 # The Agent Table Gets a Generic Fallback
 
+> **Superseded by ADR-0022.** `generic` is gone, and the canonical-directory + symlink install
+> this ADR withdrew is now the design — `add` writes to `.agents/skills` and symlinks each
+> Agent's own directory to it. The objection recorded below (an install for one Agent creating
+> a directory others read) still holds; it was overridden on purpose. The table is now the full
+> vendored upstream list, not five verified rows.
+
 `skillreg add` implements ADR-0006's full five verified Agents (`claude-code`, `codex`,
 `github-copilot`, `opencode`, `pi`) plus one addition of our own: `generic`, for the
 `.agents/skills` convention a large share of *other* tools already default to — per

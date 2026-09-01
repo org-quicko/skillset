@@ -67,7 +67,9 @@ _Avoid_: API key, credential, secret
 
 **Agent**:
 A coding agent that reads Skills from a conventional directory on a developer's machine.
-Only Agents whose directories have been verified are offered.
+The offered list is the full Agent → directory table vendored from `vercel-labs/skills`
+(ADR-0022). `add` writes to the canonical `.agents/skills` and symlinks the chosen Agent's
+own directory to it.
 _Avoid_: Client, tool, editor, IDE
 
 **Scope**:

@@ -9,13 +9,15 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun build ./src/cli.ts --outdir dist --target node --format esm --external commander --external zod --external yaml --external fflate",
+    "build": "bun build ./src/cli.ts --outdir dist --target node --format esm --external @clack/prompts --external commander --external picocolors --external zod --external yaml --external fflate",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test"
   },
   "dependencies": {
+    "@clack/prompts": "^1.2.0",
     "commander": "^13.1.0",
     "fflate": "^0.8.3",
+    "picocolors": "^1.1.1",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },

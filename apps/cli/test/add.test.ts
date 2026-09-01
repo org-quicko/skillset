@@ -46,8 +46,12 @@ function baseDeps(overrides: Partial<AddDeps> & { fetch: typeof fetch; configPat
     cwd: "/unused",
     homeDir: "/unused",
     isTTY: false,
-    write: () => {},
-    readLine: async () => "",
+    promptChoice: async () => {
+      throw new Error("unexpected prompt");
+    },
+    promptAgent: async () => {
+      throw new Error("unexpected agent prompt");
+    },
     ...overrides,
   };
 }
@@ -86,10 +90,10 @@ describe("runAdd", () => {
           cwd,
           homeDir: cwd,
         }),
-        { name: "code-review", scope: "project", agent: "generic" },
+        { name: "code-review", scope: "project", agent: "codex" },
       );
 
-      expect(report.directory).toBe(join(cwd, ".agents", "skills", "code-review"));
+      expect(report.skillDirectory).toBe(join(cwd, ".agents", "skills", "code-review"));
       for (const call of calls) {
         expect(call.init?.headers).not.toHaveProperty("authorization");
       }
@@ -116,36 +120,45 @@ describe("runAdd", () => {
       const { fetch: fetchImpl } = stubRegistry();
 
       const report = await runAdd(
-        baseDeps({
-          fetch: fetchImpl,
-          configPath,
-          cwd,
-          homeDir: cwd,
-          isTTY: false,
-          readLine: async () => {
-            throw new Error("should not prompt");
-          },
-        }),
+        baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd, isTTY: false }),
         { name: "code-review", scope: "project", agent: "codex" },
       );
 
       expect(report).toEqual({
-        directory: join(cwd, ".agents", "skills", "code-review"),
-        agents: ["codex", "github-copilot", "opencode", "generic"],
+        skillDirectory: join(cwd, ".agents", "skills", "code-review"),
+        agent: "codex",
+        link: { kind: "canonical" },
       });
       expect(await readFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "utf8")).toContain("code-review");
     });
   });
 
-  it("prompts for the Agent, then the Scope, when both are omitted and a terminal is attached", async () => {
+  it("--copy writes into the Agent's own directory instead of symlinking", async () => {
     await withTempDirs(async ({ configDir, cwd }) => {
       const configPath = join(configDir, "config.json");
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
       const { fetch: fetchImpl } = stubRegistry();
 
-      const questions: string[] = [];
-      // First "1" picks AGENT_IDS[0] (claude-code); second "1" picks SCOPES[0] (project).
-      const answers = ["1", "1"];
+      const report = await runAdd(
+        baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd, isTTY: false }),
+        { name: "code-review", scope: "project", agent: "claude-code", copy: true },
+      );
+
+      expect(report.link).toEqual({
+        kind: "copy",
+        path: join(cwd, ".claude", "skills", "code-review"),
+        reason: "requested",
+      });
+    });
+  });
+
+  it("prompts for the Agent (searchably), then the Scope, when both are omitted and a terminal is attached", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const configPath = join(configDir, "config.json");
+      await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
+      const { fetch: fetchImpl } = stubRegistry();
+
+      const seen: string[] = [];
       const report = await runAdd(
         baseDeps({
           fetch: fetchImpl,
@@ -153,16 +166,22 @@ describe("runAdd", () => {
           cwd,
           homeDir: cwd,
           isTTY: true,
-          write: (text) => {
-            if (text.startsWith("Install for which")) questions.push(text.trim());
+          promptAgent: async (choices) => {
+            seen.push("agent");
+            expect(choices.some((c) => c.id === "claude-code")).toBe(true);
+            return "claude-code";
           },
-          readLine: async () => answers.shift() ?? "",
+          promptChoice: async (question, choices) => {
+            seen.push(question);
+            return choices[0]!;
+          },
         }),
         { name: "code-review" },
       );
 
-      expect(questions).toEqual(["Install for which Agent?", "Install for which scope?"]);
-      expect(report).toEqual({ directory: join(cwd, ".claude", "skills", "code-review"), agents: ["claude-code"] });
+      expect(seen).toEqual(["agent", "Install for which scope?"]);
+      expect(report.skillDirectory).toBe(join(cwd, ".agents", "skills", "code-review"));
+      expect(report.link).toEqual({ kind: "symlink", path: join(cwd, ".claude", "skills", "code-review") });
     });
   });
 
@@ -194,7 +213,7 @@ describe("runAdd", () => {
         runAdd(baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd }), {
           name: "code-review",
           scope: "project",
-          agent: "generic",
+          agent: "codex",
         }),
       ).rejects.toThrow(/entry_path_traversal/);
 

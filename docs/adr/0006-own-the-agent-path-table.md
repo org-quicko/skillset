@@ -1,5 +1,11 @@
 # Own the Agent → Path Table
 
+> **Amended by ADR-0022.** The table is no longer a five-Agent verified subset — it is the full
+> `vercel-labs/skills` list, vendored wholesale and re-synced by diff. The install model also
+> changed: `add` writes one canonical copy under `.agents/skills` and symlinks the chosen
+> Agent's directory to it, rather than writing into exactly one Agent's directory. The reasons
+> to *own* the table rather than depend on the package at runtime are unchanged.
+
 `skillreg add` writes a Skill into the directory a coding agent reads from, which means it
 needs the per-agent conventions. We keep that mapping ourselves as plain data rather than
 depending on `skills` at runtime, and we offer **only agents whose paths we have verified** —
