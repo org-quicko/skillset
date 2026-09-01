@@ -50,6 +50,12 @@ export interface GitHubIdentity extends GitHubUser {
   organisations: string[];
   /** The account's primary address, or null if it reports none. */
   email: string | null;
+  /**
+   * Whether GitHub has challenged that address. Not a gate on who gets an
+   * account — ADR-0018 leaves that to organisation membership — but it does
+   * decide whether this login may attach itself to a User that already exists.
+   */
+  email_verified: boolean;
 }
 
 async function githubGet<T>(path: string, accessToken: string): Promise<T> {
@@ -76,9 +82,12 @@ async function githubGet<T>(path: string, accessToken: string): Promise<T> {
  * address whether or not it is public, which is the address the person
  * actually uses.
  *
- * It is taken as given, verified or not. GitHub's `verified` flag is
- * deliberately not a gate here — see ADR-0018 for what that costs and why
- * membership of the permitted organisation is relied on instead.
+ * It is taken as given, verified or not, so far as *getting an account* goes:
+ * GitHub's `verified` flag is deliberately not a gate here — see ADR-0018 for
+ * what that costs and why membership of the permitted organisation is relied on
+ * instead. The flag is still reported, because attaching this login to a User
+ * that already exists is a different question from creating one, and an
+ * unverified address is not an argument for the former.
  *
  * A private membership is still returned, because the token belongs to the
  * member themselves. An organisation that restricts third-party application
@@ -102,10 +111,15 @@ export async function fetchGitHubIdentity(accessToken: string): Promise<GitHubId
   ]);
 
   const primary = emails.find((candidate) => candidate.primary);
+  const email = primary?.email ?? user.email ?? null;
 
   return {
     ...user,
     organisations: organisations.map((organisation) => organisation.login.toLowerCase()),
-    email: primary?.email ?? user.email ?? null,
+    email,
+    // Only the primary address carries a flag we read. Falling back to `/user`'s
+    // public address means falling back to an address GitHub told us nothing
+    // about, which is not a verified one.
+    email_verified: email !== null && email === primary?.email && primary.verified,
   };
 }

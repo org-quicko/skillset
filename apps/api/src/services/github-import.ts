@@ -1,59 +1,59 @@
 import {
-  ARTIFACT_MAX_ENTRIES,
-  ARTIFACT_MAX_UNCOMPRESSED_BYTES,
+  GitHubFolderError,
+  readGitHubFolder,
+  type GitHubFolderReason,
   type GitHubImportRequest,
+  type SkillFile,
 } from "@skill-registry/shared";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
-import { accounts } from "../db/schemas/index.js";
-import { GitHubImportFailedError, GitHubNotConnectedError } from "../http/errors.js";
+import { accounts, identityProviders } from "../db/schemas/index.js";
+import { GitHubImportFailedError, GitHubLoginDisabledError, GitHubNotConnectedError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
 
-/** The only two hosts this service will ever talk to. */
-const GITHUB_API = "https://api.github.com";
-const GITHUB_RAW = "https://raw.githubusercontent.com";
-
-/** GitHub asks that a caller identify itself, and refuses requests without one. */
-const USER_AGENT = "skill-registry";
-
-/** Matches the `provider_id` Better Auth writes for a GitHub login (ADR-0017). */
+/**
+ * Names GitHub in both tables this service reads: the `provider_id` Better
+ * Auth writes for a GitHub login, and the `identity_providers.kind` whose
+ * `enabled` flag governs whether that login's token may be used. They agree by
+ * design, which is what makes a configured Provider and a linked account the
+ * same GitHub (ADR-0017).
+ */
 const GITHUB_PROVIDER_ID = "github";
 
 /**
- * Whether a stored token is ciphertext rather than a token.
+ * The walk's reasons, as sentences an authenticated writer can act on.
  *
  * @remarks
- * Better Auth's own read applies the same test, and it is the reason enabling
- * `encryptOAuthTokens` did not strand the rows written before it: a value that
- * does not look encrypted is returned untouched. `symmetricEncrypt` under a
- * string secret emits bare lowercase hex, and no GitHub token is hex — they
- * carry a `gho_`-style prefix — so the two cannot be confused.
- *
- * @param stored - The `access_token` column's value.
- * @returns Whether to decrypt it before use.
+ * Deliberately not the shared module's own wording. These address someone
+ * signed in with GitHub, importing under their own access, so a refusal points
+ * at their account; the browser's anonymous fallback says something different
+ * for the same reason, because it has no credential to talk about.
  */
-function isEncrypted(stored: string): boolean {
-  return stored.length % 2 === 0 && /^[0-9a-f]+$/i.test(stored);
-}
-
-/** The subset of GitHub's Contents API entry shape this service reads. */
-interface ContentsEntry {
-  path: string;
-  type: "file" | "dir" | "symlink" | "submodule";
-  size?: number;
-  download_url: string | null;
-}
-
-/** One fetched file, on its way to the browser as base64. */
-export interface ImportedFile {
-  path: string;
-  content_base64: string;
-}
+const IMPORT_FAILURE_MESSAGES: Record<GitHubFolderReason, string> = {
+  not_found:
+    "Couldn't find that repository or folder with your GitHub account. Check the URL, and that your " +
+    "GitHub sign-in has access to it.",
+  unauthorized: "GitHub refused that request. Sign in with GitHub again to refresh the Registry's access.",
+  // Reachable with a token too — 5,000 requests an hour, not unlimited — and
+  // "sign in again" is advice that fixes nothing here.
+  rate_limited: "GitHub rate-limited this request. Wait a bit and try again, or upload the Skill's folder instead.",
+  request_failed: "GitHub could not be reached. Try again, or upload the Skill's folder instead.",
+  untrusted_download_host: "GitHub returned a file from an unexpected host, so it was not fetched.",
+  empty_folder: "That folder is empty, or doesn't exist at that ref.",
+  too_many_entries: "That folder holds more files than a Skill may contain.",
+  uncompressed_too_large: "That folder is larger than a Skill may be.",
+};
 
 /**
  * Reads a Skill's files from a GitHub repository the caller can see,
  * including a private one, using that caller's own OAuth token (ADR-0020).
+ *
+ * @remarks
+ * What is left here is the credential, not the reading: which Provider must be
+ * enabled, whose token is spent, and in what order those two are checked. The
+ * walk itself is `readGitHubFolder` in shared, which the browser's anonymous
+ * fallback runs too.
  */
 export class GitHubImportService {
   constructor(
@@ -67,19 +67,27 @@ export class GitHubImportService {
    * Fetches every file under a folder in a repository the caller can reach.
    *
    * @remarks
-   * The request is built from `location`'s parts, never from a URL a caller
-   * supplied — every outbound request is `api.github.com` or
-   * `raw.githubusercontent.com` with validated segments interpolated, so this
-   * cannot be pointed at another host (ADR-0020).
-   *
    * It runs as the caller and nobody else: the token comes from *their* linked
    * GitHub account, so this reaches exactly the repositories they can already
    * read, and a User with no linked account gets an error rather than somebody
    * else's access.
    *
+   * It also runs only while the GitHub Provider is enabled, and the order of
+   * those two steps is the point. Disabling that Provider withdraws the
+   * Registry's use of every stored GitHub token, not merely the login button —
+   * the tokens are a by-product of the login (ADR-0020), so an operator who
+   * turns the login off has withdrawn the consent they were collected under.
+   * The check therefore runs before the column is so much as selected, and is
+   * read per import, like the login's own `enabled` check (ADR-0019), so it
+   * takes effect immediately.
+   *
    * @param userId - The User importing, whose GitHub token is used.
    * @param location - The repository, ref, and folder to read.
-   * @returns The folder's files, base64-encoded, at paths relative to it.
+   * @param fetchImpl - The `fetch` to read GitHub with. Defaults to the global
+   * one; tests pass a fake so a request never leaves the process.
+   * @returns The folder's files, at paths relative to it.
+   * @throws GitHubLoginDisabledError if the GitHub Identity Provider is
+   * disabled or was never configured, whether or not the User has a token.
    * @throws GitHubNotConnectedError if the User has no linked GitHub account.
    * @throws GitHubImportFailedError if GitHub refuses the request, the folder
    * is empty, or the folder is larger than an Artifact may be.
@@ -90,49 +98,22 @@ export class GitHubImportService {
    * });
    * ```
    */
-  async fetchSkillFiles(userId: string, location: GitHubImportRequest): Promise<ImportedFile[]> {
+  async fetchSkillFiles(
+    userId: string,
+    location: GitHubImportRequest,
+    fetchImpl?: typeof fetch,
+  ): Promise<SkillFile[]> {
+    await this.assertGitHubLoginEnabled(userId);
     const token = await this.accessToken(userId);
-    const ref = location.ref ?? (await this.defaultBranch(token, location));
 
-    const files: ImportedFile[] = [];
-    let totalBytes = 0;
-
-    const walk = async (path: string): Promise<void> => {
-      const entries = await this.contents(token, location, path, ref);
-
-      for (const entry of entries) {
-        if (entry.type === "dir") {
-          await walk(entry.path);
-          continue;
-        }
-        // Symlinks and submodules are dropped, exactly as the publishing
-        // pipeline already drops excluded paths.
-        if (entry.type !== "file") continue;
-
-        // Counted before fetching, so an oversized repository is refused
-        // rather than pulled into memory first.
-        if (files.length >= ARTIFACT_MAX_ENTRIES) {
-          throw new GitHubImportFailedError(
-            `That folder holds more than ${ARTIFACT_MAX_ENTRIES} files, which is more than a Skill may contain.`,
-          );
-        }
-        totalBytes += entry.size ?? 0;
-        if (totalBytes > ARTIFACT_MAX_UNCOMPRESSED_BYTES) {
-          throw new GitHubImportFailedError("That folder is larger than a Skill may be.");
-        }
-
-        const bytes = await this.download(token, entry);
-        files.push({
-          path: entry.path.slice(location.path.length).replace(/^\//, ""),
-          content_base64: Buffer.from(bytes).toString("base64"),
-        });
+    let files: SkillFile[];
+    try {
+      files = await readGitHubFolder(location, { token, fetch: fetchImpl });
+    } catch (cause) {
+      if (cause instanceof GitHubFolderError) {
+        throw new GitHubImportFailedError(IMPORT_FAILURE_MESSAGES[cause.reason]);
       }
-    };
-
-    await walk(location.path);
-
-    if (files.length === 0) {
-      throw new GitHubImportFailedError("That folder is empty, or doesn't exist at that ref.");
+      throw cause;
     }
 
     this.logger.info(
@@ -140,6 +121,37 @@ export class GitHubImportService {
       "imported a skill folder from github",
     );
     return files;
+  }
+
+  /**
+   * Refuses the import unless GitHub is a configured, enabled Identity
+   * Provider on this Registry.
+   *
+   * @remarks
+   * A missing row is treated exactly as a disabled one. GitHub tokens outlive
+   * the Provider that collected them — there is no delete route for a Provider
+   * (ADR-0015), but an instance restored from a backup, or one whose Provider
+   * was configured after some accounts were linked, can hold both — and "no
+   * GitHub login here" is the same answer as "not right now".
+   *
+   * @param userId - The caller, recorded on the refusal so an operator can see
+   * who is hitting a switch they flipped.
+   * @throws GitHubLoginDisabledError if no enabled GitHub Provider is configured.
+   */
+  private async assertGitHubLoginEnabled(userId: string): Promise<void> {
+    const [provider] = await this.db
+      .select({ enabled: identityProviders.enabled })
+      .from(identityProviders)
+      .where(eq(identityProviders.kind, GITHUB_PROVIDER_ID))
+      .limit(1);
+
+    if (provider?.enabled) return;
+
+    this.logger.info(
+      { user_id: userId, configured: provider !== undefined },
+      "refused a github import because github sign-in is not enabled",
+    );
+    throw new GitHubLoginDisabledError();
   }
 
   /**
@@ -151,7 +163,14 @@ export class GitHubImportService {
    *
    * The column holds ciphertext rather than a token — `encryptOAuthTokens` is
    * on (ADR-0020), so what Better Auth wrote is AES-256-GCM under the signing
-   * secret, and sending it verbatim would have GitHub refuse every import.
+   * secret, and sending it verbatim would have GitHub refuse every import. A
+   * value that does not look encrypted is returned untouched, which is what
+   * kept the rows written before that flag was turned on working; Better
+   * Auth's own read applies the same test.
+   *
+   * @param userId - The User whose linked GitHub account is read.
+   * @returns The decrypted access token.
+   * @throws GitHubNotConnectedError if the User has no linked GitHub account.
    */
   private async accessToken(userId: string): Promise<string> {
     const [account] = await this.db
@@ -165,69 +184,19 @@ export class GitHubImportService {
     if (!isEncrypted(account.access_token)) return account.access_token;
     return symmetricDecrypt({ key: this.secret, data: account.access_token });
   }
+}
 
-  private async request(token: string, url: string): Promise<Response> {
-    return fetch(url, {
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/vnd.github+json",
-        "user-agent": USER_AGENT,
-      },
-      // GitHub answers every one of these directly; following a redirect
-      // elsewhere is the one way a fixed host could still reach another.
-      redirect: "manual",
-    });
-  }
-
-  private async defaultBranch(token: string, location: GitHubImportRequest): Promise<string> {
-    const url = `${GITHUB_API}/repos/${location.owner}/${location.repo}`;
-    const res = await this.request(token, url);
-    if (!res.ok) throw this.failure(res.status);
-    return ((await res.json()) as { default_branch: string }).default_branch;
-  }
-
-  private async contents(
-    token: string,
-    location: GitHubImportRequest,
-    path: string,
-    ref: string,
-  ): Promise<ContentsEntry[]> {
-    const url =
-      `${GITHUB_API}/repos/${location.owner}/${location.repo}/contents/${path}` +
-      `?ref=${encodeURIComponent(ref)}`;
-    const res = await this.request(token, url);
-    if (!res.ok) throw this.failure(res.status);
-
-    const body = (await res.json()) as ContentsEntry | ContentsEntry[];
-    return Array.isArray(body) ? body : [body];
-  }
-
-  private async download(token: string, entry: ContentsEntry): Promise<ArrayBuffer> {
-    // `download_url` comes from GitHub rather than from the caller, but it is
-    // still checked against the host it is supposed to be: it is the one URL
-    // here this service did not build itself.
-    if (!entry.download_url?.startsWith(`${GITHUB_RAW}/`)) {
-      throw new GitHubImportFailedError(`Couldn't fetch "${entry.path}" from GitHub.`);
-    }
-
-    const res = await this.request(token, entry.download_url);
-    if (!res.ok) throw new GitHubImportFailedError(`Couldn't fetch "${entry.path}" from GitHub.`);
-    return res.arrayBuffer();
-  }
-
-  /** GitHub's status codes, as sentences a writer can act on. */
-  private failure(status: number): GitHubImportFailedError {
-    if (status === 404) {
-      return new GitHubImportFailedError(
-        "Couldn't find that repository or folder with your GitHub account. Check the URL, and that your " +
-          "GitHub sign-in has access to it.",
-      );
-    }
-    if (status === 401 || status === 403) {
-      return new GitHubImportFailedError(
-        "GitHub refused that request. Sign in with GitHub again to refresh the Registry's access.",
-      );
-    }
-    return new GitHubImportFailedError(`GitHub request failed (${status}).`);
-  }
+/**
+ * Whether a stored token is ciphertext rather than a token.
+ *
+ * @remarks
+ * `symmetricEncrypt` under a string secret emits bare lowercase hex, and no
+ * GitHub token is hex — they carry a `gho_`-style prefix — so the two cannot
+ * be confused.
+ *
+ * @param stored - The `access_token` column's value.
+ * @returns Whether to decrypt it before use.
+ */
+function isEncrypted(stored: string): boolean {
+  return stored.length % 2 === 0 && /^[0-9a-f]+$/i.test(stored);
 }

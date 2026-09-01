@@ -84,14 +84,7 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
   try {
     published = await registryFetch(client, `/skills/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
       method: "PUT",
-      body: JSON.stringify({
-        description: bundle.description,
-        body: bundle.body,
-        license: bundle.license,
-        compatibility: bundle.compatibility,
-        metadata: bundle.metadata,
-        allowed_tools: bundle.allowed_tools,
-      }),
+      body: JSON.stringify(bundle.request),
     });
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {

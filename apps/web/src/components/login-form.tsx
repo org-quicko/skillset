@@ -1,5 +1,6 @@
 import { loginRefusalMessage, type PublicIdentityProvider } from "@skill-registry/shared";
 import { useState, type FormEvent } from "react";
+import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,7 +45,7 @@ export function LoginForm() {
     <Card className="w-full max-w-sm">
       <CardHeader>
         <CardTitle>Log in</CardTitle>
-        <CardDescription>Sign in to the Skill Registry.</CardDescription>
+        <CardDescription>Sign in to Skillset.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {externalError && (
@@ -105,8 +106,11 @@ export function LoginForm() {
 }
 
 function ProviderButton({ provider }: { provider: PublicIdentityProvider }) {
+  const Icon = PROVIDER_ICONS[provider.kind];
+
   return (
     <Button type="button" variant="outline" onClick={() => startExternalLogin(provider.kind)}>
+      <Icon className="size-4" />
       Continue with {provider.display_name}
     </Button>
   );

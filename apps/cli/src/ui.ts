@@ -53,7 +53,7 @@ export function bannerText(): string {
     lines.push("");
   }
 
-  lines.push(`  ${pc.dim("Publish and manage Skills on a Skill Registry")}`, "");
+  lines.push(`  ${pc.dim("Publish and manage Skills on Skillset")}`, "");
 
   const pad = Math.max(...COMMANDS.map(([cmd]) => cmd.length));
   for (const [cmd, desc] of COMMANDS) {
@@ -188,4 +188,36 @@ export async function promptAgent(choices: readonly { id: string; displayName: s
   }
 
   return answer;
+}
+
+/**
+ * Asks the User to paste a Token, with the input masked.
+ *
+ * @returns The Token, trimmed.
+ *
+ * @remarks
+ * Prompted rather than taken as `--token <secret>`, which put the Token into shell
+ * history and, for the life of the process, into the process table where any other
+ * account on the machine could read it. The flag still exists for CI, where there is no
+ * terminal to prompt at; interactively, this is the path.
+ *
+ * On Ctrl-C (clack reports a cancel) the process exits 1, matching the other prompts.
+ *
+ * @example
+ * ```ts
+ * const token = opts.token ?? (await promptToken());
+ * ```
+ */
+export async function promptToken(): Promise<string> {
+  const answer = await p.password({
+    message: "Paste a Token minted from the web interface",
+    validate: (value) => ((value ?? "").trim().length > 0 ? undefined : "A Token is required."),
+  });
+
+  if (p.isCancel(answer)) {
+    p.cancel("Cancelled.");
+    process.exit(1);
+  }
+
+  return answer.trim();
 }

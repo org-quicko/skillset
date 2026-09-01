@@ -50,10 +50,10 @@ async function main() {
   });
 
   Bun.serve({ fetch: app.fetch, port: config.port });
-  logger.info({ port: config.port, analytics_refresh_cron: config.analyticsRefreshCron }, "Skill Registry listening");
+  logger.info({ port: config.port, analytics_refresh_cron: config.analyticsRefreshCron }, "Skillset listening");
 }
 
 main().catch((error) => {
-  logger.fatal({ err: error }, "Skill Registry failed to start");
+  logger.fatal({ err: error }, "Skillset failed to start");
   process.exit(1);
 });

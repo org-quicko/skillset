@@ -54,6 +54,7 @@ const REFUSED = {
   notPermitted: "organisation_not_permitted",
   oauthAppNotApproved: "oauth_app_not_approved",
   noEmail: "no_email_from_provider",
+  emailNotVerified: "email_not_verified",
 } as const;
 
 /**
@@ -140,10 +141,15 @@ function socialProvidersFor(providers: IdentityProviderRow[]): Record<string, un
               id: String(identity.id),
               name: identity.name ?? identity.login,
               email: identity.email,
-              // Asserted so Better Auth links this login to an existing User
-              // (ADR-0016). It records the Registry trusting the organisation,
-              // not GitHub having challenged the address (ADR-0018).
-              emailVerified: true,
+              // GitHub's own flag, not an unconditional `true`. Membership of a
+              // permitted organisation is what earns an account (ADR-0018), and
+              // that is unchanged — but `github` is deliberately absent from
+              // `trustedProviders` below, so this flag is what decides whether
+              // the login may attach to a User that already exists. Asserting
+              // `true` here meant anyone who could set an unverified primary
+              // address to an existing User's could sign in as them, and with
+              // an ungated Provider (ADR-0021) nothing else stood in the way.
+              emailVerified: identity.email_verified,
               image: identity.avatar_url ?? undefined,
             },
             data: identity,
@@ -229,6 +235,20 @@ export function organisationGate(db: Database, logger: Logger) {
     const profile = source.oauth.profile ?? {};
     const claim = ORGANISATION_CLAIM[kind];
 
+    // An address the provider itself says it has not verified is refused, whatever
+    // organisation it belongs to and whether or not this Provider checks one — an
+    // organisation gate answers who may have an account here, not whether this person
+    // owns the address the account will be keyed on (ADR-0015).
+    //
+    // Only an explicit `false` refuses. An *absent* claim is admitted, because Entra
+    // never emits one and requiring it refused every Microsoft login; the tenant check
+    // below is what carries that case, since inside a tenant the address is provisioned
+    // by its administrator. GitHub carries no such claim either, and is handled by being
+    // left out of `trustedProviders` instead (ADR-0018).
+    if (profile.email_verified === false) {
+      return refuse(REFUSED.emailNotVerified, "provider reports the email address is not verified");
+    }
+
     // An empty list is a deliberate configuration meaning "admit anyone this
     // provider authenticates" (ADR-0021). It is the one branch here that lets
     // someone in without checking anything, so it says so every single time
@@ -245,11 +265,6 @@ export function organisationGate(db: Database, logger: Logger) {
     if (claim) {
       // Google and Microsoft: matched on the claim, never on the email
       // address's suffix, which anybody can make look like anything.
-      //
-      // No `email_verified` check: the claim already proves the token was
-      // issued for the permitted tenant, and inside a tenant the address is
-      // provisioned by its administrator. Entra never emits `email_verified`,
-      // so requiring it refused every Microsoft login.
       const asserted = profile[claim];
       if (typeof asserted !== "string") {
         return refuse(REFUSED.notPermitted, `profile carries no ${claim} claim`, { permitted });
@@ -309,7 +324,7 @@ export function organisationGate(db: Database, logger: Logger) {
  */
 export function createAuth(deps: BetterAuthDependencies, providers: IdentityProviderRow[]) {
   return betterAuth({
-    appName: "Skill Registry",
+    appName: "Skillset",
     secret: deps.secret,
     baseURL: deps.publicUrl,
     basePath: AUTH_BASE_PATH,
@@ -379,6 +394,35 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
       // untouched when it does not, so plaintext rows keep working and are
       // re-encrypted the next time they are written.
       encryptOAuthTokens: true,
+      // Without this whole block, "a login whose verified email matches an
+      // existing User signs in as that User" (ADR-0015) did not hold for anyone.
+      // Better Auth refuses to attach a provider login to an existing row when
+      // `requireLocalEmailVerified` — which defaults to *true* — finds the local
+      // `email_verified` false, and this Registry never verifies an address
+      // itself: the column defaults to false on every User /setup or an Admin
+      // creates. So every external login matching an existing User was refused
+      // with "account not linked", including the Superadmin's own.
+      //
+      // Turning it off does not weaken the match. The address being matched is
+      // the *Provider's*, asserted in this login and gated above; the local
+      // column records something this Registry has no mechanism to establish and
+      // no other code reads.
+      accountLinking: {
+        enabled: true,
+        // Google and Entra both prove ownership of the address they assert, and
+        // the gate has already established the login came from a permitted
+        // organisation. Entra is the reason this list is needed rather than
+        // leaning on `emailVerified`: it emits no `email_verified` claim at all,
+        // so Better Auth maps it to `false` and a Microsoft login could never
+        // link to an existing User.
+        //
+        // `github` is deliberately absent. Its primary address may be one GitHub
+        // has never challenged (ADR-0018), and an unverified address is not
+        // grounds for attaching to a User that already exists — so a GitHub login
+        // links only when GitHub itself says the address is verified.
+        trustedProviders: ["google", "microsoft"],
+        requireLocalEmailVerified: false,
+      },
       fields: {
         accountId: "account_id",
         providerId: "provider_id",

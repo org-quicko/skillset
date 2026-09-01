@@ -16,11 +16,19 @@ const S_IFMT = 0xf000;
 const S_IFLNK = 0xa000;
 const MAX_COMMENT_LENGTH = 65535;
 const ZIP64_SIZE_SENTINEL = 0xffffffff;
+const LOCAL_HEADER_SIGNATURE = 0x04034b50;
+const LOCAL_HEADER_LENGTH = 30;
+/** General-purpose bit 3: sizes are in a trailing data descriptor, and the local header's read zero (APPNOTE 4.4.4). */
+const DATA_DESCRIPTOR_FLAG = 0x0008;
 
 interface CentralDirectoryEntry {
   name: string;
   /** The size the archive *claims* it will expand to. Declared by the archive's author, so it bounds the work but does not prove it. */
   declaredSize: number;
+  /** Where this entry's local file header sits, so its own declared size can be held against the one above. */
+  localHeaderOffset: number;
+  /** Set when the entry's sizes live in a trailing data descriptor rather than its local header, which then reads zero. */
+  hasDataDescriptor: boolean;
   isSymlink: boolean;
 }
 
@@ -67,6 +75,7 @@ function readCentralDirectory(bytes: Uint8Array, view: DataView): CentralDirecto
     }
 
     const hostOs = bytes[offset + 5];
+    const generalPurposeFlag = view.getUint16(offset + 8, true);
     const declaredSize = view.getUint32(offset + 24, true);
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
@@ -84,6 +93,8 @@ function readCentralDirectory(bytes: Uint8Array, view: DataView): CentralDirecto
     entries.push({
       name,
       declaredSize,
+      localHeaderOffset: view.getUint32(offset + 42, true),
+      hasDataDescriptor: (generalPurposeFlag & DATA_DESCRIPTOR_FLAG) !== 0,
       isSymlink: hostOs === UNIX_HOST_OS && ((externalAttrs >>> 16) & S_IFMT) === S_IFLNK,
     });
 
@@ -97,11 +108,53 @@ function validateEntryName(name: string): void {
   if (name.includes("\0")) {
     throw new SkillValidationError("entry_null_byte", `Artifact entry "${name}" contains a null byte.`);
   }
+  // A zip name separates with "/" and nothing else (PKZIP APPNOTE 4.4.17.1), so a
+  // backslash is never a legitimate one. It has to be refused before the checks below
+  // rather than folded into them: on Windows `path.join` treats "\" as a separator, so
+  // `a\..\..\evil.md` walks out of the install directory while carrying no ".." segment
+  // and no leading "/" for either of them to catch. The same goes for a UNC name like
+  // `\\server\share`, which is absolute without starting with "/" or a drive letter.
+  if (name.includes("\\")) {
+    throw new SkillValidationError("entry_backslash", `Artifact entry "${name}" contains a backslash.`);
+  }
   if (name.startsWith("/") || /^[A-Za-z]:/.test(name)) {
     throw new SkillValidationError("entry_absolute_path", `Artifact entry "${name}" is an absolute path.`);
   }
   if (name.split("/").includes("..")) {
     throw new SkillValidationError("entry_path_traversal", `Artifact entry "${name}" has a parent-directory segment.`);
+  }
+}
+
+/**
+ * Holds an entry's two declarations of its own size against each other.
+ *
+ * @remarks
+ * `unzipSync` sizes each output buffer from the central directory, so an entry whose
+ * central declaration understates its real content comes back *truncated to that
+ * declaration* rather than overrunning the limit enforced from the same numbers. Memory is
+ * bounded by that either way — but it means the size check alone cannot tell an honest
+ * archive from a rewritten one, and a short read would install as if it were the file.
+ *
+ * The local header carries the same size a second time. Rewriting one and not the other is
+ * what a header edited to slip past the limit looks like, and that disagreement is the only
+ * trace the truncation leaves.
+ */
+function enforceDeclaredSizesAgree(bytes: Uint8Array, view: DataView, entry: CentralDirectoryEntry): void {
+  // Bit 3 puts the real sizes in a trailing descriptor and leaves the local header's at
+  // zero, so there is nothing here to compare against.
+  if (entry.hasDataDescriptor) return;
+
+  const offset = entry.localHeaderOffset;
+  if (offset + LOCAL_HEADER_LENGTH > bytes.length || view.getUint32(offset, true) !== LOCAL_HEADER_SIGNATURE) {
+    throw new SkillValidationError("corrupt_archive", "Not a valid zip archive.");
+  }
+
+  const localSize = view.getUint32(offset + 22, true);
+  if (localSize !== entry.declaredSize) {
+    throw new SkillValidationError(
+      "corrupt_archive",
+      `Artifact entry "${entry.name}" declares ${entry.declaredSize} bytes in the central directory and ${localSize} in its own header.`,
+    );
   }
 }
 
@@ -128,25 +181,32 @@ function enforceUncompressedSize(total: number): void {
  *
  * This is the only place an incoming Artifact is inspected (ADR-0001 — the API never
  * does), so it is where a hostile one is stopped: it refuses path traversal, absolute
- * paths, drive letters, null bytes, and symlink entries, enforces the same transfer,
- * entry-count and uncompressed-size limits publishing does, and tolerates or rejects a
- * wrapping directory exactly the way `buildSkillBundle` does.
+ * paths, drive letters, backslashes, null bytes, and symlink entries, enforces the same
+ * transfer, entry-count and uncompressed-size limits publishing does, and tolerates or
+ * rejects a wrapping directory exactly the way `buildSkillBundle` does.
  *
  * @param zipBytes - The Artifact as downloaded from storage.
  * @returns The Skill's files, with any single wrapping directory stripped from their paths.
  * @throws SkillValidationError with rule `corrupt_archive` when the bytes are not a
- * readable zip, `unsupported_archive` for zip64, `too_many_entries` or
- * `uncompressed_too_large` when a limit is exceeded, `artifact_too_large` when the
- * download itself is oversized, `entry_null_byte`, `entry_absolute_path`,
- * `entry_path_traversal`, or `entry_symlink` for a hostile entry, and — from
- * `stripWrappingDirectory` — `ambiguous_layout` when several directories each hold a
- * `SKILL.md`, or `skill_md_missing` when none does.
+ * readable zip or an entry does not hold the bytes it declares, `unsupported_archive` for
+ * zip64, `too_many_entries` or `uncompressed_too_large` when a limit is exceeded,
+ * `artifact_too_large` when the download itself is oversized, `entry_null_byte`,
+ * `entry_absolute_path`, `entry_backslash`, `entry_path_traversal`, or `entry_symlink`
+ * for a hostile entry, and — from `stripWrappingDirectory` — `ambiguous_layout` when
+ * several directories each hold a `SKILL.md`, or `skill_md_missing` when none does.
  *
  * @remarks
  * Limits are checked against the central directory's declared sizes *before* anything is
- * decompressed, so an ordinary zip bomb is refused without being expanded. Those sizes are
- * written by whoever built the archive, so the real total is re-checked afterwards to
- * catch a header that lied.
+ * decompressed, and `unzipSync` sizes each output buffer from those same numbers, so the
+ * memory an archive can claim is bounded by the total this refuses. A header that
+ * understates its entry cannot overrun that limit — it truncates to it instead, which is
+ * what `enforceDeclaredSizesAgree` is for.
+ *
+ * What this does not bound is the *time* spent inflating: the bytes past the declared
+ * length are still decompressed before being discarded, so a highly compressible Artifact
+ * within the transfer limit can burn CPU before it is refused. That is a local cost in
+ * the CLI, on an Artifact the User asked for, and bounding it would mean inflating every
+ * entry by hand rather than through `unzipSync`.
  *
  * @example
  * ```ts
@@ -173,6 +233,7 @@ export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
     if (entry.isSymlink) {
       throw new SkillValidationError("entry_symlink", `Artifact entry "${entry.name}" is a symlink.`);
     }
+    enforceDeclaredSizesAgree(zipBytes, view, entry);
   }
 
   let unzipped: Record<string, Uint8Array>;
@@ -189,8 +250,6 @@ export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
     }
     return { path: entry.name, bytes };
   });
-
-  enforceUncompressedSize(files.reduce((total, file) => total + file.bytes.byteLength, 0));
 
   return stripWrappingDirectory(files);
 }

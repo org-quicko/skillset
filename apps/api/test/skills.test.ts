@@ -199,6 +199,29 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(row?.published_by_email).toBe(writer.email);
   });
 
+  it("returns the same Skill a read of it returns", async () => {
+    // The publish response used to be assembled by hand, column by column,
+    // separately from every read path. Nothing failed if a new column reached
+    // the insert and not that literal — the Skill would simply be missing a
+    // field until the next GET. Both now come from one place, and this is what
+    // says so: an exhaustive comparison, not a field-by-field spot check.
+    const res = await publish(context, writer, "echoed-skill", {
+      description: "Published and read back.",
+      body: "# Echo\n",
+      license: "MIT",
+      compatibility: "Claude Code",
+      allowed_tools: "Read, Grep",
+      metadata: { team: "platform" },
+    });
+    expect(res.status).toBe(200);
+    const published = (await res.json()) as ApiPublished;
+
+    const read = await context.app.request(`/api/skills/${published.skill.id}`);
+    expect(read.status).toBe(200);
+
+    expect(published.skill).toEqual((await read.json()) as ApiSkill);
+  });
+
   it("refuses publishing to a reader and allows it to writers and Admins", async () => {
     const refused = await publish(context, reader, "reader-attempt", {
       description: "Should not land.",

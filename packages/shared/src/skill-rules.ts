@@ -45,6 +45,7 @@ export type SkillRule =
   | "unsupported_archive"
   | "entry_path_traversal"
   | "entry_absolute_path"
+  | "entry_backslash"
   | "entry_null_byte"
   | "entry_symlink";
 

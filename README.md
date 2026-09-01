@@ -1,4 +1,4 @@
-# Skill Registry
+# Skillset
 
 A self-hosted registry for Agent Skills. See [`.scratch/skill-registry/spec.md`](.scratch/skill-registry/spec.md) for the full spec.
 

@@ -420,6 +420,37 @@ describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)",
       expect(result).toBe(admit);
     });
 
+    it("refuses a login the provider says it has not verified, even from the permitted domain", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "google", permitted_organisations: ["example.com"] });
+
+      // The organisation gate answers who may have an account here; it does not
+      // answer whether this person owns the address the account is keyed on
+      // (ADR-0015). An explicit `false` is the provider disclaiming exactly that.
+      const result = await gate({
+        method: "oauth",
+        oauth: {
+          providerId: "google",
+          profile: { email: "dev@example.com", email_verified: false, hd: "example.com" },
+        },
+      });
+      expect(result).toEqual({ error: "email_not_verified" });
+    });
+
+    it("refuses an unverified address even through an ungated Provider", async () => {
+      await clearProviders();
+      await seedProvider(context, { kind: "google", permitted_organisations: [] });
+
+      // ADR-0021 lets a Provider admit anyone it authenticates. That is a
+      // decision about organisations, and it does not extend to admitting an
+      // address the provider itself will not vouch for.
+      const result = await gate({
+        method: "oauth",
+        oauth: { providerId: "google", profile: { email: "dev@anywhere.com", email_verified: false } },
+      });
+      expect(result).toEqual({ error: "email_not_verified" });
+    });
+
     it("matches Microsoft on the tid claim", async () => {
       await clearProviders();
       await seedProvider(context, { kind: "microsoft", permitted_organisations: ["tenant-guid"] });

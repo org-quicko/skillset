@@ -17,7 +17,7 @@ import {
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
 } from "@skill-registry/shared";
-import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { isInvalidIdSyntax } from "../db/pg-errors.js";
 import { skillDirectory, skillTags, skills, users, type UserRow } from "../db/schemas/index.js";
@@ -86,12 +86,6 @@ interface SkillSummary {
 
 interface SkillDetail extends SkillSummary {
   body: string;
-}
-
-interface PublishedSkill extends SkillDetail {
-  // The publisher just authenticated the request — every field is known,
-  // unlike the leftJoin-derived, possibly-removed Publisher above.
-  published_by: { user_id: string; email: string; first_name: string; last_name: string };
 }
 
 interface SkillUpload {
@@ -361,20 +355,7 @@ export class SkillsService {
    * ```
    */
   async get(id: string): Promise<SkillDetail> {
-    const skill = await selectByIdOrUndefined(() =>
-      this.db
-        .select(skillSelection)
-        .from(skills)
-        .leftJoin(users, eq(skills.published_by, users.id))
-        .where(eq(skills.id, id))
-        .limit(1),
-    );
-    if (!skill) throw new SkillNotFoundError();
-    const [tags, installs] = await Promise.all([
-      this.tags.getSkillTags(skill.id),
-      this.analytics.getInstallCount(skill.id),
-    ]);
-    return { ...skill, tags, installs };
+    return this.readSkill(eq(skills.id, id));
   }
 
   /**
@@ -398,14 +379,49 @@ export class SkillsService {
    * ```
    */
   async getByName(name: string): Promise<SkillDetail> {
-    const [skill] = await this.db
-      .select(skillSelection)
-      .from(skills)
-      .leftJoin(users, eq(skills.published_by, users.id))
-      .where(eq(skills.name, name))
-      .limit(1);
+    return this.readSkill(eq(skills.name, name));
+  }
 
+  /**
+   * Reads the one Skill matching `where`, whole.
+   *
+   * @remarks
+   * The single place a Skill is assembled. Every read path goes through it —
+   * by id, by name, and the response to a publish — so a column added to
+   * `skillSelection` reaches all three at once. It used to be assembled three
+   * times, twice as this select and once as a hand-written literal, and
+   * nothing failed if a new column reached only some of them.
+   *
+   * Tags and install count are not columns on `skills`: Tags are a join
+   * through `skill_tags` (ADR-0011) and the count comes off the
+   * `skill_analytics` view (ADR-0012), so both are fetched alongside — and
+   * concurrently, since neither depends on the other.
+   *
+   * A malformed id is treated as "no row" rather than an error. Postgres
+   * raises 22P02 only for the uuid comparison, so a name-keyed call cannot
+   * trigger that branch — it costs nothing to apply it uniformly and it saves
+   * having two spellings of this method.
+   *
+   * @param where - The condition identifying the Skill, over `skills`.
+   * @returns `SkillDetail`
+   * @throws SkillNotFoundError if nothing matches, or `where` compares a
+   * malformed id.
+   * @example
+   * ```ts
+   * const skill = await this.readSkill(eq(skills.name, "code-review"));
+   * ```
+   */
+  private async readSkill(where: SQL): Promise<SkillDetail> {
+    const skill = await selectByIdOrUndefined(() =>
+      this.db
+        .select(skillSelection)
+        .from(skills)
+        .leftJoin(users, eq(skills.published_by, users.id))
+        .where(where)
+        .limit(1),
+    );
     if (!skill) throw new SkillNotFoundError();
+
     const [tags, installs] = await Promise.all([
       this.tags.getSkillTags(skill.id),
       this.analytics.getInstallCount(skill.id),
@@ -430,7 +446,7 @@ export class SkillsService {
    * @param payload - The request body, expected to carry `description` and
    * `body`, and optionally `license`, `compatibility`, `metadata`, and
    * `allowed_tools`; not yet known to have any of them.
-   * @returns `{ skill: PublishedSkill; upload: SkillUpload }`
+   * @returns `{ skill: SkillDetail; upload: SkillUpload }`
    * @throws SkillValidationError if `rawName`, `payload.description`,
    * `payload.body`, or any present optional field fails validation. A
    * failing optional field rejects the publish exactly like a failing
@@ -447,7 +463,7 @@ export class SkillsService {
     publisher: UserRow,
     rawName: string,
     payload: Record<string, unknown> | null,
-  ): Promise<{ skill: PublishedSkill; upload: SkillUpload }> {
+  ): Promise<{ skill: SkillDetail; upload: SkillUpload }> {
     // The caller parsed the name out of the SKILL.md frontmatter. The API does
     // not read the Artifact to confirm the two agree (ADR-0001).
     const name = validateSkillName(rawName);
@@ -510,29 +526,14 @@ export class SkillsService {
     this.logger.info({ skill_name: name, user_id: publisher.id }, "skill published");
 
     return {
-      skill: {
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        body: row.body,
-        license: row.license,
-        compatibility: row.compatibility,
-        metadata: row.metadata,
-        allowed_tools: row.allowed_tools,
-        // A republish's Tags and install count both survive untouched —
-        // publishing never writes skill_tags or skill_install_events, and
-        // nothing but refreshInstallCounts ever writes skill_analytics
-        // (ADR-0012); a brand new Skill simply has neither yet.
-        tags: await this.tags.getSkillTags(row.id),
-        installs: await this.analytics.getInstallCount(row.id),
-        published_at: row.published_at,
-        published_by: {
-          user_id: publisher.id,
-          email: publisher.email,
-          first_name: publisher.first_name,
-          last_name: publisher.last_name,
-        },
-      },
+      // Read back rather than assembled from `row` and `publisher`: one place
+      // shapes a Skill, so a column added to `skillSelection` appears here
+      // without this method being touched. A republish's Tags and install
+      // count both survive untouched — publishing never writes `skill_tags` or
+      // `skill_install_events`, and nothing but `refreshInstallCounts` ever
+      // writes `skill_analytics` (ADR-0012); a brand new Skill simply has
+      // neither yet.
+      skill: await this.readSkill(eq(skills.id, row.id)),
       upload: {
         url,
         method: "PUT",

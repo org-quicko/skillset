@@ -70,3 +70,38 @@ describe("Better Auth's model and the schema agree", () => {
     expect(models).toEqual(["accounts", "sessions", "users", "verifications"]);
   });
 });
+
+/**
+ * Seam 0, second half — the account-linking settings, which decide whether an
+ * external login may attach to a User that already exists.
+ *
+ * These fail the same silent way the field map did. Better Auth's defaults
+ * refuse a link when the *local* `email_verified` is false, and this Registry
+ * never verifies an address itself — the column defaults to false on every User
+ * `/setup` or an Admin creates. The symptom is a login refused as "account not
+ * linked" for a User who plainly exists, which is ADR-0015's central promise
+ * broken with nothing in the schema to show it.
+ */
+describe("account linking admits an existing User", () => {
+  async function contextFor() {
+    const { db } = createDatabase(UNUSED_DATABASE_URL);
+    const auth = createAuth({ db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent") }, []);
+    return auth.$context;
+  }
+
+  it("does not require a locally-verified address, which this Registry never establishes", async () => {
+    const context = await contextFor();
+    expect(context.options.account?.accountLinking?.requireLocalEmailVerified).toBe(false);
+    expect(context.options.account?.accountLinking?.enabled).toBe(true);
+  });
+
+  it("trusts Google and Microsoft, because Entra asserts no email_verified and would never link", async () => {
+    const context = await contextFor();
+    expect(context.trustedProviders).toEqual(["google", "microsoft"]);
+  });
+
+  it("does not trust GitHub, whose address may be one GitHub never challenged (ADR-0018)", async () => {
+    const context = await contextFor();
+    expect(context.trustedProviders).not.toContain("github");
+  });
+});

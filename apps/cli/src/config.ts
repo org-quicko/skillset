@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -93,14 +93,26 @@ export async function readConfig(configPath: string): Promise<Config | null> {
  * @param config - The Registry location and Token to persist.
  * @throws Error when the directory cannot be created or the file cannot be written.
  *
+ * @remarks
+ * The file holds a Token in plain text, so it is written `0600` and its directory `0700`.
+ * `mode` on `writeFile` only applies when the file is created, so an existing one is
+ * narrowed explicitly — a config written before this did not restrict it at all. Windows
+ * has no POSIX mode and `chmod` is a near no-op there, which is why the failure is
+ * ignored rather than aborting a login that otherwise succeeded.
+ *
  * @example
  * ```ts
  * await writeConfig(resolveConfigPath(process.env), { registry: "https://registry.example", token });
  * ```
  */
 export async function writeConfig(configPath: string, config: Config): Promise<void> {
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  try {
+    await chmod(configPath, 0o600);
+  } catch {
+    // Nothing to narrow on a filesystem without POSIX modes.
+  }
 }
 
 /**
@@ -133,6 +145,13 @@ export function resolveCredentials(env: NodeJS.ProcessEnv, fileConfig: Config | 
  * even a location is known. Reads do not require authentication (ADR-0013), so a missing
  * Token is not a failure here — it just means the request goes out anonymously.
  *
+ * @remarks
+ * A stored Token belongs to the Registry it was stored against, so it is only offered
+ * back when the resolved Registry is still that one. Overriding just `SKILLREG_REGISTRY`
+ * used to keep the file's Token and send it to whatever host the variable named, handing
+ * one Registry's credential to another. `SKILLREG_TOKEN` is unconditional — naming a
+ * Token is stating which one to use.
+ *
  * @example
  * ```ts
  * resolveRegistryAccess({ SKILLREG_REGISTRY: "https://registry.example" }, null);
@@ -142,5 +161,17 @@ export function resolveCredentials(env: NodeJS.ProcessEnv, fileConfig: Config | 
 export function resolveRegistryAccess(env: NodeJS.ProcessEnv, fileConfig: Config | null): RegistryAccess | null {
   const registry = env.SKILLREG_REGISTRY ?? fileConfig?.registry;
   if (!registry) return null;
-  return { registry, token: env.SKILLREG_TOKEN ?? fileConfig?.token };
+  if (env.SKILLREG_TOKEN) return { registry, token: env.SKILLREG_TOKEN };
+
+  const storedIsSameRegistry = fileConfig !== null && sameRegistry(registry, fileConfig.registry);
+  return { registry, token: storedIsSameRegistry ? fileConfig.token : undefined };
+}
+
+/** Compares two Registry locations as locations, so a trailing slash or a capitalised host is not a different host. */
+function sameRegistry(one: string, other: string): boolean {
+  return normalizeRegistry(one) === normalizeRegistry(other);
+}
+
+function normalizeRegistry(registry: string): string {
+  return registry.trim().replace(/\/+$/, "").toLowerCase();
 }

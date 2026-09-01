@@ -1,5 +1,6 @@
 import type { User } from "@skill-registry/shared";
 import { LogOutIcon, SettingsIcon } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -28,34 +29,37 @@ export function Header({ user, onOpenSettings }: { user: User; onOpenSettings?: 
         onClick={() => navigate("/")}
         className="cursor-pointer text-sm font-semibold tracking-tight outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
-        Skill Registry
+        Skillset
       </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger className="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-          <Avatar>
-            <AvatarFallback>{initials(user)}</AvatarFallback>
-          </Avatar>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex flex-col gap-0.5 font-normal">
-              <span className="text-sm font-medium text-foreground">
-                {user.first_name} {user.last_name}
-              </span>
-              <span className="text-xs text-muted-foreground">{user.email}</span>
-            </DropdownMenuLabel>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onOpenSettings}>
-            <SettingsIcon />
-            Settings
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => logout.mutate()} disabled={logout.isPending}>
-            <LogOutIcon />
-            {logout.isPending ? "Signing out…" : "Sign out"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <DropdownMenu>
+          <DropdownMenuTrigger className="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+            <Avatar>
+              <AvatarFallback>{initials(user)}</AvatarFallback>
+            </Avatar>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="flex flex-col gap-0.5 font-normal">
+                <span className="text-sm font-medium text-foreground">
+                  {user.first_name} {user.last_name}
+                </span>
+                <span className="text-xs text-muted-foreground">{user.email}</span>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onOpenSettings}>
+              <SettingsIcon />
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => logout.mutate()} disabled={logout.isPending}>
+              <LogOutIcon />
+              {logout.isPending ? "Signing out…" : "Sign out"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </header>
   );
 }

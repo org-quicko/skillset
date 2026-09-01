@@ -75,6 +75,13 @@ describe("extractSkillFiles", () => {
     { name: "a leading slash", entryName: "/evil.txt", expected: "entry_absolute_path" },
     { name: "a drive letter", entryName: "C:/evil.txt", expected: "entry_absolute_path" },
     { name: "a null byte", entryName: "evil\0.txt", expected: "entry_null_byte" },
+    // A backslash carries no ".." segment and no leading "/", so on Windows — where
+    // `path.join` separates on it — these walk out of the install directory past every
+    // check above unless the backslash itself is refused.
+    { name: "a backslash parent-directory walk", entryName: "a\\..\\..\\..\\evil.txt", expected: "entry_backslash" },
+    { name: "a backslash-separated path", entryName: "references\\evil.txt", expected: "entry_backslash" },
+    { name: "a UNC name", entryName: "\\\\server\\share\\evil.txt", expected: "entry_backslash" },
+    { name: "a drive letter behind a backslash", entryName: "C:\\evil.txt", expected: "entry_backslash" },
   ];
 
   for (const { name, entryName, expected } of nameCases) {
@@ -134,6 +141,14 @@ describe("extractSkillFiles", () => {
 
   it("refuses a zip64 entry rather than guessing its size", () => {
     expect(ruleFor(patchDeclaredSize(validSkillZip(), 0xffffffff))).toBe("unsupported_archive");
+  });
+
+  it("refuses an entry whose two declared sizes disagree, rather than installing a truncated file", () => {
+    // The other half of the bomb case. Understating the size passes the limit above, and
+    // `unzipSync` then sizes its output buffer from that same number and truncates to it
+    // — so the short read would install as the file's real content. Rewriting the central
+    // directory and not the local header is the trace that leaves.
+    expect(ruleFor(patchDeclaredSize(validSkillZip(), 4))).toBe("corrupt_archive");
   });
 
   it("tolerates a single wrapping directory", () => {

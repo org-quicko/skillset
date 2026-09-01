@@ -8,10 +8,10 @@ import { runLogin } from "./commands/login.js";
 import { runPublish } from "./commands/publish.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveConfigPath } from "./config.js";
-import { bannerText, fail, promptAgent, promptChoice } from "./ui.js";
+import { bannerText, fail, promptAgent, promptChoice, promptToken } from "./ui.js";
 
 const program = new Command();
-program.name("skillreg").description("Publish and manage Skills on a Skill Registry.");
+program.name("skillreg").description("Publish and manage Skills on Skillset.");
 program.addHelpText("beforeAll", bannerText());
 program.action(() => console.log(bannerText()));
 
@@ -21,13 +21,28 @@ program
   .command("login")
   .description("Authenticate the CLI against a Registry with a Token minted from the web interface.")
   .requiredOption("--registry <url>", "The Registry's URL")
-  .requiredOption("--token <secret>", "A Token minted from the web interface")
-  .action(async (opts: { registry: string; token: string }) => {
+  .option("--token <secret>", "A Token minted from the web interface (prompted for if omitted)")
+  .action(async (opts: { registry: string; token?: string }) => {
     p.intro(label("login"));
+
+    // Prompted rather than required on the command line, so the Token stays out of shell
+    // history and the process table. The flag remains for CI, which has no terminal.
+    let token = opts.token;
+    if (!token) {
+      if (process.stdin.isTTY !== true) {
+        fail(new Error("No terminal to prompt at. Pass --token, or set SKILLREG_REGISTRY and SKILLREG_TOKEN."));
+        return;
+      }
+      token = await promptToken();
+    }
+
     const s = p.spinner();
     s.start(`Verifying your Token against ${opts.registry}`);
     try {
-      const result = await runLogin({ fetch, configPath: resolveConfigPath(process.env) }, opts);
+      const result = await runLogin(
+        { fetch, configPath: resolveConfigPath(process.env) },
+        { registry: opts.registry, token },
+      );
       s.stop(`Authenticated as ${pc.cyan(result.email)} ${pc.dim(`(${result.role})`)}`);
       p.outro(`Logged in to ${result.registry}`);
     } catch (error) {

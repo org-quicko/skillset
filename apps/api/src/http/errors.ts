@@ -218,6 +218,26 @@ export class GitHubNotConnectedError extends AppError {
 }
 
 /**
+ * A User tried to import from GitHub while the GitHub Identity Provider is
+ * disabled, or was never configured. Told apart from
+ * `GitHubNotConnectedError` because the remedy is somebody else's: the writer
+ * may well have a perfectly good linked account and a stored token, and the
+ * Registry is refusing to use it (ADR-0020). "Sign in with GitHub" is not
+ * advice they can take on an instance where that login is turned off.
+ */
+export class GitHubLoginDisabledError extends AppError {
+  /** Builds the 409 `github_login_disabled` error. */
+  constructor() {
+    super(
+      409,
+      "github_login_disabled",
+      "GitHub sign-in is turned off on this Registry, so it will not use your GitHub access to read " +
+        "repositories. Ask an Admin to enable it, or upload the Skill's folder instead.",
+    );
+  }
+}
+
+/**
  * An import from GitHub could not be completed. Unlike an external login's
  * refusal, the reason is safe to pass on and useful: the caller is an
  * authenticated writer acting on their own access, so telling them the folder

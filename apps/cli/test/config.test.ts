@@ -79,11 +79,22 @@ describe("resolveCredentials", () => {
     expect(resolveCredentials({}, fileConfig)).toEqual(fileConfig);
   });
 
-  it("prefers env vars over the file, field by field", () => {
-    expect(resolveCredentials({ SKILLREG_REGISTRY: "https://env.example" }, fileConfig)).toEqual({
-      registry: "https://env.example",
+  it("prefers the env Token over the file's", () => {
+    expect(resolveCredentials({ SKILLREG_TOKEN: "env-token" }, fileConfig)).toEqual({
+      registry: "https://file.example",
+      token: "env-token",
+    });
+  });
+
+  it("keeps the stored Token when the env names the Registry it was stored against", () => {
+    expect(resolveCredentials({ SKILLREG_REGISTRY: "https://file.example/" }, fileConfig)).toEqual({
+      registry: "https://file.example/",
       token: "file-token",
     });
+  });
+
+  it("never sends the stored Token to a different Registry", () => {
+    expect(resolveCredentials({ SKILLREG_REGISTRY: "https://env.example" }, fileConfig)).toBeNull();
   });
 
   it("returns null when neither source has both pieces", () => {
@@ -105,6 +116,24 @@ describe("resolveRegistryAccess", () => {
       registry: "https://file.example",
       token: "file-token",
     });
+  });
+
+  it("drops the stored Token when the env points at another Registry, rather than forwarding it", () => {
+    expect(
+      resolveRegistryAccess({ SKILLREG_REGISTRY: "https://other.example" }, {
+        registry: "https://file.example",
+        token: "file-token",
+      }),
+    ).toEqual({ registry: "https://other.example", token: undefined });
+  });
+
+  it("treats a trailing slash and a capitalised host as the same Registry", () => {
+    expect(
+      resolveRegistryAccess({ SKILLREG_REGISTRY: "https://File.Example/" }, {
+        registry: "https://file.example",
+        token: "file-token",
+      }),
+    ).toEqual({ registry: "https://File.Example/", token: "file-token" });
   });
 
   it("returns null only when no Registry is known at all", () => {

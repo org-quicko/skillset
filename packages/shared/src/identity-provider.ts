@@ -51,6 +51,9 @@ export const LOGIN_REFUSAL_MESSAGE: Record<string, string> = {
     "applications, an owner has to approve this Registry's OAuth app before anyone can sign in with GitHub.",
   no_email_from_provider:
     "That provider did not give this Registry an email address, which is how accounts are identified here.",
+  email_not_verified:
+    "Your provider reports that your email address has not been verified. Verify it with your provider and try " +
+    "again, or use your password.",
 };
 
 /**

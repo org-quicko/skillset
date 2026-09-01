@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { symmetricEncrypt } from "better-auth/crypto";
-import { accounts } from "../src/db/schemas/index.js";
+import { eq } from "drizzle-orm";
+import { accounts, identityProviders } from "../src/db/schemas/index.js";
 import { GitHubImportService } from "../src/services/github-import.js";
 import { createLogger } from "../src/logger.js";
 import {
@@ -77,6 +78,19 @@ describe("Importing a Skill from a private GitHub repository (ADR-0020)", () => 
       role: "reader",
     });
     readerCookie = await signIn(context, "reader@example.com", PASSWORD);
+
+    // An import only runs while GitHub is an enabled Identity Provider: the
+    // stored tokens are a by-product of that login, so turning it off
+    // withdraws them (ADR-0020). Every test below that expects an import to
+    // get anywhere needs it on.
+    await context.db.insert(identityProviders).values({
+      kind: "github",
+      display_name: "GitHub",
+      client_id: "client-id",
+      client_secret: "client-secret",
+      permitted_organisations: ["acme"],
+      enabled: true,
+    });
   }, 60_000);
 
   afterAll(async () => {
@@ -161,12 +175,7 @@ describe("Importing a Skill from a private GitHub repository (ADR-0020)", () => 
   });
 
   describe("fetching, against a stubbed GitHub", () => {
-    const realFetch = globalThis.fetch;
     const service = () => new GitHubImportService(context.db, TEST_AUTH_SECRET, createLogger("silent"));
-
-    afterEach(() => {
-      globalThis.fetch = realFetch;
-    });
 
     /**
      * Links a GitHub account holding `token`, stored the way Better Auth
@@ -195,11 +204,16 @@ describe("Importing a Skill from a private GitHub repository (ADR-0020)", () => 
         });
     }
 
-    /** Records every URL and bearer token asked for, and answers from a fixture map. */
-    function stubGitHub(routes: Record<string, unknown>): { urls: string[]; bearers: string[] } {
+    /**
+     * A `fetch` recording every URL and bearer token asked for, answering from
+     * a fixture map. Passed to `fetchSkillFiles` rather than assigned over the
+     * global: the walk itself lives in shared and is tested there, so what is
+     * left to observe here is only which credential this service spends.
+     */
+    function stubGitHub(routes: Record<string, unknown>): { fetch: typeof fetch; urls: string[]; bearers: string[] } {
       const urls: string[] = [];
       const bearers: string[] = [];
-      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         urls.push(url);
         const authorization = new Headers(init?.headers).get("authorization");
@@ -207,18 +221,19 @@ describe("Importing a Skill from a private GitHub repository (ADR-0020)", () => 
 
         const body = routes[url];
         if (body === undefined) return new Response("not found", { status: 404 });
+        if (body instanceof Response) return body;
         if (body instanceof Uint8Array) return new Response(body, { status: 200 });
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
       }) as typeof fetch;
-      return { urls, bearers };
+      return { fetch: fetchImpl, urls, bearers };
     }
 
-    it("reads a folder as the calling writer, and only from GitHub's hosts", async () => {
+    it("reads a folder as the calling writer, spending that writer's decrypted token", async () => {
       await linkGitHub("gho_writer_token");
-      const { urls, bearers } = stubGitHub({
+      const stub = stubGitHub({
         "https://api.github.com/repos/acme/skills/contents/code-review?ref=main": [
           {
             path: "code-review/SKILL.md",
@@ -232,20 +247,19 @@ describe("Importing a Skill from a private GitHub repository (ADR-0020)", () => 
         ),
       });
 
-      const files = await service().fetchSkillFiles(writerId, validBody() as never);
+      const files = await service().fetchSkillFiles(writerId, validBody() as never, stub.fetch);
 
       expect(files).toHaveLength(1);
-      // Relative to the folder that was asked for, not the repository root —
-      // the same shape a dropped folder produces.
       expect(files[0]?.path).toBe("SKILL.md");
-      expect(Buffer.from(files[0]!.content_base64, "base64").toString()).toBe("hello world!");
-      expect(urls.every((url) => url.startsWith("https://api.github.com/") || url.startsWith("https://raw.githubusercontent.com/"))).toBe(true);
+      expect(new TextDecoder().decode(files[0]?.bytes)).toBe("hello world!");
 
-      // The token GitHub is handed is the writer's own, not the ciphertext the
-      // column holds. Asserted rather than assumed: sending the stored value
-      // verbatim fails only at GitHub, which no stub would ever notice.
-      expect(bearers.length).toBeGreaterThan(0);
-      expect(new Set(bearers)).toEqual(new Set(["gho_writer_token"]));
+      // The point of this test, and the reason it lives here rather than
+      // beside the walk: the token GitHub is handed is the writer's own, not
+      // the ciphertext the column holds. Asserted rather than assumed, since
+      // sending the stored value verbatim fails only at GitHub, which no stub
+      // would ever notice.
+      expect(stub.bearers.length).toBeGreaterThan(0);
+      expect(new Set(stub.bearers)).toEqual(new Set(["gho_writer_token"]));
     });
 
     it("still reads a token stored before encryption was turned on", async () => {
@@ -253,55 +267,111 @@ describe("Importing a Skill from a private GitHub repository (ADR-0020)", () => 
       // enabling `encryptOAuthTokens` does not strand rows already written
       // (ADR-0020). The import inherits that, and this pins it.
       await linkGitHubRaw("gho_plaintext_token");
-      const { bearers } = stubGitHub({
+      const stub = stubGitHub({
         "https://api.github.com/repos/acme/skills/contents/code-review?ref=main": [],
       });
 
-      await expect(service().fetchSkillFiles(writerId, validBody() as never)).rejects.toThrow(/empty/);
-      expect(bearers).toEqual(["gho_plaintext_token"]);
+      await expect(service().fetchSkillFiles(writerId, validBody() as never, stub.fetch)).rejects.toThrow(/empty/);
+      expect(stub.bearers).toEqual(["gho_plaintext_token"]);
     });
 
-    it("refuses a download_url that points off raw.githubusercontent.com", async () => {
+    it("reports the walk's refusal as a github_import_failed the writer can act on", async () => {
+      // How a reason crosses out of shared: the walk throws
+      // `rate_limited`, and this service turns it into the sentence an
+      // authenticated writer needs — not "sign in again", which fixes nothing.
       await linkGitHub("gho_writer_token");
-      stubGitHub({
+      const stub = stubGitHub({
+        "https://api.github.com/repos/acme/skills/contents/code-review?ref=main": new Response("rate limited", {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+      });
+
+      await expect(service().fetchSkillFiles(writerId, validBody() as never, stub.fetch)).rejects.toThrow(
+        /rate-limited/,
+      );
+    });
+
+    describe("when github sign-in is not enabled", () => {
+      /**
+       * The folder every test here would import if the token were sent, so a
+       * refusal cannot be mistaken for a repository that was not there.
+       */
+      const READABLE_FOLDER = {
         "https://api.github.com/repos/acme/skills/contents/code-review?ref=main": [
           {
             path: "code-review/SKILL.md",
             type: "file",
             size: 12,
-            // GitHub would never send this. The check exists because it is the
-            // one URL the service does not build itself (ADR-0020).
-            download_url: "https://evil.example.com/payload",
+            download_url: "https://raw.githubusercontent.com/acme/skills/main/code-review/SKILL.md",
           },
         ],
+        "https://raw.githubusercontent.com/acme/skills/main/code-review/SKILL.md": new TextEncoder().encode(
+          "hello world!",
+        ),
+      };
+
+      afterEach(async () => {
+        await context.db
+          .update(identityProviders)
+          .set({ enabled: true })
+          .where(eq(identityProviders.kind, "github"));
       });
 
-      await expect(service().fetchSkillFiles(writerId, validBody() as never)).rejects.toThrow(/Couldn't fetch/);
-    });
+      it("refuses the import, and spends no token, while the Provider is disabled", async () => {
+        await linkGitHub("gho_writer_token");
+        await context.db
+          .update(identityProviders)
+          .set({ enabled: false })
+          .where(eq(identityProviders.kind, "github"));
+        const stub = stubGitHub(READABLE_FOLDER);
 
-    it("resolves the default branch when the URL named no ref", async () => {
-      await linkGitHub("gho_writer_token");
-      const { urls } = stubGitHub({
-        "https://api.github.com/repos/acme/skills": { default_branch: "trunk" },
-        "https://api.github.com/repos/acme/skills/contents/code-review?ref=trunk": [],
+        await expect(service().fetchSkillFiles(writerId, validBody() as never, stub.fetch)).rejects.toThrow(
+          /GitHub sign-in is turned off/,
+        );
+
+        // The point of the switch: not that the import fails, but that the
+        // writer's stored token never leaves the Registry. A refusal after the
+        // fetch would read the same from the outside and would not be this.
+        expect(stub.urls).toEqual([]);
+        expect(stub.bearers).toEqual([]);
       });
 
-      await expect(
-        service().fetchSkillFiles(writerId, validBody({ ref: null }) as never),
-      ).rejects.toThrow(/empty/);
-      expect(urls).toContain("https://api.github.com/repos/acme/skills/contents/code-review?ref=trunk");
-    });
+      it("refuses the import when GitHub was never configured as a Provider", async () => {
+        await linkGitHub("gho_writer_token");
+        await context.db.delete(identityProviders).where(eq(identityProviders.kind, "github"));
+        const stub = stubGitHub(READABLE_FOLDER);
 
-    it("drops symlinks and submodules, as the publishing pipeline already does", async () => {
-      await linkGitHub("gho_writer_token");
-      stubGitHub({
-        "https://api.github.com/repos/acme/skills/contents/code-review?ref=main": [
-          { path: "code-review/link", type: "symlink", download_url: null },
-          { path: "code-review/vendor", type: "submodule", download_url: null },
-        ],
+        await expect(service().fetchSkillFiles(writerId, validBody() as never, stub.fetch)).rejects.toThrow(
+          /GitHub sign-in is turned off/,
+        );
+        expect(stub.urls).toEqual([]);
+
+        await context.db.insert(identityProviders).values({
+          kind: "github",
+          display_name: "GitHub",
+          client_id: "client-id",
+          client_secret: "client-secret",
+          permitted_organisations: ["acme"],
+          enabled: true,
+        });
       });
 
-      await expect(service().fetchSkillFiles(writerId, validBody() as never)).rejects.toThrow(/empty/);
+      it("tells the browser which refusal it was, so it can fall back anonymously", async () => {
+        await linkGitHub("gho_writer_token");
+        await context.db
+          .update(identityProviders)
+          .set({ enabled: false })
+          .where(eq(identityProviders.kind, "github"));
+
+        const res = await post(validBody(), writerCookie);
+        expect(res.status).toBe(409);
+
+        // The code the publish screen branches on to retry the fetch
+        // anonymously. Distinct from `github_not_connected` because the remedy
+        // is an Admin's, not the writer's.
+        expect(((await res.json()) as ApiError).error.code).toBe("github_login_disabled");
+      });
     });
   });
 });

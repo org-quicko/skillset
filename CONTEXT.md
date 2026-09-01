@@ -1,4 +1,4 @@
-# Skill Registry
+# Skillset
 
 A self-hosted registry for Agent Skills. Skills are published from the CLI or the web
 interface, stored in object storage, and discovered by members of a single team.
@@ -82,8 +82,22 @@ A configured way for a User to prove who they are without a password, offered on
 beside the password form. There are three kinds — Google Workspace, Microsoft Entra, and GitHub —
 and at most one Provider of each kind, any number of which may be enabled at once. A Provider
 vouches for an email address and for the Permitted Organisations that address belongs to;
-the Registry trusts it for nothing else.
+the Registry trusts it for nothing else. Proving identity is all a Provider does — for GitHub it is
+one of the two capabilities its Integration offers, and the other is switched separately.
 _Avoid_: SSO, social login, connection, OIDC provider (as the domain term)
+
+**GitHub Integration**:
+The Registry's single registration with GitHub, offering two capabilities that are switched on
+independently: Sign-in, which makes GitHub an Identity Provider, and Import, which lets a writer
+read a Skill out of a repository. Either may be on without the other (ADR-0023).
+_Avoid_: GitHub app, GitHub provider (for the whole registration), connector
+
+**Connection**:
+A writer's own grant of repository access to the Registry, made deliberately and separately from
+signing in. It is what an Import reads a private repository as, so it reaches exactly what that
+writer can already read — and it need not be the same GitHub account they sign in with. Revoking
+one stops the Registry using it; it does not withdraw the grant at GitHub.
+_Avoid_: Link, linked account, authorisation, integration
 
 **Permitted Organisation**:
 One value a Provider admits people from: a Workspace domain for Google, a tenant id for

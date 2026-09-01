@@ -136,8 +136,49 @@ describe("Artifact layout (ticket 03)", () => {
       file("SKILL.md", skillMd("name: code-review\ndescription: Reviews code.", "# Review\n\nSteps here.\n")),
     ]);
     expect(bundle.name).toBe("code-review");
-    expect(bundle.description).toBe("Reviews code.");
-    expect(bundle.body).toBe("# Review\n\nSteps here.\n");
+    expect(bundle.request.description).toBe("Reviews code.");
+    expect(bundle.request.body).toBe("# Review\n\nSteps here.\n");
+  });
+
+  it("carries every frontmatter field the SKILL.md set into the request body", () => {
+    const bundle = buildSkillBundle([
+      file(
+        "SKILL.md",
+        skillMd(
+          [
+            "name: code-review",
+            "description: Reviews code.",
+            "license: MIT",
+            "compatibility: Claude Code",
+            "allowed-tools: Read, Grep",
+            "metadata:",
+            "  team: platform",
+          ].join("\n"),
+        ),
+      ),
+    ]);
+
+    // The body both publishers now send verbatim. Asserted whole rather than
+    // field by field: a field that stopped reaching the wire is exactly the
+    // regression the hand-written literals used to allow, and only an
+    // exhaustive comparison catches it.
+    expect(bundle.request).toEqual({
+      description: "Reviews code.",
+      body: "How to do the thing.\n",
+      license: "MIT",
+      compatibility: "Claude Code",
+      allowed_tools: "Read, Grep",
+      metadata: { team: "platform" },
+    });
+  });
+
+  it("omits a frontmatter field the SKILL.md never set, rather than sending it null", () => {
+    const bundle = buildSkillBundle(validSkill());
+
+    // `name` is the path segment, so repeating it in the body would give one
+    // value two homes; the four optional fields are simply absent.
+    expect(Object.keys(bundle.request).sort()).toEqual(["body", "description"]);
+    expect("name" in bundle.request).toBe(false);
   });
 });
 

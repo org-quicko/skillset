@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Skill Registry API",
+    "title": "Skillset API",
     "version": "0.1.0",
     "description": "A self-hosted Registry for Agent Skills. This is the contract the CLI depends on; the web interface uses the same routes and has no private data path of its own.\n\n**Conventions.** Every JSON key on the wire is snake_case, which means wire keys line up with Postgres column names. TypeScript types, interfaces, and classes are camelCase, so conversion happens once at the boundary in the shared module rather than ad hoc per call site.\n\n**Artifact bytes never pass through this API.** Publishing returns a presigned upload target that the caller writes to directly, and reading an Artifact redirects to a short-lived presigned location. The API therefore validates the metadata a caller claims about a Skill, never the Artifact itself (ADR-0001)."
   },
