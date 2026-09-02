@@ -82,22 +82,38 @@ A configured way for a User to prove who they are without a password, offered on
 beside the password form. There are three kinds — Google Workspace, Microsoft Entra, and GitHub —
 and at most one Provider of each kind, any number of which may be enabled at once. A Provider
 vouches for an email address and for the Permitted Organisations that address belongs to;
-the Registry trusts it for nothing else. Proving identity is all a Provider does — for GitHub it is
-one of the two capabilities its Integration offers, and the other is switched separately.
+the Registry trusts it for nothing else. Proving identity is all a Provider does — a GitHub
+Identity Provider knows nothing of the GitHub Integration an Import reads a repository through,
+and the two are registered, granted, and revoked separately.
 _Avoid_: SSO, social login, connection, OIDC provider (as the domain term)
 
-**GitHub Integration**:
-The Registry's single registration with GitHub, offering two capabilities that are switched on
-independently: Sign-in, which makes GitHub an Identity Provider, and Import, which lets a writer
-read a Skill out of a repository. Either may be on without the other (ADR-0023).
-_Avoid_: GitHub app, GitHub provider (for the whole registration), connector
+**Git Provider**:
+A hosted git service the Registry can read a Skill's folder from. GitHub and GitLab are the two it
+knows. A Git Provider is not an Identity Provider, even where the same company is both: GitHub is
+reached through two separate registrations, one for signing in and one for Importing, and neither
+knows about the other.
+_Avoid_: Source, repository host, VCS, forge
+
+**Integration**:
+The Registry's registration with one Git Provider, holding the credential pair a Connection is
+granted against. There is at most one per Git Provider, and Importing is available for exactly
+those Git Providers that have one — there is no separate switch. An Integration grants nobody an
+account, which is the whole of what separates it from an Identity Provider.
+_Avoid_: App, connector, GitHub app, provider (unqualified)
 
 **Connection**:
 A writer's own grant of repository access to the Registry, made deliberately and separately from
-signing in. It is what an Import reads a private repository as, so it reaches exactly what that
-writer can already read — and it need not be the same GitHub account they sign in with. Revoking
-one stops the Registry using it; it does not withdraw the grant at GitHub.
+signing in. It is what an Import reads a private repository as, so it reaches the repositories its
+Integration was granted — which is not everything that writer can read — and it need not be the
+same account they sign in with. Revoking one stops the Registry using it; it does not withdraw the
+grant at the Git Provider.
 _Avoid_: Link, linked account, authorisation, integration
+
+**Import**:
+A one-time copy of a Skill's files out of a Git Provider and into the Registry. It is not a link:
+what was published keeps no reference to where it came from, and nothing is ever re-read. A public
+folder needs no Connection; a private one is read as the writer's own Connection.
+_Avoid_: Sync, clone, pull, link
 
 **Permitted Organisation**:
 One value a Provider admits people from: a Workspace domain for Google, a tenant id for

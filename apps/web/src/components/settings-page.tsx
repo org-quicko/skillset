@@ -1,9 +1,9 @@
 import { roleMeets, type User } from "@skill-registry/shared";
-import { ArrowLeftIcon } from "lucide-react";
+import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
+import { IntegrationsCard } from "@/components/integrations-card";
 import { ProfileCard } from "@/components/profile-card";
 import { TokensCard } from "@/components/tokens-card";
-import { Button } from "@/components/ui/button";
 import { UsersCard } from "@/components/users-card";
 import { useRouter } from "@/lib/use-router";
 import { cn } from "@/lib/utils";
@@ -12,15 +12,24 @@ const PROFILE_PATH = "/settings";
 const USERS_PATH = "/settings/users";
 const TOKENS_PATH = "/settings/tokens";
 const LOGIN_PATH = "/settings/login";
+const INTEGRATIONS_PATH = "/settings/integrations";
+const CONNECTIONS_PATH = "/settings/connections";
 
-type Section = "profile" | "users" | "login" | "tokens";
+type Section = "profile" | "users" | "login" | "integrations" | "connections" | "tokens";
 
-// `canManageUsers` gates the Login section too: configuring an Identity
-// Provider decides who may sign in at all, which is squarely Registry
-// administration, and the API refuses everyone below admin either way.
-function sectionFor(pathname: string, canManageUsers: boolean): Section {
+// `canManageUsers` gates the Login and Integrations sections too: both decide
+// something about the Registry rather than about you — who may sign in, and
+// which apps it holds repository credentials through — and the API refuses
+// everyone below admin either way.
+//
+// Connections is gated on `writer` instead, and separately: it is the one
+// section here that is about the person rather than the Registry, and a reader
+// must not be invited to grant a credential they could never use (ADR-0024).
+function sectionFor(pathname: string, canManageUsers: boolean, canImport: boolean): Section {
   if (pathname === USERS_PATH && canManageUsers) return "users";
   if (pathname === LOGIN_PATH && canManageUsers) return "login";
+  if (pathname === INTEGRATIONS_PATH && canManageUsers) return "integrations";
+  if (pathname === CONNECTIONS_PATH && canImport) return "connections";
   if (pathname === TOKENS_PATH) return "tokens";
   return "profile";
 }
@@ -28,50 +37,61 @@ function sectionFor(pathname: string, canManageUsers: boolean): Section {
 export function SettingsPage({ user, onBack }: { user: User; onBack: () => void }) {
   const { pathname, navigate } = useRouter();
   const canManageUsers = roleMeets(user.role, "admin");
-  const section = sectionFor(pathname, canManageUsers);
+  const canImport = roleMeets(user.role, "writer");
+  const section = sectionFor(pathname, canManageUsers, canImport);
+
+  const tabs: { label: string; section: Section; path: string }[] = [
+    { label: "Profile", section: "profile", path: PROFILE_PATH },
+    ...(canManageUsers ? [{ label: "Users", section: "users" as const, path: USERS_PATH }] : []),
+    ...(canManageUsers ? [{ label: "Login", section: "login" as const, path: LOGIN_PATH }] : []),
+    ...(canManageUsers
+      ? [{ label: "Integrations", section: "integrations" as const, path: INTEGRATIONS_PATH }]
+      : []),
+    ...(canImport
+      ? [{ label: "Connections", section: "connections" as const, path: CONNECTIONS_PATH }]
+      : []),
+    { label: "Tokens", section: "tokens", path: TOKENS_PATH },
+  ];
 
   return (
-    <div className="flex w-full max-w-4xl flex-col gap-6">
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="icon" onClick={onBack} aria-label="Back">
-          <ArrowLeftIcon />
-        </Button>
-        <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
-      </div>
-
-      <nav className="flex gap-1 border-b">
-        <SettingsTab label="Profile" active={section === "profile"} onClick={() => navigate(PROFILE_PATH)} />
-        {canManageUsers && (
-          <SettingsTab label="Users" active={section === "users"} onClick={() => navigate(USERS_PATH)} />
-        )}
-        {canManageUsers && (
-          <SettingsTab label="Login" active={section === "login"} onClick={() => navigate(LOGIN_PATH)} />
-        )}
-        <SettingsTab label="Tokens" active={section === "tokens"} onClick={() => navigate(TOKENS_PATH)} />
+    <div className="flex flex-col gap-5">
+      <nav className="flex items-center gap-2 text-xs text-muted-foreground">
+        <button type="button" onClick={onBack} className="cursor-pointer hover:text-foreground">
+          skills
+        </button>
+        <span>/</span>
+        <span>settings</span>
       </nav>
 
-      {section === "profile" && <ProfileCard user={user} />}
-      {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
-      {section === "login" && canManageUsers && <IdentityProvidersCard />}
-      {section === "tokens" && <TokensCard />}
-    </div>
-  );
-}
+      <h1 className="text-3xl font-medium tracking-tight">Settings</h1>
 
-function SettingsTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active}
-      className={cn(
-        "px-3 py-2 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-        active
-          ? "border-b-2 border-primary text-foreground"
-          : "border-b-2 border-transparent text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
+      <nav className="flex gap-6 border-b">
+        {tabs.map((tab) => (
+          <button
+            key={tab.section}
+            type="button"
+            onClick={() => navigate(tab.path)}
+            aria-current={section === tab.section}
+            className={cn(
+              "-mb-px cursor-pointer border-b-2 pb-2.5 text-sm outline-none focus-visible:text-foreground",
+              section === tab.section
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="pt-1">
+        {section === "profile" && <ProfileCard user={user} />}
+        {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
+        {section === "login" && canManageUsers && <IdentityProvidersCard />}
+        {section === "integrations" && canManageUsers && <IntegrationsCard />}
+        {section === "connections" && canImport && <ConnectionCard />}
+        {section === "tokens" && <TokensCard />}
+      </div>
+    </div>
   );
 }

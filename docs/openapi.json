@@ -16,6 +16,18 @@
     {
       "name": "identity-providers",
       "description": "Configuring the Identity Providers a Registry offers on its login page (ADR-0015)"
+    },
+    {
+      "name": "integrations",
+      "description": "The Registry's registrations with Git Providers. An Integration holds the credential pair a Connection is granted against, and its existence is the only switch Importing has (ADR-0024)"
+    },
+    {
+      "name": "imports",
+      "description": "Reading a Skill's files out of a Git Provider. A one-time copy, never a link (ADR-0024)"
+    },
+    {
+      "name": "connections",
+      "description": "A writer's own grant of repository access, made deliberately and separately from signing in. Its existence is the consent (ADR-0024)"
     }
   ],
   "paths": {
@@ -823,29 +835,33 @@
         }
       }
     },
-    "/github/skill-files": {
+    "/imports/{provider}/skill-files": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
       "post": {
-        "tags": ["skills"],
-        "summary": "Read a Skill's files from a GitHub repository the caller can see",
-        "description": "Requires at least the writer role. Fetches a folder from a GitHub repository — **private ones included** — using the calling writer's own GitHub OAuth token, and returns its files for the browser to publish through the usual pipeline (ADR-0020).\n\nThe body carries the repository's parts and deliberately **no URL**: the server builds every GitHub request itself from these fields, so this route cannot be aimed at another host. The browser parses the pasted URL and sends the result; every part is re-validated here.\n\nPublic repositories do not need this. The browser fetches those anonymously and always has (ADR-0010); the interface only falls back to this route when the anonymous attempt cannot see the repository. Nothing here writes to GitHub — every request it makes is a `GET`.",
+        "tags": ["imports"],
+        "summary": "Read a Skill's files from a project the caller's Connection can see",
+        "description": "Requires at least the `writer` role. Fetches a folder from a project — **private ones included** — using the calling writer's own Connection, and returns its files for the browser to publish through the usual pipeline (ADR-0024).\n\nWhat the grant reaches is the repositories an owner selected when the Registry's app was installed, **not** everything the writer can read.\n\nThe body carries the project's parts and deliberately **no URL**: the server builds every provider request itself from these fields and the provider's pinned API base, so this route cannot be aimed at another host (ADR-0020). The provider comes from the **path** and is written over anything the body claims. Every field is re-validated here — `project` is checked segment by segment, which is what allows a GitLab nested-group path while still refusing traversal.\n\nPreconditions are checked in order: an Integration for the provider, then a Connection for the caller. An Integration's absence is an Admin's problem and is refused before a Connection is so much as selected.\n\nA writer with **no** Connection does not need this route — the browser reads public projects anonymously and always has (ADR-0010), which is what lets a Registry with no Integration at all still import a public Skill. Nothing here writes to a provider: every request the walk makes is a `GET`.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["owner", "repo", "ref", "path"],
+                "required": ["project", "ref", "path"],
                 "properties": {
-                  "owner": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
-                  "repo": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+                  "project": {
+                    "type": "string",
+                    "example": "acme/skills",
+                    "description": "The project's path: `owner/repo` for GitHub, or `group/subgroup/project` for GitLab, which has nested groups. Every segment must match `^[A-Za-z0-9._-]+$` and be none of `.`, `..`, or `-`; no leading or trailing slash. GitHub is held to exactly two segments."
+                  },
                   "ref": {
                     "type": ["string", "null"],
                     "pattern": "^[A-Za-z0-9._-]+$",
-                    "description": "Branch, tag, or commit. `null` uses the repository's default branch."
+                    "description": "Branch, tag, or commit. `null` uses the project's default branch. A ref containing `/` is not supported — a browse URL is ambiguous between the ref and the folder path."
                   },
                   "path": {
                     "type": "string",
-                    "description": "The folder within the repository, `\"\"` for its root. No leading or trailing slash, and no `.` or `..` segment."
+                    "description": "The folder within the project, `\"\"` for its root. No leading or trailing slash, and no `.` or `..` segment before or after percent-decoding."
                   }
                 }
               }
@@ -855,37 +871,21 @@
         "responses": {
           "200": {
             "description": "The folder's files, at paths relative to the folder itself",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["items"],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": ["path", "content_base64"],
-                        "properties": {
-                          "path": { "type": "string" },
-                          "content_base64": { "type": "string", "description": "The file's bytes, base64-encoded." }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SkillFiles" } } }
           },
           "400": { "$ref": "#/components/responses/ValidationFailed" },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
-          "403": { "description": "The caller is a reader; importing exists to publish" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
           "409": {
-            "description": "The caller has no linked GitHub account (`github_not_connected`) — they should sign in with GitHub once",
+            "description": "A precondition the caller or an Admin has to satisfy: no Integration for this provider (`integration_not_configured`), no Connection for the caller (`not_connected`), a grant that can no longer be refreshed (`connection_expired` — which says *reconnect*, never sign in again), or the Registry's app not being installed on the project's owner (`app_not_installed`).\n\n`app_not_installed` is diagnosed by asking `GET /user/installations` after a 404, because a project the app cannot see answers 404 exactly as a mistyped one does — and a writer who is not an organisation owner cannot install it themselves, only request it. The message names the owner and carries the install link.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "422": {
+            "description": "The folder the caller named cannot be published as a Skill (`import_rejected`): it is empty, genuinely missing at that ref, or holds more files or bytes than an Artifact may.\n\nA 4xx and not a 502, deliberately: nothing failed upstream. The provider answered perfectly well and the answer is that this folder is not a Skill, so retrying will never succeed — and a mistyped URL, the commonest failure of all, must not count toward a deployment's server-error rate.",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
           "502": {
-            "description": "GitHub refused the request, the folder is empty or invisible to that writer, or it is larger than a Skill may be (`github_import_failed`)",
+            "description": "The provider genuinely failed (`import_failed`): it rate-limited the request, could not be reached, or returned a file from a host outside its own allowlist.",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -999,6 +999,220 @@
           "404": { "$ref": "#/components/responses/IdentityProviderNotFound" }
         }
       }
+    },
+    "/integrations": {
+      "get": {
+        "tags": ["integrations"],
+        "summary": "List every configured Integration",
+        "description": "Requires at least the admin role.\n\nAn Integration's existence is the only switch Importing has: it is available for exactly those Git Providers with a row, and there is deliberately no `import_enabled` flag above it (ADR-0024). An operator who wants this Registry to hold no repository credentials for anybody creates no Integration.\n\nThis is not an Identity Provider and is configured separately. Signing in with GitHub and Importing from GitHub are two registrations that share nothing but a vendor, so either may exist without the other.\n\nNever includes a client secret. There is no unauthenticated counterpart to this route — unlike an Identity Provider, an Integration draws no button on a login page.",
+        "responses": {
+          "200": {
+            "description": "Every configured Integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Integration" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      },
+      "post": {
+        "tags": ["integrations"],
+        "summary": "Register a Git Provider",
+        "description": "Requires at least the admin role.\n\nAn Integration's existence is the only switch Importing has: it is available for exactly those Git Providers with a row, and there is deliberately no `import_enabled` flag above it (ADR-0024). An operator who wants this Registry to hold no repository credentials for anybody creates no Integration.\n\nThis is not an Identity Provider and is configured separately. Signing in with GitHub and Importing from GitHub are two registrations that share nothing but a vendor, so either may exist without the other.\n\nAt most one Integration per Git Provider — `provider` is the row's identity, so a second is a conflict rather than an addition. It must name a Git Provider this Registry reads from; that list is `GIT_PROVIDERS` in the shared package, and a provider is added there rather than by migration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["provider", "display_name", "client_id", "client_secret"],
+                "properties": {
+                  "provider": { "type": "string", "enum": ["github", "gitlab"], "example": "github" },
+                  "display_name": { "type": "string", "maxLength": 100, "example": "GitHub" },
+                  "client_id": { "type": "string", "example": "Iv1.a1b2c3d4e5f6" },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Stored as given (ADR-0015). No response shape ever returns it."
+                  },
+                  "app_slug": {
+                    "type": "string",
+                    "nullable": true,
+                    "pattern": "^[A-Za-z0-9-]+$",
+                    "maxLength": 100,
+                    "example": "acme-skill-registry",
+                    "description": "Interpolated into the provider's installation URL, hence the narrow pattern. Omitted is the same as null: this provider has no installation step."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created Integration",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Integration" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "409": {
+            "description": "An Integration for that Git Provider is already configured",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/integrations/{provider}": {
+      "parameters": [
+        {
+          "name": "provider",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "enum": ["github", "gitlab"] },
+          "description": "The Git Provider whose Integration to change."
+        }
+      ],
+      "patch": {
+        "tags": ["integrations"],
+        "summary": "Change an Integration's configuration",
+        "description": "Requires at least the admin role.\n\n`provider` cannot be changed: it is the Integration's identity, so altering it would repoint an existing registration rather than create a new one.\n\nOmitting `client_secret` leaves the stored one untouched, which is what lets an Admin edit an Integration without being shown its secret. `app_slug` distinguishes absent from null — absent leaves whatever is stored, null clears it.\n\nCredentials are read per use, so an edit takes effect on the next request with no restart (ADR-0019).\n\nThere is deliberately no delete route, matching `/identity-providers`. Removing an Integration that writers still hold Connections against would strand those credentials, and the `ON DELETE RESTRICT` on `connections.provider` refuses it at the database.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": { "type": "string", "maxLength": 100 },
+                  "client_id": { "type": "string" },
+                  "client_secret": { "type": "string" },
+                  "app_slug": { "type": "string", "nullable": true, "pattern": "^[A-Za-z0-9-]+$", "maxLength": 100 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Integration",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Integration" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": {
+            "description": "No Integration is configured for that Git Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/connections": {
+      "get": {
+        "tags": ["connections"],
+        "summary": "List your own Connections",
+        "description": "Requires at least the `writer` role. Importing exists to publish, and a reader cannot publish — so a reader is refused rather than shown an empty list, and no connect action is offered to them.\n\nReturns only the caller's own Connections. No token appears in this shape, and there is no Admin variant that returns one: the tokens exist solely for the Registry to spend on that writer's behalf.",
+        "responses": {
+          "200": {
+            "description": "The caller's own Connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Connection" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" }
+        }
+      }
+    },
+    "/connections/{provider}/start": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "get": {
+        "tags": ["connections"],
+        "summary": "Begin connecting a Git Provider",
+        "description": "Requires at least the `writer` role. Redirects to the provider's **installation** page rather than a plain authorize URL, which is what lets the writer choose which repositories the Registry may read in the same pass as authorizing it — and why the grant is an owner-chosen list rather than everything they can read.\n\nSets an httpOnly, `SameSite=Lax` cookie holding a nonce. `Lax` is required rather than chosen: the callback arrives as a top-level GET navigation from the provider, and `Strict` would withhold the cookie on exactly that request. The nonce is what makes the state single-use — a state lifted from a log or a referrer is useless in another browser.\n\nNot a JSON route: the response is a 302, and a browser is expected to follow it.",
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider's installation page, with a signed state",
+            "headers": {
+              "Location": { "schema": { "type": "string" } },
+              "Set-Cookie": {
+                "description": "The connect flow's nonce: httpOnly, SameSite=Lax, five-minute lifetime.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "That Git Provider has no credentialed flow at all — it is public-read only, and no configuration changes that",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "409": { "$ref": "#/components/responses/IntegrationNotConfigured" }
+        }
+      }
+    },
+    "/connections/{provider}/callback": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "get": {
+        "tags": ["connections"],
+        "summary": "Complete a Connection from the provider's callback",
+        "description": "Requires at least the `writer` role. The provider redirects the writer here with `code` and `state`.\n\nThe state is verified and the nonce matched **before anything else** — no database read, no outbound request. This is the CSRF surface of the flow: without it an attacker could walk a victim's browser through their own authorization and attach their GitHub account to the victim's Registry account. A state that is missing, tampered with, expired, for another provider, minted for another User, or whose nonce does not match the browser's all yield the same `invalid_state`, because naming the failed check would tell an attacker which part of their forgery to fix.\n\nThe nonce cookie is cleared on every path out of this route, successful or not. That is what burns the state.\n\nOn success the grant is upserted on `(user_id, provider)` — reconnecting replaces rather than accumulating — and the writer is redirected back to settings.",
+        "parameters": [
+          { "name": "code", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "Connection stored; redirect back to settings",
+            "headers": { "Location": { "schema": { "type": "string" } } }
+          },
+          "400": {
+            "description": "The state could not be verified, or the provider is not connectable",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "409": { "$ref": "#/components/responses/IntegrationNotConfigured" },
+          "502": {
+            "description": "The provider refused to exchange the code, or would not identify the account",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/connections/{provider}": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "delete": {
+        "tags": ["connections"],
+        "summary": "Disconnect a Git Provider",
+        "description": "Requires at least the `writer` role. Deletes the Connection and nothing else — in particular it does not touch the writer's sign-in account, so withdrawing repository access can never lock anyone out.\n\n**This is Registry-local.** It stops *this Registry* using the grant; it does not withdraw the grant at the provider, which the writer must do in their own provider settings. Interface copy must say so — anything else is untrue.",
+        "responses": {
+          "204": { "description": "Disconnected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "404": {
+            "description": "The caller holds no Connection to that Git Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1054,6 +1268,13 @@
         "description": "The Tag's id.",
         "schema": { "type": "string", "format": "uuid" }
       },
+      "GitProvider": {
+        "name": "provider",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "enum": ["github", "gitlab"] },
+        "description": "A Git Provider this Registry reads from."
+      },
       "IdentityProviderId": {
         "name": "id",
         "in": "path",
@@ -1077,7 +1298,15 @@
         "description": "No valid session or Token. The web interface treats this as an expired session, discards cached state, and returns to login.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
-      "AdminOnly": {
+      "WriterOnly": {
+      "description": "The caller's role is below writer. Importing exists to publish, and a reader cannot publish.",
+      "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+    },
+    "IntegrationNotConfigured": {
+      "description": "No Integration is configured for that Git Provider, so there is no credential to connect with. An Admin's problem: an Integration row's existence is the only switch Importing has (ADR-0024).",
+      "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+    },
+    "AdminOnly": {
         "description": "Requires at least the admin role (admin or the superadmin)",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
@@ -1349,6 +1578,64 @@
             "description": "Whether the login page offers it and logins through it are accepted. Disabling is how a Provider is taken out of service; there is no delete."
           },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Integration": {
+        "type": "object",
+        "description": "The Registry's registration with one Git Provider, holding the credential pair a Connection is granted against (ADR-0024). `client_secret` is deliberately absent from this and every other response: it is written and never read back.",
+        "required": ["provider", "display_name", "client_id", "app_slug", "created_at", "updated_at"],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "example": "github",
+            "description": "The Git Provider, and the row's identity. Plain text rather than an enum, so registering a new provider is an insert and not a migration."
+          },
+          "display_name": { "type": "string", "example": "GitHub" },
+          "client_id": { "type": "string", "example": "Iv1.a1b2c3d4e5f6" },
+          "app_slug": {
+            "type": "string",
+            "nullable": true,
+            "example": "acme-skill-registry",
+            "description": "The app's slug at the provider, used to build its installation URL. Null for a provider with no installation step — only GitHub has one."
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SkillFiles": {
+        "type": "object",
+        "description": "A folder's files, ready to feed the publishing pipeline. Paths are relative to the folder that was imported, not the project root — the same shape a dropped folder produces.",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "content_base64"],
+              "properties": {
+                "path": { "type": "string", "example": "SKILL.md" },
+                "content_base64": {
+                  "type": "string",
+                  "description": "The file's bytes, base64-encoded. Base64 only because bytes have to cross JSON; the encoding belongs at the wire and nowhere else."
+                }
+              }
+            }
+          }
+        }
+      },
+      "Connection": {
+        "type": "object",
+        "description": "A writer's own grant of repository access (ADR-0024). There is no token field, and no variant of this shape has one — a Connection's tokens never leave the server in any response, on any route.",
+        "required": ["provider", "external_account_login", "created_at", "updated_at"],
+        "properties": {
+          "provider": { "type": "string", "example": "github" },
+          "external_account_login": {
+            "type": "string",
+            "example": "ada-work",
+            "description": "The connected account at the provider. Present because a writer needs it: the connected account need not be the one they sign in with, and which account is connected is usually the answer to why an Import cannot see a repository."
+          },
+          "created_at": { "type": "string", "format": "date-time", "description": "When the grant was given — the consent's own timestamp." },
           "updated_at": { "type": "string", "format": "date-time" }
         }
       },

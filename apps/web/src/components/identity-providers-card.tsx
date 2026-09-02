@@ -1,12 +1,14 @@
 import { IDENTITY_PROVIDER_GUIDANCE, isUngated, type IdentityProvider } from "@skill-registry/shared";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";
+import { Panel } from "@/components/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useIdentityProviders, useUpdateIdentityProvider } from "@/hooks/use-identity-providers";
 import { apiErrorMessage } from "@/lib/api";
+
+const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase";
 
 /**
  * An Admin's view of external login: which Identity Providers are configured,
@@ -31,54 +33,63 @@ export function IdentityProvidersCard() {
   }
 
   return (
-    <Card className="w-full max-w-4xl">
-      <CardHeader>
-        <CardTitle>External login</CardTitle>
-        <CardDescription>
-          Anyone whose account is in one of a Provider’s permitted organisations can sign in, and gets a reader
-          account on their first login. Promote them from Users. A Provider with no organisations listed admits
-          everyone that provider will authenticate.
-        </CardDescription>
-        <CardAction>
-          <Button onClick={() => openDialog(null)}>Add Provider</Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {providers.isError && <p className="text-sm text-destructive">{apiErrorMessage(providers.error)}</p>}
-        {update.isError && <p className="text-sm text-destructive">{apiErrorMessage(update.error)}</p>}
+    <div className="flex flex-col gap-3.5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-sm font-medium">External login</h2>
+          <p className="max-w-2xl text-xs text-muted-foreground">
+            Anyone whose account is in one of a Provider&apos;s permitted organisations can sign in, and gets a
+            reader account on their first login. Promote them from Users. A Provider with no organisations listed
+            admits everyone that provider will authenticate.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => openDialog(null)}>
+          Add Provider
+        </Button>
+      </div>
 
-        {providers.isSuccess && providers.data.items.length === 0 && (
+      {providers.isError && <p className="text-sm text-destructive">{apiErrorMessage(providers.error)}</p>}
+      {update.isError && <p className="text-sm text-destructive">{apiErrorMessage(update.error)}</p>}
+
+      {providers.isSuccess && providers.data.items.length === 0 && (
+        <Panel>
           <p className="text-sm text-muted-foreground">
             No Identity Providers configured. The login page asks for a password only.
           </p>
-        )}
+        </Panel>
+      )}
 
-        {providers.isSuccess && providers.data.items.length > 0 && (
+      {providers.isSuccess && providers.data.items.length > 0 && (
+        <Panel contentClassName="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Provider</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Permitted organisations</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead />
+              <TableRow className="hover:bg-transparent">
+                <TableHead className={HEAD_CLASS}>Provider</TableHead>
+                <TableHead className={HEAD_CLASS}>Kind</TableHead>
+                <TableHead className={HEAD_CLASS}>Permitted organisations</TableHead>
+                <TableHead className={HEAD_CLASS}>Status</TableHead>
+                <TableHead className={HEAD_CLASS} />
               </TableRow>
             </TableHeader>
             <TableBody>
               {providers.data.items.map((provider) => {
                 const isRowPending = update.isPending && update.variables?.id === provider.id;
                 return (
-                  <TableRow key={provider.id}>
-                    <TableCell>
-                      <span className="font-medium">{provider.display_name}</span>
+                  <TableRow key={provider.id} className="hover:bg-transparent">
+                    <TableCell className="font-medium">{provider.display_name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {IDENTITY_PROVIDER_GUIDANCE[provider.kind].label}
                     </TableCell>
-                    <TableCell>{IDENTITY_PROVIDER_GUIDANCE[provider.kind].label}</TableCell>
                     <TableCell>
                       {isUngated(provider.permitted_organisations) ? (
                         // An enabled Provider with no gate is the one row state
                         // worth an alarm: it admits everyone, and it looks
                         // identical to a half-finished one unless it says so.
-                        <span className={provider.enabled ? "font-medium text-destructive" : "text-muted-foreground"}>
+                        <span
+                          className={
+                            provider.enabled ? "font-medium text-destructive" : "text-muted-foreground"
+                          }
+                        >
                           {provider.enabled ? "Anyone — no check" : "None set"}
                         </span>
                       ) : (
@@ -96,26 +107,28 @@ export function IdentityProvidersCard() {
                         {provider.enabled ? "On the login page" : "Disabled"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openDialog(provider)}>
-                        Edit
-                      </Button>
-                      <Button
-                        variant={provider.enabled ? "outline" : "default"}
-                        size="sm"
-                        disabled={isRowPending}
-                        onClick={() => update.mutate({ id: provider.id, body: { enabled: !provider.enabled } })}
-                      >
-                        {provider.enabled ? "Disable" : "Enable"}
-                      </Button>
+                    <TableCell>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openDialog(provider)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant={provider.enabled ? "outline" : "default"}
+                          size="sm"
+                          disabled={isRowPending}
+                          onClick={() => update.mutate({ id: provider.id, body: { enabled: !provider.enabled } })}
+                        >
+                          {provider.enabled ? "Disable" : "Enable"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
-        )}
-      </CardContent>
+        </Panel>
+      )}
 
       {/* Keyed so switching between "add" and editing a particular Provider
           remounts the form rather than leaving the previous one's values in
@@ -126,6 +139,6 @@ export function IdentityProvidersCard() {
         onOpenChange={setDialogOpen}
         provider={editing}
       />
-    </Card>
+    </div>
   );
 }

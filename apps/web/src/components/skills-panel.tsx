@@ -9,7 +9,7 @@ import {
 import { useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";
-import { SkillList } from "@/components/skill-list";
+import { SkillsHome } from "@/components/skills-home";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useRouter } from "@/lib/use-router";
@@ -52,11 +52,13 @@ function searchFromFilters(filters: SkillDirectoryFilters): string {
   return query ? `/?${query}` : "/";
 }
 
-export function SkillsPanel({ role }: { role: Role }) {
+/** `role` is `null` for a signed-out visitor — they can browse and search, but no write action is offered. */
+export function SkillsPanel({ role }: { role: Role | null }) {
   const { pathname, search, navigate, replace } = useRouter();
   const [publishOpen, setPublishOpen] = useState(false);
 
   const filters = filtersFromSearch(search);
+  const canPublish = role !== null && roleMeets(role, "writer");
 
   // Replace, not navigate: every keystroke, Tag toggle, or sort click is a
   // refinement of the same view, not a transition the back button should
@@ -68,21 +70,23 @@ export function SkillsPanel({ role }: { role: Role }) {
   if (pathname.startsWith(SKILL_PATH_PREFIX)) {
     const name = decodeURIComponent(pathname.slice(SKILL_PATH_PREFIX.length));
     return (
-      <SkillDetail
-        name={name}
-        canDelete={roleMeets(role, "admin")}
-        canEditTags={roleMeets(role, "writer")}
-        canRenameTags={roleMeets(role, "admin")}
-        onBack={() => navigate("/")}
-        onDeleted={() => navigate("/")}
-      />
+      <div className="mx-auto w-full max-w-[1200px] px-7 pt-6 pb-10">
+        <SkillDetail
+          name={name}
+          canDelete={role !== null && roleMeets(role, "admin")}
+          canEditTags={role !== null && roleMeets(role, "writer")}
+          canRenameTags={role !== null && roleMeets(role, "admin")}
+          onBack={() => navigate("/")}
+          onDeleted={() => navigate("/")}
+        />
+      </div>
     );
   }
 
   return (
     <>
-      <SkillList
-        canPublish={roleMeets(role, "writer")}
+      <SkillsHome
+        canPublish={canPublish}
         filters={filters}
         onFiltersChange={handleFiltersChange}
         onSelect={(name) => navigate(skillPath(name))}

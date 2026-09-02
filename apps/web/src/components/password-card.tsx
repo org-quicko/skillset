@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type ReactNode } from "react";
+import { LabeledField } from "@/components/labeled-field";
+import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useReplaceOwnPassword } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
 
@@ -31,44 +31,38 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
   }
 
   return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardTitle>Password</CardTitle>
-        <CardDescription>{description ?? "Change your password at any time."}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="current_password">Current password</Label>
-            <Input
-              id="current_password"
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              required
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new_password">New password</Label>
-            <Input
-              id="new_password"
-              type="password"
-              autoComplete="new-password"
-              minLength={12}
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              required
-            />
-          </div>
-          {replacePassword.isError && (
-            <p className="text-sm text-destructive">{apiErrorMessage(replacePassword.error)}</p>
-          )}
-          <Button type="submit" disabled={replacePassword.isPending}>
-            {replacePassword.isPending ? "Replacing…" : "Replace password"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+    <Panel className="w-full" title="Password" description={description ?? "Change your password at any time."}>
+      <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+        <LabeledField label="Current password" htmlFor="current_password">
+          <Input
+            id="current_password"
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            required
+            className="h-10"
+          />
+        </LabeledField>
+        <LabeledField label="New password" htmlFor="new_password" hint="At least 12 characters.">
+          <Input
+            id="new_password"
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            required
+            className="h-10"
+          />
+        </LabeledField>
+        {replacePassword.isError && (
+          <p className="text-sm text-destructive">{apiErrorMessage(replacePassword.error)}</p>
+        )}
+        <Button type="submit" className="w-fit" disabled={replacePassword.isPending}>
+          {replacePassword.isPending ? "Replacing…" : "Replace password"}
+        </Button>
+      </form>
+    </Panel>
   );
 }

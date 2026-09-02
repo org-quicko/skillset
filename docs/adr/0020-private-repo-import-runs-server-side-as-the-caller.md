@@ -1,11 +1,17 @@
 # Private Repo Import Runs Server-Side, As The Caller
 
-> **Superseded in part by ADR-0023.** Everything below about running as the caller, closing the
+> **Superseded in part by ADR-0024.** Everything below about running as the caller, closing the
 > request-forgery surface, and encrypting the token at rest still governs. What no longer holds is
-> the coupling: *"Connecting GitHub is signing in with GitHub"*. Import is now its own capability
-> with its own flag, its own consent, and its own revocation. In particular, `repo` is no longer
-> requested at login, disabling the login no longer withdraws import access, and the credential
-> lives on a separate `github-import` account row rather than on the sign-in one.
+> the coupling — *"Connecting GitHub is signing in with GitHub"* — and the credential itself. The
+> import credential is now a **GitHub App** granting `contents: read`, registered separately from
+> the sign-in OAuth App and granted deliberately as a **Connection** in its own table. `repo` is
+> not requested at login, the login token is not stored, and disabling the login does not withdraw
+> import access. ADR-0023's intermediate design — one OAuth App authorized twice, an
+> `import_enabled` flag, the grant on a `github-import` account row — was never built; do not
+> follow it.
+>
+> One further reversal: a connected writer now takes the server-side path for **public**
+> repositories too, rather than only on an anonymous failure. ADR-0024 explains why (rate limits).
 
 A writer can publish a Skill from a **private** GitHub repository they can already read. The
 Registry fetches it server-side using that writer's own GitHub OAuth token, stored on their linked

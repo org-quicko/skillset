@@ -383,11 +383,14 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
     },
     account: {
       modelName: "accounts",
-      // A GitHub token here carries the `repo` scope — read and write across
-      // every private repository its owner can reach (ADR-0020) — so this is
-      // the most dangerous column in the schema, and the only credential the
-      // Registry stores that is not one-way. Encrypted at rest with
-      // AES-256-GCM under `BETTER_AUTH_SECRET`.
+      // Still on, and still earning its place: Google and Microsoft tokens land
+      // here, and an OAuth token is the only credential the Registry stores that
+      // is not one-way. Encrypted at rest with AES-256-GCM under
+      // `BETTER_AUTH_SECRET`.
+      //
+      // A GitHub token no longer lands here at all — the account hook below drops
+      // it, because nothing reads it after ADR-0024 and GitHub keeps issuing
+      // repo-capable tokens to anyone who once granted that scope.
       //
       // Turning this on does not strand tokens written before it: Better Auth
       // checks whether a stored value even looks encrypted and returns it
@@ -445,6 +448,23 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
       },
     },
     databaseHooks: {
+      account: {
+        // A GitHub login's tokens are dropped on the way to the database. After
+        // ADR-0024 nothing reads them: repository access comes from a Connection
+        // granted against a separate GitHub App, and the login is identity only.
+        //
+        // Dropped rather than merely unrequested, because unrequesting is not
+        // enough. Scopes accumulate on a GitHub OAuth App, so everyone who ever
+        // granted the repo scope keeps being issued a repo-capable token here
+        // however narrow the requested list becomes. An encrypted copy of a
+        // credential nobody can use is pure liability in a leaked backup.
+        //
+        // On both create *and* update: a returning user re-authorizing takes the
+        // update path, and leaving that one open would quietly refill the column
+        // on the next sign-in.
+        create: { before: async (account) => ({ data: withoutGitHubTokens(account) }) },
+        update: { before: async (account) => ({ data: withoutGitHubTokens(account) }) },
+      },
       user: {
         create: {
           // The only path that creates a User outside this Registry's own
@@ -479,6 +499,49 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
     },
     trustedOrigins: [deps.publicUrl],
   });
+}
+
+/**
+ * Nulls a GitHub login's OAuth tokens, leaving every other provider's alone.
+ *
+ * @remarks
+ * Only `github`. Google and Microsoft tokens stay: neither is `repo`-shaped, and
+ * no decision has been taken to stop keeping them. `credential` keeps its
+ * password, which lives in this same table.
+ *
+ * The fields are set to `null` rather than deleted, and that is not a style
+ * choice — deleting them does nothing at all. Better Auth *merges* what a
+ * `before` hook returns over the data it already had:
+ * `actualData = { ...actualData, ...result.data }` in `db/with-hooks`. A key
+ * this function omitted would simply be restored by that spread, so the hook
+ * would read as correct and silently store the token anyway. An explicit null
+ * is the only thing that survives the merge.
+ *
+ * On the update path the hook receives the *payload*, not the row — so the only
+ * reason it can tell a GitHub refresh from a Google one is that Better Auth
+ * includes `providerId` in that payload: `link-account.mjs` builds it as
+ * `{ providerId, idToken, accessToken, refreshToken, ... }`. If that ever stops
+ * being true, this hook silently stops firing on re-authorization, which is what
+ * `github-login-tokens.test.ts` exists to catch.
+ *
+ * @param account - The account row Better Auth is about to write, in its own
+ * field names, before the map in `createAuth` renames them to columns.
+ * @returns The row to write, with a GitHub login's tokens nulled.
+ * @example
+ * ```ts
+ * create: { before: async (account) => ({ data: withoutGitHubTokens(account) }) }
+ * ```
+ */
+function withoutGitHubTokens<T extends { providerId?: string }>(account: T): T {
+  if (account.providerId !== "github") return account;
+
+  return {
+    ...account,
+    accessToken: null,
+    refreshToken: null,
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+  };
 }
 
 /** The Better Auth instance's type, for the dependencies that carry one. */

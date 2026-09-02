@@ -1,11 +1,15 @@
 # GitHub Fetch Is Client-Side and Public-Only
 
-> **Partly superseded by ADR-0020.** Private repositories are reachable now, through a server-side
-> fetch using the signed-in writer's own GitHub token — so the two things this ADR rejected, a
-> stored GitHub credential and a server-side fetch, both exist. ADR-0020 answers the two questions
-> the last paragraph below demanded of anyone reopening it. The rest of this ADR stands and is still
-> the live path for **public** repositories: anonymous, client-side, no credential, no server in the
-> loop.
+> **Partly superseded by ADR-0020, then ADR-0024.** Private repositories are reachable now,
+> through a server-side fetch using a credential the writer granted — so the two things this ADR
+> rejected, a stored GitHub credential and a server-side fetch, both exist. ADR-0024 is the current
+> account of what that credential is and how it is granted.
+>
+> The rest of this ADR stands, and is still the live path for **public** repositories imported by a
+> writer with **no Connection**: anonymous, client-side, no credential, no server in the loop. A
+> writer who *does* hold a Connection now takes the server-side path even for a public repository,
+> because the anonymous budget is sixty requests an hour per IP and a folder walk spends one per
+> file.
 
 Publishing from a GitHub URL fetches the folder's files straight from the browser, anonymously,
 through GitHub's own public REST API and `raw.githubusercontent.com`. The API never sees the URL

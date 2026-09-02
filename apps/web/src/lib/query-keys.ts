@@ -62,6 +62,17 @@ export function usersQueryKey(page: number) {
   return [...usersListQueryKey, page] as const;
 }
 
+/**
+ * The caller's own Connections, and what they could connect.
+ *
+ * Discarded with the rest of the cache when a session ends, like Tokens: a
+ * Connection is one person's grant and means nothing to the next session.
+ */
+export const connectionsQueryKey = ["connections"] as const;
+
+/** Every configured Integration — an Admin's view. There is no public counterpart. */
+export const integrationsQueryKey = ["integrations"] as const;
+
 /** Every configured Identity Provider — an Admin's view, including disabled ones. */
 export const identityProvidersQueryKey = ["identity-providers"] as const;
 

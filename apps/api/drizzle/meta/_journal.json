@@ -22,6 +22,27 @@
       "when": 1788185777261,
       "tag": "0002_permitted_organisations",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788335292916,
+      "tag": "0003_integrations",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788339539901,
+      "tag": "0004_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788339540901,
+      "tag": "0005_forget_github_login_tokens",
+      "breakpoints": true
     }
   ]
 }

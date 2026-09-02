@@ -12,7 +12,7 @@ export function ChangePasswordRequired() {
   const logout = useLogout();
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex w-full max-w-md flex-col items-center gap-4">
       <h1 className="text-lg font-semibold tracking-tight">Choose a password</h1>
       <PasswordCard description="An Admin created your account with a generated password. Replace it to continue." />
       <Button variant="ghost" size="sm" onClick={() => logout.mutate()} disabled={logout.isPending}>

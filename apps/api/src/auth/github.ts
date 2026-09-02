@@ -7,18 +7,27 @@ const USER_AGENT = "skill-registry";
  * The scopes a GitHub login asks for.
  *
  * @remarks
- * `read:org` is what makes the login gate work at all: without it `/user/orgs`
- * returns an empty list for every member and every login is refused (ADR-0018).
+ * Identity, and nothing else. `read:org` is what makes the login gate work at
+ * all: without it `/user/orgs` returns an empty list for every member and every
+ * login is refused (ADR-0018).
  *
- * `repo` is for importing Skills from private repositories (ADR-0020), and is
- * the one worth knowing about. GitHub does not divide it: it is read *and*
- * write across every private repository the person can reach, with no
- * per-repository narrowing available to an OAuth App. It is requested at login
- * rather than at first import, so everyone signing in with GitHub grants it —
- * including a reader who never imports anything. ADR-0020 records why that
- * trade was taken and what would replace it.
+ * `repo` used to be here, so that a login could double as the credential for
+ * importing from a private repository. It is gone: repository access now comes
+ * from a **Connection** granted against a separate GitHub App, which asks for
+ * `contents: read` on repositories an owner selected rather than read *and*
+ * write across everything the person can reach (ADR-0024). A reader who only
+ * browses the catalogue no longer grants anything at all.
+ *
+ * Two things about that removal are true and must not be overclaimed. Scopes
+ * **accumulate** on a GitHub OAuth App, so anyone who already granted `repo`
+ * keeps receiving `repo`-capable tokens here whatever this list says — which is
+ * exactly why the login's token is no longer stored (see the account hook in
+ * `createAuth`). And the grants already given cannot be withdrawn from this
+ * side: `DELETE /applications/{client_id}/grant` revokes the whole
+ * authorization and would face every existing user with a fresh consent screen
+ * at their next sign-in.
  */
-export const GITHUB_SCOPES = ["read:user", "user:email", "read:org", "repo"];
+export const GITHUB_SCOPES = ["read:user", "user:email", "read:org"];
 
 interface GitHubUser {
   id: number;

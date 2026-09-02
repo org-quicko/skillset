@@ -1,5 +1,11 @@
 # Publish a Skill from a private GitHub repository
 
+> **Superseded by `.scratch/github-import/spec.md` (ADR-0024).** This spec describes importing
+> with the sign-in OAuth token and the `repo` scope. That credential is gone: the import
+> credential is a separately registered GitHub App granting `contents: read`, and the grant is a
+> Connection in its own table. Kept for the reasoning behind running as the caller and closing the
+> request-forgery surface, both of which still govern. Do not build from the credential sections.
+
 ## What to build
 
 Publishing from a GitHub URL works today for public repositories only: the browser fetches the

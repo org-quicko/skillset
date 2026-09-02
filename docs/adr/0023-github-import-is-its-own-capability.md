@@ -1,5 +1,16 @@
 # Importing From GitHub Is Its Own Capability, Not A Side Effect Of Sign-In
 
+> **Superseded by ADR-0024, and never implemented.** The separation this ADR argued for is
+> correct and survives: signing in and granting repository access are two acts, two consents, and
+> two revocations. The mechanism does not. There is no `import_enabled` flag, no second
+> authorization of the sign-in OAuth App, and no `github-import` row in `accounts`. Import uses a
+> **GitHub App** registered separately, with the grant in its own `connections` table.
+>
+> The one thing to read here rather than in ADR-0024 is the argument about `GET /user/orgs`
+> returning an empty list for a fine-grained token. That finding still stands and is exactly why
+> one GitHub App cannot serve both purposes — ADR-0024 reaches the opposite conclusion from the
+> same fact only because it stopped trying to make one app do both.
+
 One GitHub OAuth application still serves this Registry, but it now serves **two capabilities that
 are switched on independently**: *Sign-in*, which makes GitHub an Identity Provider, and *Import*,
 which lets a writer read a Skill folder out of a repository. Each has its own flag, its own consent,

@@ -1,5 +1,12 @@
 # Importing from GitHub is its own capability
 
+> **Superseded by `.scratch/github-import/spec.md` (ADR-0024), and never built.** The
+> separation it argues for is right; the mechanism is not. Ignore `import_enabled`, the
+> `genericOAuth` `github-import` provider, the `accounts`-row storage, the Admin Import toggle,
+> and the `github_import_disabled` refusal code — none of them exist. The user stories remain the
+> best statement of what the separation is for, and the `/user/orgs` finding in its Out of Scope
+> section is load-bearing for ADR-0024.
+
 Spec for ADR-0023. Splits the GitHub Integration's two capabilities — Sign-in and Import — so each
 has its own switch, its own consent, and its own revocation.
 

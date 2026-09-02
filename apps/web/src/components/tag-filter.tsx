@@ -36,9 +36,9 @@ export function TagFilter({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="justify-between">
+        <Button variant="outline" size="sm" className="justify-between">
           <span className="flex flex-wrap items-center gap-1">
-            {selectedTags.length === 0 && "Filter by Tag"}
+            {selectedTags.length === 0 && "Tags"}
             {selectedTags.map((tag) => (
               <Badge key={tag.id} variant="secondary">
                 {tag.name}

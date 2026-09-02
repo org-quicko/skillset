@@ -1,10 +1,11 @@
 import { useEffect, type ReactNode } from "react";
-import { AuthenticatedHome } from "@/components/authenticated-home";
+import type { User } from "@skill-registry/shared";
 import { BootstrapForm } from "@/components/bootstrap-form";
 import { ChangePasswordRequired } from "@/components/change-password-required";
 import { Header } from "@/components/header";
 import { LoginForm } from "@/components/login-form";
 import { SettingsPage } from "@/components/settings-page";
+import { SkillsPanel } from "@/components/skills-panel";
 import { useCurrentUser, useSetupState } from "@/hooks/use-auth";
 import { LOGIN_PATH } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
@@ -21,49 +22,38 @@ function CenteredPage({ children }: { children: ReactNode }) {
   return <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-4">{children}</div>;
 }
 
+/** The site chrome every public and signed-in page shares: top nav, content, footer. */
+function SiteShell({ user, children }: { user: User | null; children: ReactNode }) {
+  const { navigate } = useRouter();
+  return (
+    <div className="flex min-h-svh flex-col">
+      <Header user={user} onOpenSettings={() => navigate(SETTINGS_PATH)} />
+      <main className="flex-1">{children}</main>
+    </div>
+  );
+}
+
 function App() {
   const setup = useSetupState();
   const initialized = setup.data?.initialized ?? false;
   const me = useCurrentUser(setup.isSuccess && initialized);
-  const { pathname, navigate, replace } = useRouter();
+  const { pathname, replace, navigate } = useRouter();
 
   const isSignedOut = setup.isSuccess && initialized && me.isSuccess && !me.data;
   const isSignedIn = setup.isSuccess && initialized && me.isSuccess && !!me.data;
 
-  // /login is a real, addressable route, not just whatever renders when
-  // nothing else matches: a signed-out visitor anywhere else is bounced
-  // there, and a signed-in one who lands on it (e.g. the back button after
-  // logging in) is bounced home. `replace`, not `navigate` — this is a
-  // correction, not a transition the back button should have to undo.
+  // A signed-in visitor who lands on /login (e.g. the back button after
+  // logging in) is bounced home; a signed-out visitor who asks for /settings
+  // is sent to sign in. Reads elsewhere need no session (ADR-0013), so there
+  // is no blanket redirect off the rest of the site. `replace`, not
+  // `navigate` — these are corrections, not history the back button steps
+  // through.
   useEffect(() => {
-    if (isSignedOut && pathname !== LOGIN_PATH) replace(LOGIN_PATH);
-    else if (isSignedIn && pathname === LOGIN_PATH) replace("/");
-  }, [isSignedOut, isSignedIn, pathname, replace]);
+    if (isSignedIn && pathname === LOGIN_PATH) replace("/");
+    else if (isSignedOut && isSettingsPath(pathname)) replace(LOGIN_PATH);
+  }, [isSignedIn, isSignedOut, pathname, replace]);
 
-  if (isSignedIn && me.data) {
-    // A generated password that hasn't been replaced yet blocks every other
-    // route (docs/data-model.md) — there is nothing else to offer until it is.
-    if (me.data.must_change_password) {
-      return (
-        <CenteredPage>
-          <ChangePasswordRequired />
-        </CenteredPage>
-      );
-    }
-
-    return (
-      <div className="flex min-h-svh flex-col">
-        <Header user={me.data} onOpenSettings={() => navigate("/settings")} />
-        <main className="flex flex-1 justify-center p-4 sm:p-6">
-          {isSettingsPath(pathname) ? (
-            <SettingsPage user={me.data} onBack={() => navigate("/")} />
-          ) : (
-            <AuthenticatedHome user={me.data} />
-          )}
-        </main>
-      </div>
-    );
-  }
+  if (setup.isLoading || me.isLoading) return <CenteredPage>{null}</CenteredPage>;
 
   if (setup.isSuccess && !initialized) {
     return (
@@ -73,15 +63,36 @@ function App() {
     );
   }
 
-  if (pathname === LOGIN_PATH) {
+  // A generated password that hasn't been replaced yet blocks every other
+  // route (docs/data-model.md) — there is nothing else to offer until it is.
+  if (isSignedIn && me.data?.must_change_password) {
     return (
       <CenteredPage>
-        <LoginForm />
+        <ChangePasswordRequired />
       </CenteredPage>
     );
   }
 
-  return <CenteredPage>{null}</CenteredPage>;
+  if (pathname === LOGIN_PATH) {
+    return isSignedIn ? <CenteredPage>{null}</CenteredPage> : <LoginForm />;
+  }
+
+  if (isSettingsPath(pathname)) {
+    if (!isSignedIn || !me.data) return <CenteredPage>{null}</CenteredPage>;
+    return (
+      <SiteShell user={me.data}>
+        <div className="mx-auto w-full max-w-4xl px-7 pt-6 pb-10">
+          <SettingsPage user={me.data} onBack={() => navigate("/")} />
+        </div>
+      </SiteShell>
+    );
+  }
+
+  return (
+    <SiteShell user={me.data ?? null}>
+      <SkillsPanel role={me.data?.role ?? null} />
+    </SiteShell>
+  );
 }
 
 export default App;

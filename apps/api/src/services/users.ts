@@ -6,14 +6,15 @@ import {
   type UserCreate,
   type UserUpdateName,
 } from "@skill-registry/shared";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getPasswordCredential, setPasswordCredential } from "../auth/credential.js";
 import { generateInitialPassword, hashPassword, verifyPassword } from "../auth/password.js";
 import { generateTokenSecret, hashTokenSecret } from "../auth/token.js";
 import type { Database } from "../db/client.js";
 import { isUniqueViolation } from "../db/pg-errors.js";
-import { tokens, users, type TokenRow, type UserRow } from "../db/schemas/index.js";
+import {
+  connections, tokens, users, type TokenRow, type UserRow } from "../db/schemas/index.js";
 import {
   EmailTakenError,
   SuperadminProtectedError,
@@ -23,6 +24,16 @@ import {
 } from "../http/errors.js";
 import type { Logger } from "../logger.js";
 
+/**
+ * A User as the list route reports them: the row, plus which Git Providers
+ * they hold a Connection to.
+ *
+ * @remarks
+ * The provider names and nothing more. Never a token, and never the connected
+ * account's login — an Admin needs to know that a grant exists so they can ask
+ * about it, not to read the writer's credential.
+ */
+export type UserListing = UserRow & { connected_providers: string[] };
 /** A page below 1 — or not a number at all — is the first page, not an error. */
 function parsePage(raw: string | undefined): number {
   const page = Number(raw ?? "1");
@@ -49,10 +60,10 @@ export class UsersService {
    * const { items, total } = await usersService.list("1");
    * ```
    */
-  async list(rawPage: string | undefined): Promise<Page<UserRow>> {
+  async list(rawPage: string | undefined): Promise<Page<UserListing>> {
     const page = parsePage(rawPage);
 
-    const items = await this.db
+    const rows = await this.db
       .select()
       .from(users)
       .orderBy(desc(users.created_at))
@@ -61,7 +72,35 @@ export class UsersService {
 
     const [totals] = await this.db.select({ total: count() }).from(users);
 
-    return { items, page, page_size: USER_PAGE_SIZE, total: totals?.total ?? 0 };
+    // A second query over just this page's Users rather than a join with a
+    // group-by: the join would have to aggregate every column of `users` to
+    // collapse one row per Connection back into one row per User, and a page
+    // is fifty rows.
+    const granted =
+      rows.length === 0
+        ? []
+        : await this.db
+            .select({ user_id: connections.user_id, provider: connections.provider })
+            .from(connections)
+            .where(
+              inArray(
+                connections.user_id,
+                rows.map((row) => row.id),
+              ),
+            )
+            .orderBy(asc(connections.provider));
+
+    const byUser = new Map<string, string[]>();
+    for (const row of granted) {
+      byUser.set(row.user_id, [...(byUser.get(row.user_id) ?? []), row.provider]);
+    }
+
+    return {
+      items: rows.map((row) => ({ ...row, connected_providers: byUser.get(row.id) ?? [] })),
+      page,
+      page_size: USER_PAGE_SIZE,
+      total: totals?.total ?? 0,
+    };
   }
 
   /**

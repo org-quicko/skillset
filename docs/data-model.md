@@ -1,11 +1,12 @@
 # Data Model
 
-Postgres 18. Ten tables, one materialized view, and one plain view. One table or view per file
+Postgres 18. Twelve tables, one materialized view, and one plain view. One table or view per file
 under `apps/api/src/db/schemas/`, managed with Drizzle migrations. Both views are created in
 hand-written SQL because Drizzle has no generator for a view (ADR-0012); everything else,
 generated columns and check constraints included, comes out of `bun run db:generate`.
 
-Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag.
+Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag,
+Git Provider, Integration, Connection, Import.
 
 Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
 TypeScript type — there is no separate camelCase domain shape or conversion boundary. Types are
@@ -388,6 +389,111 @@ second User rather than following the first.
 Deleting a Provider is not a supported operation — `enabled` is how one is taken out of
 service, so nobody loses their way in to a mistyped click.
 
+## `integrations`
+
+The Registry's registration with one Git Provider, holding the credential pair a Connection is
+granted against (ADR-0024). At most one row per provider — `provider` is the row's identity.
+
+```
+provider       text primary key                 -- 'github' | 'gitlab'
+display_name   text not null
+client_id      text not null
+client_secret  text not null
+app_slug       text                             -- null for a provider with no installation step
+created_at     timestamptz not null default now()
+updated_at     timestamptz not null default now()
+```
+
+**This is not a column on `identity_providers`, and the separation is the point.** GitHub is
+reached through two registrations that share nothing but a vendor: an OAuth App for signing in,
+which lives in `identity_providers`, and a GitHub App for Importing, which lives here. Either may
+exist without the other. Signing in with GitHub while holding no repository credential is a
+supported deployment, and so is Importing from GitHub on a Registry where nobody can sign in with
+it.
+
+`provider` is **plain text, not an enum**, so registering a new Git Provider is an insert rather
+than a migration (ADR-0024). The values it may take are the keys of `GIT_PROVIDERS` in
+`@skill-registry/shared`, checked in the service. What Postgres enforces instead is the other
+direction: `connections.provider` references this column, which makes *"you cannot connect to a
+provider this Registry has not registered"* a database invariant rather than an application rule.
+
+**A row's existence is the only switch Importing has.** There is deliberately no
+`import_enabled` flag: an operator who wants this Registry to hold no repository credentials for
+anybody creates no row, and that is the off switch. A second switch above it would express nothing
+the first does not. ADR-0024 records why the Admin-level flag ADR-0023 proposed was dropped.
+
+`app_slug` is the app's slug at the provider, used to build its installation URL
+(`https://github.com/apps/{app_slug}/installations/new`). It is nullable because only GitHub has an
+installation step; GitLab has none.
+
+`client_secret` is stored as given, following `identity_providers` and listmonk (ADR-0015). No
+response shape includes it — it is written and never read back. Note honestly what that means
+alongside the encrypted Connection tokens that reference this row: encryption there defends a
+leaked backup, not a compromised host, because this secret sits beside it in plaintext.
+
+There is no delete route, matching `/identity-providers`. Removing an Integration that writers
+still hold Connections against would strand those credentials, and the `ON DELETE RESTRICT` on
+`connections.provider` refuses it at the database.
+
+## `connections`
+
+A writer's own grant of repository access to the Registry, made deliberately and separately from
+signing in (ADR-0024). Its existence *is* the consent; nothing else records it.
+
+```
+id                        uuid primary key default uuidv7()
+user_id                   uuid not null references users(id) on delete cascade
+provider                  text not null references integrations(provider) on delete restrict
+external_account_id       text not null
+external_account_login    text not null
+access_token              text not null                      -- ciphertext
+refresh_token             text                               -- ciphertext, null when none was issued
+expires_at                timestamptz                        -- null means the token does not expire
+refresh_token_expires_at  timestamptz
+created_at                timestamptz not null default now()
+updated_at                timestamptz not null default now()
+unique (user_id, provider)
+```
+
+**This is deliberately not an `accounts` row.** Better Auth's `accounts` table models identities,
+and a Connection is not one: nobody signs in by connecting, the connected account need not be the
+account the writer signs in with, and the Permitted Organisation gate does not run on it. Storing a
+third-party API credential in the authentication table is the conflation ADR-0024 exists to undo,
+and it is also why Better Auth does not drive the grant — the flow is two routes of the Registry's
+own with a signed, single-use state.
+
+`provider` references `integrations` rather than carrying a free string. That is what makes
+*"you cannot connect to a provider this Registry has not registered"* a database invariant.
+`ON DELETE RESTRICT` is load-bearing: removing an Integration that writers still hold Connections
+against fails loudly rather than silently dropping their credentials.
+
+`unique (user_id, provider)` means reconnecting **replaces**. One Connection per writer per
+provider, so "which account does this Import use?" never needs asking — the alternative is a picker
+on a paste-a-URL flow, or trying each account in turn, which turns one 404 into several.
+
+`external_account_id` is the provider's own id, which survives a rename where the login does not.
+`external_account_login` exists for the interface: a writer needs to see *which* account is
+connected, because it need not be the one they sign in with, and that is usually the answer to "why
+can this Import not see my repository?".
+
+Both token columns hold **ciphertext**, AES-256-GCM under Better Auth's signing secret. State the
+limit of that honestly: it defends a leaked *backup*, not a compromised host, because
+`integrations.client_secret` sits in plaintext in the same database by ADR-0015's deliberate
+choice, and anyone who can read the environment can decrypt.
+
+`expires_at` and `refresh_token` are **nullable, and null is meaningful**: it says the provider
+issued a token that does not expire. ADR-0024 keeps GitHub App token expiry switched on, but an
+operator can switch it off on their own app, and connecting must not fail because they did. A token
+within a minute of expiry is refreshed before use — before it expires, not after, because a token
+that dies part-way through a folder walk is a failure a refresh thirty seconds earlier would have
+avoided, and the walk is not resumable.
+
+There is no delete route for an Integration, so a Connection is only ever removed by its writer
+disconnecting, by their role dropping below `writer`, or by their User row going away. Note that
+disconnecting is **Registry-local**: it stops this Registry using the grant and does not withdraw
+it at the provider. If the interface ever says "revoked" without that qualification, the product
+and ADR-0024 disagree, and the ADR is right.
+
 ## `sessions`, `accounts`, and `verifications`
 
 These three belong to Better Auth (ADR-0016). Their columns are its model, mapped back to this
@@ -406,13 +512,45 @@ password — that row's `password` column is where `users.password_hash` went �
 kind for an external login. `issuer` says who vouched for it: the provider's own issuer, or the
 synthetic `local:credential` for a password.
 
-`access_token` on a `github` row is not incidental storage: it is a live GitHub credential carrying
-the `repo` scope, and it is what a private-repository import runs as (ADR-0020). GitHub does not
-divide that scope, so it grants read *and* write across every private repository that User can
-reach. It is encrypted at rest — Better Auth's `encryptOAuthTokens` is on — so the column holds
-AES-256-GCM ciphertext under `BETTER_AUTH_SECRET`, and anything reading it has to decrypt before
-use. `GitHubImportService` is the only reader. Treat this column as the most sensitive in the
-schema anyway: password and Token hashes are one-way, and this one is reversible by design.
+`access_token` on a **`github`** row is always null, and that is enforced rather than merely
+expected. It used to hold a live credential carrying the `repo` scope — read *and* write across
+every private repository that User could reach — because a login doubled as the credential for
+importing (ADR-0020). ADR-0024 ends that: repository access comes from a **Connection** granted
+against a separate GitHub App, so nothing reads this column for GitHub any more.
+
+Three things keep it null, and all three are needed:
+
+- `GITHUB_SCOPES` no longer asks for `repo`.
+- A database hook in `createAuth` nulls the token fields on any `github` account write, create
+  and update alike. Unrequesting the scope is not sufficient on its own: scopes **accumulate** on
+  a GitHub OAuth App, so anyone who once granted `repo` keeps being issued a `repo`-capable token
+  whatever the Registry asks for.
+- Migration `0005_forget_github_login_tokens` cleared the rows written before all this.
+
+The hook has a sharp edge worth knowing about, recorded on `withoutGitHubTokens` and covered by
+`apps/api/test/github-login-tokens.test.ts`: Better Auth *merges* what a `before` hook returns
+over the data it already had, so omitting a field restores it. Only an explicit null survives. A
+hook written to delete the keys reads as correct and stores the token anyway.
+
+`scope` on those same rows is **left alone**, and still reads `repo` for anyone who granted it.
+That is deliberate and it is not a contradiction: `scope` records what GitHub actually granted,
+and GitHub has still granted `repo` — scopes accumulate on an OAuth App, so the grant outlives
+the Registry's decision to stop asking for it or storing its token. Clearing the column would
+make the row *less* truthful, and would erase the only record of which Users have a `repo` grant
+sitting at GitHub for them to revoke. So: a `github` row with a null `access_token` and a `scope`
+mentioning `repo` is the expected and correct state, not a half-finished migration.
+
+What this does **not** do, and must not be described as doing: it does not withdraw the `repo`
+grants people already gave at GitHub. Those live in each person's own GitHub authorizations, and
+revoking them from here would take `DELETE /applications/{client_id}/grant`, which withdraws the
+whole authorization and would face every existing user with a fresh consent screen at their next
+sign-in. Deleting our copy is a real mitigation and a partial one.
+
+Google and Microsoft tokens are untouched and still stored here, encrypted at rest — Better
+Auth's `encryptOAuthTokens` is on, so the column holds AES-256-GCM ciphertext under
+`BETTER_AUTH_SECRET` and anything reading it has to decrypt first. Treat the column as the most
+sensitive in the schema regardless: password and Token hashes are one-way, and this one is
+reversible by design.
 
 The three of `provider_id`, `issuer`, and `account_id` are unique together because they are what
 Better Auth matches an account on, all three at once. Writing a credential without the issuer

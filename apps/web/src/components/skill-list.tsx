@@ -1,114 +1,93 @@
 import type { SkillDirectorySortField, SkillDirectorySortOrder } from "@skill-registry/shared";
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { ArrowDownIcon, ArrowUpIcon, ArrowUpDownIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { ArrowDownIcon, ArrowUpIcon, ArrowUpDownIcon, SearchXIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { TagFilter } from "@/components/tag-filter";
 import { useSkillDirectory, type SkillDirectoryFilters } from "@/hooks/use-skills";
-import { useTags } from "@/hooks/use-tags";
 import { apiErrorMessage } from "@/lib/api";
-import { formatMoment } from "@/lib/utils";
-
-interface DirectoryRow {
-  id: string;
-  name: string;
-  published_by_name: string;
-  updated_at: string;
-  installs: number;
-  tags: { id: string; name: string }[];
-}
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 /** How many of a Skill's Tags show as their own chip before the rest collapse into a "+N" one. */
 const VISIBLE_TAG_COUNT = 2;
 
-/** The Name column's cell: the Skill's name plus up to two Tag chips, with any remainder behind a "+N" chip whose tooltip lists them by name. */
-function NameCell({ name, tags }: { name: string; tags: { id: string; name: string }[] }) {
-  const visible = tags.slice(0, VISIBLE_TAG_COUNT);
-  const remaining = tags.slice(VISIBLE_TAG_COUNT);
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="font-medium">{name}</span>
-      {visible.map((tag) => (
-        <Badge key={tag.id} variant="outline">
-          {tag.name}
-        </Badge>
-      ))}
-      {remaining.length > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="secondary">+{remaining.length}</Badge>
-          </TooltipTrigger>
-          <TooltipContent>{remaining.map((tag) => tag.name).join(", ")}</TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 }
 
 /** A column header that toggles sort_by/sort_order on click, showing the current direction when this column is the active sort. */
-function SortableHeader({
+function SortHeader({
   field,
   label,
-  sortBy,
-  sortOrder,
-  onSortChange,
+  align,
+  filters,
+  onFiltersChange,
 }: {
   field: SkillDirectorySortField;
   label: string;
-  sortBy: SkillDirectorySortField;
-  sortOrder: SkillDirectorySortOrder;
-  onSortChange: (sortBy: SkillDirectorySortField, sortOrder: SkillDirectorySortOrder) => void;
+  align: "start" | "end";
+  filters: SkillDirectoryFilters;
+  onFiltersChange: (filters: SkillDirectoryFilters) => void;
 }) {
-  const active = sortBy === field;
+  const active = filters.sortBy === field;
+  const nextOrder: SkillDirectorySortOrder = active && filters.sortOrder === "desc" ? "asc" : "desc";
+
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-3 h-8"
-      onClick={() => onSortChange(field, active && sortOrder === "desc" ? "asc" : "desc")}
+    <button
+      type="button"
+      onClick={() => onFiltersChange({ ...filters, sortBy: field, sortOrder: nextOrder })}
+      className={cn(
+        "inline-flex cursor-pointer items-center gap-1 text-inherit outline-none select-none hover:text-foreground focus-visible:text-foreground",
+        align === "end" && "flex-row-reverse",
+      )}
     >
       {label}
       {active ? (
-        sortOrder === "desc" ? (
-          <ArrowDownIcon />
+        filters.sortOrder === "desc" ? (
+          <ArrowDownIcon className="size-3.5" />
         ) : (
-          <ArrowUpIcon />
+          <ArrowUpIcon className="size-3.5" />
         )
       ) : (
-        <ArrowUpDownIcon className="opacity-50" />
+        <ArrowUpDownIcon className="size-3.5 opacity-40" />
       )}
-    </Button>
+    </button>
   );
 }
 
+/**
+ * The Skill directory as a sortable, scroll-loaded table. Filter and sort
+ * state is owned by the caller (the URL query string, via `SkillsHome`); this
+ * component only renders it and reports changes back.
+ *
+ * @param filters - The active search term, Tag ids, and sort choice.
+ * @param onFiltersChange - Called with the full new filter set when a sort header or Tag chip is clicked.
+ * @param onSelect - Called with a Skill's name when its row is clicked.
+ */
 export function SkillList({
-  canPublish,
   filters,
   onFiltersChange,
   onSelect,
-  onPublish,
 }: {
-  canPublish: boolean;
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
   onSelect: (name: string) => void;
-  onPublish: () => void;
 }) {
   const skills = useSkillDirectory(filters);
-  const tags = useTags();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const rows = useMemo(() => skills.data?.pages.flatMap((page) => page.items) ?? [], [skills.data]);
+  const rows = skills.data?.pages.flatMap((page) => page.items) ?? [];
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = skills;
 
-  // Scroll-loading: fetch the next page once the sentinel below the table
-  // scrolls into view, rather than a Previous/Next control (ticket 23).
+  // Scroll-loading: fetch the next page once the sentinel row scrolls into
+  // view, rather than a Previous/Next control (ticket 23).
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel || !hasNextPage) return;
@@ -120,114 +99,108 @@ export function SkillList({
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleSortChange = useCallback(
-    (sortBy: SkillDirectorySortField, sortOrder: SkillDirectorySortOrder) => {
-      onFiltersChange({ ...filters, sortBy, sortOrder });
-    },
-    [filters, onFiltersChange],
-  );
+  if (skills.isError) {
+    return <p className="px-5 py-10 text-center text-sm text-destructive">{apiErrorMessage(skills.error)}</p>;
+  }
 
-  const columns = useMemo<ColumnDef<DirectoryRow>[]>(
-    () => [
-      {
-        accessorKey: "name",
-        header: "Name",
-        cell: ({ row }) => <NameCell name={row.original.name} tags={row.original.tags} />,
-      },
-      { accessorKey: "published_by_name", header: "Publisher" },
-      {
-        accessorKey: "updated_at",
-        header: () => (
-          <SortableHeader
-            field="updated_at"
-            label="Updated"
-            sortBy={filters.sortBy}
-            sortOrder={filters.sortOrder}
-            onSortChange={handleSortChange}
-          />
-        ),
-        cell: ({ row }) => formatMoment(row.original.updated_at),
-      },
-      {
-        accessorKey: "installs",
-        header: () => (
-          <SortableHeader
-            field="installs"
-            label="Installs"
-            sortBy={filters.sortBy}
-            sortOrder={filters.sortOrder}
-            onSortChange={handleSortChange}
-          />
-        ),
-      },
-    ],
-    [filters.sortBy, filters.sortOrder, handleSortChange],
-  );
-
-  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() });
+  if (skills.isSuccess && rows.length === 0) {
+    const hasFilters = filters.q.trim() !== "" || filters.tagIds.length > 0;
+    return (
+      <div className="flex flex-col items-center gap-2 px-5 py-14 text-center">
+        <SearchXIcon className="size-6 text-ring" />
+        <p className="text-sm text-muted-foreground">
+          {hasFilters ? `No skills match “${filters.q || "that filter"}”` : "No skills published yet"}
+        </p>
+        {hasFilters && <p className="text-sm text-muted-foreground">Try a skill name, tag or publisher.</p>}
+      </div>
+    );
+  }
 
   return (
-    <Card className="w-full max-w-5xl">
-      <CardHeader>
-        <CardTitle>Skills</CardTitle>
-        {canPublish && (
-          <CardAction>
-            <Button onClick={onPublish}>Publish a Skill</Button>
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder="Search by name, description, or publisher..."
-            value={filters.q}
-            onChange={(event) => onFiltersChange({ ...filters, q: event.target.value })}
-            className="sm:max-w-sm"
-          />
-          <TagFilter
-            tags={tags.data?.items ?? []}
-            selected={filters.tagIds}
-            onChange={(tagIds) => onFiltersChange({ ...filters, tagIds })}
-          />
+    <div className="w-full">
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">#</TableHead>
+          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">Skill</TableHead>
+          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">
+            Publisher
+          </TableHead>
+          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">
+            <SortHeader
+              field="updated_at"
+              label="Updated"
+              align="start"
+              filters={filters}
+              onFiltersChange={onFiltersChange}
+            />
+          </TableHead>
+          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">
+            <SortHeader
+              field="installs"
+              label="Installs"
+              align="end"
+              filters={filters}
+              onFiltersChange={onFiltersChange}
+            />
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((skill, index) => {
+          const visibleTags = skill.tags.slice(0, VISIBLE_TAG_COUNT);
+          const hiddenTags = skill.tags.slice(VISIBLE_TAG_COUNT);
+          return (
+            <TableRow key={skill.id} className="cursor-pointer" onClick={() => onSelect(skill.name)}>
+              <TableCell className="text-xs text-muted-foreground">{index + 1}</TableCell>
+              <TableCell>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium">{skill.name}</span>
+                  {visibleTags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      variant="outline"
+                      className="cursor-pointer"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onFiltersChange({ ...filters, tagIds: [tag.id] });
+                      }}
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                  {hiddenTags.length > 0 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge variant="secondary" onClick={(event) => event.stopPropagation()}>
+                          +{hiddenTags.length}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>{hiddenTags.map((tag) => tag.name).join(", ")}</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Avatar className="size-[26px]">
+                    <AvatarFallback className="text-[11px]">{initials(skill.published_by_name)}</AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm text-muted-foreground">{skill.published_by_name}</span>
+                </div>
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">{formatRelativeTime(skill.updated_at)}</TableCell>
+              <TableCell className="text-right tabular-nums">{skill.installs.toLocaleString()}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+      {hasNextPage && (
+        <div ref={sentinelRef} className="py-3 text-center text-sm text-muted-foreground">
+          {isFetchingNextPage ? "Loading more…" : ""}
         </div>
-
-        {skills.isError && <p className="text-sm text-destructive">{apiErrorMessage(skills.error)}</p>}
-        {skills.isSuccess && rows.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            {filters.q || filters.tagIds.length > 0 ? "No Skills match your search." : "No Skills published yet."}
-          </p>
-        )}
-        {skills.isSuccess && rows.length > 0 && (
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => (
-                      <TableHead key={header.id}>
-                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.original.id} className="cursor-pointer" onClick={() => onSelect(row.original.name)}>
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div ref={sentinelRef} className="h-1" />
-            {skills.isFetchingNextPage && (
-              <p className="py-2 text-center text-sm text-muted-foreground">Loading more…</p>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }

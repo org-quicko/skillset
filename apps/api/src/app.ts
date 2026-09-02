@@ -7,14 +7,18 @@ import type { Database } from "./db/client.js";
 import { registerErrorHandler } from "./http/errors.js";
 import type { Logger } from "./logger.js";
 import { registerAuthRoutes } from "./routes/auth.js";
-import { registerGitHubRoutes } from "./routes/github.js";
+import { registerConnectionRoutes } from "./routes/connections.js";
 import { registerIdentityProviderRoutes } from "./routes/identity-providers.js";
+import { registerImportRoutes } from "./routes/imports.js";
+import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { registerSetupRoutes } from "./routes/setup.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
 import { registerTagsRoutes } from "./routes/tags.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { AnalyticsService } from "./services/analytics.js";
-import { GitHubImportService } from "./services/github-import.js";
+import { ConnectionsService } from "./services/connections.js";
+import { ImportsService } from "./services/imports.js";
+import { IntegrationsService } from "./services/integrations.js";
 import { IdentityProvidersService } from "./services/identity-providers.js";
 import { SetupService } from "./services/setup.js";
 import { SkillsService } from "./services/skills.js";
@@ -71,7 +75,9 @@ export function createApp(deps: AppDependencies): Hono {
   const users = new UsersService(deps.db, deps.logger);
   const setup = new SetupService(deps.db, deps.logger);
   const identityProviders = new IdentityProvidersService(deps.db, deps.logger);
-  const githubImport = new GitHubImportService(deps.db, deps.betterAuthSecret, deps.logger);
+  const integrations = new IntegrationsService(deps.db, deps.logger);
+  const connections = new ConnectionsService(deps.db, deps.betterAuthSecret, deps.logger, integrations);
+  const imports = new ImportsService(deps.logger, integrations, connections);
 
   // What `requireAuth`/`requireRole` need, and nothing else — the role is
   // re-read from the database on every request (ADR-0005).
@@ -92,7 +98,9 @@ export function createApp(deps: AppDependencies): Hono {
   registerSetupRoutes(api, { setup, auth });
   registerAuthRoutes(api, { identityProviders, auth });
   registerIdentityProviderRoutes(api, { ...authDeps, identityProviders });
-  registerGitHubRoutes(api, { ...authDeps, githubImport });
+  registerIntegrationRoutes(api, { ...authDeps, integrations });
+  registerConnectionRoutes(api, { ...authDeps, connections, publicUrl: deps.publicUrl });
+  registerImportRoutes(api, { ...authDeps, imports });
   registerUsersRoutes(api, { ...authDeps, users });
   registerSkillsRoutes(api, { ...authDeps, skills, tags });
   registerTagsRoutes(api, { ...authDeps, tags });

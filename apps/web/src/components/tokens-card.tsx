@@ -1,12 +1,50 @@
 import type { TokenCreated } from "@skill-registry/shared";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { LabeledField } from "@/components/labeled-field";
+import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useMintToken, useRevokeToken, useTokens } from "@/hooks/use-tokens";
 import { apiErrorMessage } from "@/lib/api";
 import { formatMoment } from "@/lib/utils";
+
+function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token.secret);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard blocked — the secret is on screen to copy by hand.
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border bg-background p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium">{token.name}</span>
+        <button
+          type="button"
+          aria-label="Copy secret"
+          onClick={copy}
+          className="flex cursor-pointer text-muted-foreground hover:text-foreground"
+        >
+          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+        </button>
+      </div>
+      <code className="rounded bg-muted p-2 font-mono text-xs break-all">{token.secret}</code>
+      <p className="text-xs text-muted-foreground">
+        Copy this now — it is shown once and cannot be retrieved again.
+      </p>
+      <Button variant="outline" size="sm" className="w-fit" onClick={onDismiss}>
+        Done
+      </Button>
+    </div>
+  );
+}
 
 export function TokensCard() {
   const [name, setName] = useState("");
@@ -24,69 +62,56 @@ export function TokensCard() {
   }
 
   return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardTitle>Tokens</CardTitle>
-        <CardDescription>A Token lets the CLI act as you, with your role.</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
+    <div className="flex max-w-xl flex-col gap-4">
+      <Panel title="New Token" description="A Token lets the CLI act as you, with your role.">
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="token_name">Name</Label>
+          <LabeledField label="Name" htmlFor="token_name">
             <Input
               id="token_name"
               placeholder="my-laptop"
               value={name}
               onChange={(event) => setName(event.target.value)}
               required
+              className="h-10"
             />
-          </div>
+          </LabeledField>
           {mint.isError && <p className="text-sm text-destructive">{apiErrorMessage(mint.error)}</p>}
-          <Button type="submit" disabled={mint.isPending}>
+          <Button type="submit" className="w-fit" disabled={mint.isPending}>
             {mint.isPending ? "Minting…" : "Mint Token"}
           </Button>
+          {minted && <MintedSecret token={minted} onDismiss={() => setMinted(null)} />}
         </form>
+      </Panel>
 
-        {minted && (
-          <div className="flex flex-col gap-2 rounded-md border p-3">
-            <p className="text-sm font-medium">{minted.name}</p>
-            <code className="break-all rounded bg-muted p-2 text-xs">{minted.secret}</code>
-            <p className="text-xs text-muted-foreground">
-              Copy this now — it is shown once and cannot be retrieved again.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => setMinted(null)}>
-              Done
+      <Panel title="Your Tokens" contentClassName="p-0">
+        {tokens.isPending && <p className="p-5 text-sm text-muted-foreground">Loading…</p>}
+        {tokens.isError && <p className="p-5 text-sm text-destructive">{apiErrorMessage(tokens.error)}</p>}
+        {tokens.isSuccess && tokens.data.length === 0 && (
+          <p className="p-5 text-sm text-muted-foreground">No Tokens yet.</p>
+        )}
+        {tokens.data?.map((token) => (
+          <div
+            key={token.id}
+            className="flex items-center justify-between gap-3 border-b px-5 py-3.5 last:border-b-0"
+          >
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">{token.name}</span>
+              <span className="text-xs text-muted-foreground">
+                Created {formatMoment(token.created_at)} · last used {formatMoment(token.last_used_at)}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={revoke.isPending}
+              onClick={() => revoke.mutate(token.id)}
+            >
+              Revoke
             </Button>
           </div>
-        )}
-
-        <div className="flex flex-col gap-2">
-          {tokens.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {tokens.isError && <p className="text-sm text-destructive">{apiErrorMessage(tokens.error)}</p>}
-          {tokens.isSuccess && tokens.data.length === 0 && (
-            <p className="text-sm text-muted-foreground">No Tokens yet.</p>
-          )}
-          {tokens.data?.map((token) => (
-            <div key={token.id} className="flex items-center justify-between gap-3 border-b pb-2 last:border-b-0">
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">{token.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  Created {formatMoment(token.created_at)} — last used {formatMoment(token.last_used_at)}
-                </span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={revoke.isPending}
-                onClick={() => revoke.mutate(token.id)}
-              >
-                Revoke
-              </Button>
-            </div>
-          ))}
-          {revoke.isError && <p className="text-sm text-destructive">{apiErrorMessage(revoke.error)}</p>}
-        </div>
-      </CardContent>
-    </Card>
+        ))}
+        {revoke.isError && <p className="px-5 py-3 text-sm text-destructive">{apiErrorMessage(revoke.error)}</p>}
+      </Panel>
+    </div>
   );
 }

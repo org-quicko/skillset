@@ -1,10 +1,10 @@
 import type { User } from "@skill-registry/shared";
 import { useState, type FormEvent } from "react";
+import { LabeledField } from "@/components/labeled-field";
 import { PasswordCard } from "@/components/password-card";
+import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useUpdateOwnName } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
 
@@ -31,39 +31,38 @@ export function ProfileCard({ user }: { user: User }) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>{user.email}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="first_name">First name</Label>
+    <div className="flex max-w-xl flex-col gap-4">
+      <Panel title="Profile">
+        <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+          <LabeledField label="Email">
+            <Input value={user.email} readOnly disabled className="h-10" />
+          </LabeledField>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <LabeledField label="First name" htmlFor="first_name">
               <Input
                 id="first_name"
                 value={firstName}
                 onChange={(event) => setFirstName(event.target.value)}
                 required
+                className="h-10"
               />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="last_name">Last name</Label>
+            </LabeledField>
+            <LabeledField label="Last name" htmlFor="last_name">
               <Input
                 id="last_name"
                 value={lastName}
                 onChange={(event) => setLastName(event.target.value)}
                 required
+                className="h-10"
               />
-            </div>
-            {updateName.isError && <p className="text-sm text-destructive">{apiErrorMessage(updateName.error)}</p>}
-            <Button type="submit" disabled={updateName.isPending}>
-              {updateName.isPending ? "Saving…" : "Save name"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+            </LabeledField>
+          </div>
+          {updateName.isError && <p className="text-sm text-destructive">{apiErrorMessage(updateName.error)}</p>}
+          <Button type="submit" className="w-fit" disabled={updateName.isPending}>
+            {updateName.isPending ? "Saving…" : "Save name"}
+          </Button>
+        </form>
+      </Panel>
 
       <PasswordCard />
     </div>

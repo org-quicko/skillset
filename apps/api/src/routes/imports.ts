@@ -1,0 +1,59 @@
+import { SkillFilesSchema, SkillSourceLocationSchema } from "@skill-registry/shared";
+import type { Hono } from "hono";
+import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
+import { ValidationError } from "../http/errors.js";
+import type { ImportsService } from "../services/imports.js";
+
+export type ImportRouteDependencies = AuthDependencies & {
+  imports: ImportsService;
+};
+
+/**
+ * Registers `POST /imports/:provider/skill-files`: reading a Skill folder out
+ * of a project the caller's Connection can see, private ones included
+ * (ADR-0024).
+ *
+ * @remarks
+ * Note what the body is, and is not. It carries `{ project, ref, path }` and
+ * there is deliberately no URL field — the service builds every provider
+ * request from these parts and the provider's pinned API base, so this route
+ * cannot be aimed at another host (ADR-0020). The browser parses the pasted URL
+ * and sends the result; the schema below re-validates every field rather than
+ * trusting that it did.
+ *
+ * The provider comes from the **path**, and is written over anything the body
+ * claims. A caller must not be able to move an import to a different provider
+ * by asking nicely in JSON.
+ *
+ * `writer`, not `reader`: this exists to publish, and reading a Skill needs no
+ * identity at all (ADR-0013), so there is no reason for a reader to reach it.
+ *
+ * Public projects come through here too, for a writer who holds a Connection —
+ * the token is worth sending either way, since it is the same access and it
+ * buys thousands of requests an hour instead of the sixty an anonymous browser
+ * gets. A writer with **no** Connection keeps the anonymous client-side path
+ * (ADR-0010), which is what lets a Registry with no Integration at all still
+ * import a public Skill.
+ *
+ * @param app - The Hono app to register the route on.
+ * @param deps - The auth dependencies and the Imports service.
+ */
+export function registerImportRoutes(app: Hono<{ Variables: AuthVariables }>, deps: ImportRouteDependencies): void {
+  app.post("/imports/:provider/skill-files", requireAuth(deps), requireRole("writer"), async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+
+    // Spread first, provider second: the path wins.
+    const parsed = SkillSourceLocationSchema.safeParse({ ...(body ?? {}), provider: c.req.param("provider") });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new ValidationError(issue?.message ?? "Invalid project location.", issue?.path.join("."));
+    }
+
+    const files = await deps.imports.fetchSkillFiles(c.get("user").id, parsed.data);
+    const items = files.map((file) => ({
+      path: file.path,
+      content_base64: Buffer.from(file.bytes).toString("base64"),
+    }));
+    return c.json(SkillFilesSchema.parse({ items }));
+  });
+}

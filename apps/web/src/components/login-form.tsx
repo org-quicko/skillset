@@ -1,10 +1,9 @@
 import { loginRefusalMessage, type PublicIdentityProvider } from "@skill-registry/shared";
+import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useLogin } from "@/hooks/use-auth";
 import { useLoginProviders } from "@/hooks/use-identity-providers";
 import { ApiError } from "@/lib/api";
@@ -21,12 +20,17 @@ function startExternalLogin(kind: string): void {
   void authClient.signIn.social({ provider: kind, callbackURL: "/" });
 }
 
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">{children}</span>;
+}
+
 export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [reveal, setReveal] = useState(false);
   const login = useLogin();
   const providers = useLoginProviders();
-  const { search } = useRouter();
+  const { search, navigate } = useRouter();
 
   // Set by the API when it bounces a failed external login back here. The code
   // names which check refused it, so the message can be the one that helps —
@@ -42,66 +46,92 @@ export function LoginForm() {
   const items = providers.data?.items ?? [];
 
   return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardTitle>Log in</CardTitle>
-        <CardDescription>Sign in to Skillset.</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {externalError && (
-          <p className="text-sm text-destructive">{loginRefusalMessage(externalError)}</p>
-        )}
+    <div className="flex min-h-svh flex-col bg-background">
+      <header className="border-b">
+        <div className="mx-auto flex h-[54px] w-full max-w-[1200px] items-center px-7">
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            className="cursor-pointer font-wordmark text-[13px] tracking-[0.04em] lowercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            skillset
+          </button>
+        </div>
+      </header>
 
-        {/* Above the password form, and the password form is always present:
-            it is the way back in when a provider is misconfigured or its
-            client secret has expired (ADR-0015). */}
-        {items.length > 0 && (
-          <>
-            <div className="flex flex-col gap-2">
-              {items.map((provider) => (
-                <ProviderButton key={provider.kind} provider={provider} />
-              ))}
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="h-px flex-1 bg-border" />
-              <span className="text-xs text-muted-foreground">or</span>
-              <span className="h-px flex-1 bg-border" />
-            </div>
-          </>
-        )}
+      <div className="flex flex-1 items-start justify-center px-7 py-20 sm:py-24">
+        <div className="flex w-full max-w-[400px] flex-col gap-6">
+          <h1 className="text-[22px] font-medium tracking-tight">Sign in</h1>
 
-        <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </div>
-          {login.isError && (
-            <p className="text-sm text-destructive">
-              {login.error instanceof ApiError ? login.error.message : "Something went wrong."}
-            </p>
+          {externalError && <p className="text-sm text-destructive">{loginRefusalMessage(externalError)}</p>}
+
+          {/* Above the password form, and the password form is always present:
+              it is the way back in when a provider is misconfigured or its
+              client secret has expired (ADR-0015). */}
+          {items.length > 0 && (
+            <>
+              <div className="flex flex-col gap-2.5">
+                {items.map((provider) => (
+                  <ProviderButton key={provider.kind} provider={provider} />
+                ))}
+              </div>
+              <div className="flex items-center gap-3.5">
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
           )}
-          <Button type="submit" disabled={login.isPending}>
-            {login.isPending ? "Logging in…" : "Log in"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+
+          <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel>Email</FieldLabel>
+              <Input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@quicko.com"
+                required
+                className="h-11"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel>Password</FieldLabel>
+              <div className="relative">
+                <Input
+                  type={reveal ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  className="h-11 pr-10"
+                />
+                <button
+                  type="button"
+                  aria-label={reveal ? "Hide password" : "Show password"}
+                  onClick={() => setReveal((value) => !value)}
+                  className="absolute top-1/2 right-3 flex -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
+                >
+                  {reveal ? <EyeOffIcon className="size-[18px]" /> : <EyeIcon className="size-[18px]" />}
+                </button>
+              </div>
+            </div>
+
+            {login.isError && (
+              <p className="text-sm text-destructive">
+                {login.error instanceof ApiError ? login.error.message : "Something went wrong."}
+              </p>
+            )}
+
+            <Button type="submit" size="lg" className="mt-1 h-11 w-full" disabled={login.isPending}>
+              {login.isPending ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -109,7 +139,13 @@ function ProviderButton({ provider }: { provider: PublicIdentityProvider }) {
   const Icon = PROVIDER_ICONS[provider.kind];
 
   return (
-    <Button type="button" variant="outline" onClick={() => startExternalLogin(provider.kind)}>
+    <Button
+      type="button"
+      variant="outline"
+      size="lg"
+      className="h-11 w-full"
+      onClick={() => startExternalLogin(provider.kind)}
+    >
       <Icon className="size-4" />
       Continue with {provider.display_name}
     </Button>

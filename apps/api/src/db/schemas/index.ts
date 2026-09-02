@@ -10,7 +10,9 @@ export * from "./session";
 export * from "./user";
 export * from "./verification";
 
+export * from "./connection";
 export * from "./identity-provider";
+export * from "./integration";
 export * from "./skill";
 export * from "./skill-analytics";
 export * from "./skill-directory";
