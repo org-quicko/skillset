@@ -68,7 +68,10 @@ export function useLogin() {
         password: body.password,
       });
       if (error) {
-        throw new ApiError("invalid_credentials", "Email or password is incorrect.");
+        // 401, matching what the API answers for a rejected credential —
+        // Better Auth's client reports the failure without one, and every
+        // `ApiError` carries the status its callers branch on.
+        throw new ApiError(401, "invalid_credentials", "Email or password is incorrect.");
       }
       return apiFetch("/users/me", UserSchema, { suppressAuthReset: true });
     },

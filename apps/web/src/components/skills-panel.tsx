@@ -12,6 +12,7 @@ import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
+import { LOGIN_PATH } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 
 const SKILL_PATH_PREFIX = "/skills/";
@@ -58,7 +59,11 @@ export function SkillsPanel({ role }: { role: Role | null }) {
   const [publishOpen, setPublishOpen] = useState(false);
 
   const filters = filtersFromSearch(search);
-  const canPublish = role !== null && roleMeets(role, "writer");
+  const isSignedOut = role === null;
+  // Shown to every visitor, signed out or not: clicking it while signed out
+  // asks for a login instead of hiding the option outright (reads never
+  // require a session, but publishing does).
+  const canPublish = role === null || roleMeets(role, "writer");
 
   // Replace, not navigate: every keystroke, Tag toggle, or sort click is a
   // refinement of the same view, not a transition the back button should
@@ -90,7 +95,7 @@ export function SkillsPanel({ role }: { role: Role | null }) {
         filters={filters}
         onFiltersChange={handleFiltersChange}
         onSelect={(name) => navigate(skillPath(name))}
-        onPublish={() => setPublishOpen(true)}
+        onPublish={() => (isSignedOut ? navigate(LOGIN_PATH) : setPublishOpen(true))}
       />
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogContent className="sm:max-w-2xl">

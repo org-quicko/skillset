@@ -261,9 +261,9 @@ describe("Listing the Tag catalog (GET /tags)", () => {
     expect(items.map((tag) => tag.name)).toEqual(["apple", "mango", "zebra"]);
   });
 
-  it("refuses listing without a session", async () => {
+  it("is readable without a session, same as the Skill reads (ADR-0013)", async () => {
     const res = await context.app.request("/api/tags");
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
   });
 });
 

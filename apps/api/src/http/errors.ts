@@ -168,24 +168,10 @@ export class IdentityProviderKindTakenError extends AppError {
   }
 }
 
-/** No Integration is configured for the requested Git Provider. */
+/** No Integration exists by the requested id. */
 export class IntegrationNotFoundError extends AppError {
   constructor() {
     super(404, "not_found", "No such Integration.");
-  }
-}
-
-/**
- * An Integration was created for a Git Provider that already has one. There is
- * at most one Integration per provider (ADR-0024) — it is the row's identity —
- * so the second is a conflict rather than an addition, and an Admin who meant
- * to change the first should edit it.
- */
-export class IntegrationProviderTakenError extends AppError {
-  constructor() {
-    super(409, "provider_taken", "An Integration for that Git Provider is already configured.", {
-      field: "provider",
-    });
   }
 }
 
@@ -205,6 +191,27 @@ export class IntegrationNotConfiguredError extends AppError {
       409,
       "integration_not_configured",
       `Importing from ${provider} is not configured on this Registry. Ask an administrator to set it up.`,
+    );
+  }
+}
+
+/**
+ * More than one Integration is configured for a Git Provider, and the caller
+ * did not say which to use (ADR-0025).
+ *
+ * @remarks
+ * Only reached on a connect attempt with no `integration_id`: a caller with
+ * exactly one Integration to choose from never sees this, because there is
+ * nothing to choose. The interface avoids it entirely by always sending the
+ * id of whichever app the writer picked from the list.
+ */
+export class IntegrationChoiceRequiredError extends AppError {
+  constructor(provider: string) {
+    super(
+      400,
+      "integration_choice_required",
+      `More than one integration is configured for ${provider} — specify which one to connect through.`,
+      { field: "integration_id" },
     );
   }
 }

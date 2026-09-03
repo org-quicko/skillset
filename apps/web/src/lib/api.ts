@@ -1,18 +1,11 @@
-import { ErrorResponseSchema } from "@skill-registry/shared";
+import { ApiError, apiErrorFrom, parseApiResponse } from "@skill-registry/shared";
 import type { z } from "zod";
 import { queryClient } from "./query-client";
 import { discardSessionState } from "./query-keys";
 
-export class ApiError extends Error {
-  code: string;
-  field?: string;
-
-  constructor(code: string, message: string, field?: string) {
-    super(message);
-    this.code = code;
-    this.field = field;
-  }
-}
+// Re-exported so components keep importing the error they catch from the
+// module they call — the class itself is shared with the CLI (api-client.ts).
+export { ApiError };
 
 /** What every "did this mutation fail" message shows: the server's own reason, or a generic fallback. */
 export function apiErrorMessage(error: unknown): string {
@@ -32,10 +25,16 @@ export interface ApiFetchOptions extends RequestInit {
 }
 
 /**
- * The one place every request goes through, and the only place a response
- * body is parsed. `schema` shapes the success response — there is no
- * hand-written mapping step. Pass `null` when the response has no body
- * (a 204, e.g. logout).
+ * The one place every request goes through. `schema` shapes the success
+ * response — there is no hand-written mapping step. Pass `null` when the
+ * response has no body (a 204, e.g. logout).
+ *
+ * @remarks
+ * Decoding a refusal and parsing a success body are both `shared`'s
+ * (`apiErrorFrom`, `parseApiResponse`), so this and the CLI's `registryFetch`
+ * cannot drift in what they make of the same response. What is left here is
+ * what only a browser does: same-origin `/api`, cookie credentials, and the
+ * session reset on a 401.
  */
 export async function apiFetch<T>(
   path: string,
@@ -53,14 +52,6 @@ export async function apiFetch<T>(
     discardSessionState(queryClient);
   }
 
-  if (!res.ok) {
-    const parsed = ErrorResponseSchema.safeParse(await res.json().catch(() => null));
-    const error = parsed.success
-      ? parsed.data.error
-      : { code: "unknown_error", message: "Something went wrong." };
-    throw new ApiError(error.code, error.message, error.field);
-  }
-
-  if (schema === null) return undefined as T;
-  return schema.parse(await res.json());
+  if (!res.ok) throw await apiErrorFrom(res);
+  return parseApiResponse(res, schema);
 }

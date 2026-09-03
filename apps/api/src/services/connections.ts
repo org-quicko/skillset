@@ -8,6 +8,7 @@ import {
 import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
+import { firstRow } from "../db/rows.js";
 import { connections, type ConnectionRow, type IntegrationRow, type UserRow } from "../db/schemas/index.js";
 import {
   ConnectionDeclinedError,
@@ -15,6 +16,7 @@ import {
   ConnectionExpiredError,
   ConnectionNotFoundError,
   ConnectionStateInvalidError,
+  IntegrationChoiceRequiredError,
   IntegrationNotConfiguredError,
   NotConnectedError,
   ProviderNotConnectableError,
@@ -48,6 +50,8 @@ const USER_AGENT = "skill-registry";
  */
 export interface ConnectionListing {
   provider: string;
+  /** Which Integration (app) this grant was issued through (ADR-0025). */
+  integration_id: string;
   external_account_login: string;
   created_at: Date;
   updated_at: Date;
@@ -84,6 +88,8 @@ export interface CompletionAttempt {
 interface StatePayload {
   /** Provider. */
   p: string;
+  /** The Integration (app) chosen to connect through (ADR-0025). */
+  i: string;
   /** The User it was minted for. */
   u: string;
   /** Nonce, matched against the browser's cookie. */
@@ -149,10 +155,15 @@ export class ConnectionsService {
    * @param user - The writer connecting. The state is bound to them, so a state
    * minted for one User cannot complete in another's session.
    * @param provider - The Git Provider to connect.
+   * @param integrationId - Which Integration (app) to connect through, when the
+   * provider has more than one (ADR-0025). Omit when it has exactly one — there
+   * is nothing to choose, so none is required.
    * @returns Where to redirect, the state, and the nonce to store.
    * @throws ProviderNotConnectableError if that provider has no credentialed
    * flow at all — GitLab is public-read only, and no configuration changes it.
    * @throws IntegrationNotConfiguredError if no Integration is configured for it.
+   * @throws IntegrationChoiceRequiredError if more than one Integration is
+   * configured for it and `integrationId` was not given.
    * @example
    * ```ts
    * const { redirect_to, nonce } = await connections.start(user, "github");
@@ -160,12 +171,13 @@ export class ConnectionsService {
    * return c.redirect(redirect_to, 302);
    * ```
    */
-  async start(user: UserRow, provider: string): Promise<StartedAuthorization> {
-    const { oauth, integration } = await this.connectable(provider);
+  async start(user: UserRow, provider: string, integrationId?: string): Promise<StartedAuthorization> {
+    const { oauth, integration } = await this.connectable(provider, integrationId);
 
     const nonce = randomBytes(24).toString("base64url");
     const state = this.signState({
       p: provider,
+      i: integration.id,
       u: user.id,
       n: nonce,
       e: this.now().getTime() + STATE_TTL_MS,
@@ -199,6 +211,9 @@ export class ConnectionsService {
    *
    * Upserts on `(user_id, provider)`, so reconnecting replaces rather than
    * accumulating and "which account does this Import use?" never needs asking.
+   * Reconnecting through a *different* Integration for the same provider
+   * repoints `integration_id` too — there is still only one active Connection
+   * per provider at a time (ADR-0025).
    *
    * @param user - The writer whose session the callback arrived in.
    * @param provider - The Git Provider named in the path.
@@ -230,7 +245,7 @@ export class ConnectionsService {
     attempt: CompletionAttempt,
     fetchImpl?: typeof fetch,
   ): Promise<ConnectionRow> {
-    this.verifyState(user, provider, attempt);
+    const payload = this.verifyState(user, provider, attempt);
 
     if (attempt.error) {
       this.logger.info({ user_id: user.id, provider, error: attempt.error }, "connection declined at the provider");
@@ -243,7 +258,10 @@ export class ConnectionsService {
       throw new ConnectionStateInvalidError();
     }
 
-    const { oauth, integration } = await this.connectable(provider);
+    // The Integration is the one chosen and signed into the state at `start`
+    // time — not re-resolved from `provider` alone, which could now be
+    // ambiguous between several apps (ADR-0025).
+    const { oauth, integration } = await this.connectable(provider, payload.i);
     const tokens = await this.exchange(
       oauth,
       integration,
@@ -257,11 +275,12 @@ export class ConnectionsService {
     // write two different ciphertexts for the same secret, which is confusing
     // to anyone reading a stored row against this query.
     const grant = await this.grantColumns(tokens);
-    const [row] = await this.db
+    const rows = await this.db
       .insert(connections)
       .values({
         user_id: user.id,
         provider,
+        integration_id: integration.id,
         external_account_id: account.id,
         external_account_login: account.login,
         ...grant,
@@ -269,6 +288,7 @@ export class ConnectionsService {
       .onConflictDoUpdate({
         target: [connections.user_id, connections.provider],
         set: {
+          integration_id: integration.id,
           external_account_id: account.id,
           external_account_login: account.login,
           ...grant,
@@ -276,7 +296,7 @@ export class ConnectionsService {
         },
       })
       .returning();
-    if (!row) throw new Error("Upsert did not return the stored Connection.");
+    const row = firstRow(rows, "Connection upsert");
 
     this.logger.info(
       { user_id: user.id, provider, external_account_login: account.login },
@@ -294,7 +314,8 @@ export class ConnectionsService {
    * returns one either — the tokens exist only for the Registry to spend.
    *
    * @param userId - The User whose Connections to list.
-   * @returns One entry per Connection: provider, connected account, timestamps.
+   * @returns One entry per Connection: provider, which Integration it was
+   * granted through, connected account, timestamps.
    * @example
    * ```ts
    * const items = await connections.listForUser(user.id);
@@ -304,6 +325,7 @@ export class ConnectionsService {
     return this.db
       .select({
         provider: connections.provider,
+        integration_id: connections.integration_id,
         external_account_login: connections.external_account_login,
         created_at: connections.created_at,
         updated_at: connections.updated_at,
@@ -314,12 +336,15 @@ export class ConnectionsService {
   }
 
   /**
-   * The Git Providers a writer could connect on this Registry.
+   * The Integrations a writer could connect through on this Registry.
    *
    * @remarks
-   * An Integration whose provider has no credentialed flow is left out, so a
-   * GitLab Integration — which is legal, and useful for nothing here — never
-   * produces a Connect button that could only fail (ADR-0024).
+   * One entry per Integration, not per Git Provider (ADR-0025): a provider
+   * with two configured apps offers two entries, and the interface lets the
+   * writer pick between them. An Integration whose provider has no
+   * credentialed flow is left out, so a GitLab Integration — which is legal,
+   * and useful for nothing here — never produces a Connect button that could
+   * only fail (ADR-0024).
    *
    * Carries no credential. `display_name` comes from the Integration an Admin
    * named, so the button says what they called it.
@@ -330,7 +355,7 @@ export class ConnectionsService {
    * configured, which the interface must render as "ask an Admin" rather than
    * as a dead link.
    *
-   * @returns One entry per connectable Git Provider, oldest Integration first.
+   * @returns One entry per connectable Integration, oldest first.
    * @example
    * ```ts
    * const connectable = await connections.connectableProviders();
@@ -341,8 +366,10 @@ export class ConnectionsService {
     return configured
       .filter((integration) => gitProviderConfig(integration.provider).oauth !== null)
       .map((integration) => ({
+        id: integration.id,
         provider: integration.provider,
         display_name: integration.display_name,
+        app_slug: integration.app_slug,
         manage_access_url: this.manageAccessUrl(integration),
       }));
   }
@@ -454,7 +481,14 @@ export class ConnectionsService {
       throw new ConnectionExpiredError(provider);
     }
 
-    const { oauth, integration } = await this.connectable(provider);
+    // Refreshed against the app the grant was actually issued through
+    // (ADR-0025) — a sibling Integration for the same provider would hold a
+    // different client secret and could not refresh this token.
+    const integration = await this.integrations.findById(row.integration_id);
+    if (!integration) throw new IntegrationNotConfiguredError(provider);
+    const oauth = gitProviderConfig(provider).oauth;
+    if (!oauth) throw new ProviderNotConnectableError(provider);
+
     let tokens: { access_token: string } & TokenResponse;
     try {
       tokens = await this.exchange(
@@ -590,16 +624,31 @@ export class ConnectionsService {
   }
 
   /**
-   * The provider's credentialed flow and its Integration, or a refusal.
+   * The provider's credentialed flow and the Integration to use, or a refusal.
    *
+   * @remarks
+   * More than one Integration may exist for the provider (ADR-0025). When
+   * `integrationId` is given, it is resolved directly and checked against the
+   * provider — this is how `complete` re-resolves the exact app chosen at
+   * `start`, from the signed state, with no ambiguity possible. When it is
+   * omitted, every Integration for the provider is considered: none is an
+   * unconfigured provider, exactly one is used with nothing to choose, and more
+   * than one cannot be resolved without asking.
+   *
+   * @param integrationId - The Integration to use, when known already.
    * @throws ProviderNotConnectableError if the provider has no credentialed
    * flow — told apart from an unconfigured Integration because no Admin can
    * fix it, so sending the writer to ask one would be an errand that cannot
    * succeed.
-   * @throws IntegrationNotConfiguredError if no Integration is configured.
+   * @throws IntegrationNotConfiguredError if no Integration is configured for
+   * the provider, or `integrationId` names one that does not exist or belongs
+   * to a different provider.
+   * @throws IntegrationChoiceRequiredError if more than one Integration is
+   * configured for the provider and `integrationId` was not given.
    */
   private async connectable(
     provider: string,
+    integrationId?: string,
   ): Promise<{ oauth: GitProviderOAuth; integration: IntegrationRow }> {
     // Guarded before `gitProviderConfig`, which throws a plain `Error` for an
     // unknown name and would surface as a 500. The provider here is a path
@@ -609,10 +658,50 @@ export class ConnectionsService {
     const oauth = gitProviderConfig(provider).oauth;
     if (!oauth) throw new ProviderNotConnectableError(provider);
 
-    const integration = await this.integrations.find(provider);
-    if (!integration) throw new IntegrationNotConfiguredError(provider);
+    if (integrationId !== undefined) {
+      const integration = await this.integrations.findById(integrationId);
+      if (!integration || integration.provider !== provider) {
+        throw new IntegrationNotConfiguredError(provider);
+      }
+      return { oauth, integration };
+    }
 
-    return { oauth, integration };
+    const configured = await this.integrations.listByProvider(provider);
+    if (configured.length === 0) throw new IntegrationNotConfiguredError(provider);
+    if (configured.length > 1) throw new IntegrationChoiceRequiredError(provider);
+
+    return { oauth, integration: configured[0] as IntegrationRow };
+  }
+
+  /**
+   * The Integration a writer's Connection to a provider was granted through,
+   * or `undefined` if they hold none.
+   *
+   * @remarks
+   * Exists for diagnosis, not for the connect flow itself — an Import that
+   * fails because the app is not installed on a project's owner needs *that
+   * specific app's* slug to build an install link (ADR-0025), not an arbitrary
+   * Integration configured for the provider, which might be a different app
+   * with a different slug.
+   *
+   * @param userId - The User whose Connection to inspect.
+   * @param provider - The Git Provider to look under.
+   * @returns The Integration, or `undefined` if there is no Connection or its
+   * Integration has since been removed.
+   * @example
+   * ```ts
+   * const integration = await connections.integrationFor(user.id, "github");
+   * ```
+   */
+  async integrationFor(userId: string, provider: string): Promise<IntegrationRow | undefined> {
+    const [row] = await this.db
+      .select({ integration_id: connections.integration_id })
+      .from(connections)
+      .where(and(eq(connections.user_id, userId), eq(connections.provider, provider)))
+      .limit(1);
+    if (!row) return undefined;
+
+    return this.integrations.findById(row.integration_id);
   }
 
   /** Signs a state payload, url-safe and compact enough to travel in a query. */
@@ -624,11 +713,14 @@ export class ConnectionsService {
   /**
    * Verifies a callback's state against the caller and their browser.
    *
+   * @returns The state's payload, once every check has passed — in particular
+   * `i`, the Integration chosen at `start` time, which is how `complete`
+   * resolves the same app without asking the caller to name it again.
    * @throws ConnectionStateInvalidError on any failure. One error for all of
    * them on purpose: naming the failed check tells an attacker which part of
    * their forgery to fix, so the specific cause goes to the log instead.
    */
-  private verifyState(user: UserRow, provider: string, attempt: CompletionAttempt): void {
+  private verifyState(user: UserRow, provider: string, attempt: CompletionAttempt): StatePayload {
     const refuse = (reason: string) => {
       this.logger.info({ user_id: user.id, provider, reason }, "refused a connection callback");
       return new ConnectionStateInvalidError();
@@ -658,6 +750,8 @@ export class ConnectionsService {
     // cookie the route clears on every callback, so a replayed state — or one
     // lifted from a log and opened in another browser — has nothing to match.
     if (!attempt.nonce || attempt.nonce !== payload.n) throw refuse("nonce_mismatch");
+
+    return payload;
   }
 
   /** HMAC-SHA256 over the state's body, hex, under the signing secret. */

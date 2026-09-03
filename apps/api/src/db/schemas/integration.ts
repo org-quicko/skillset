@@ -1,8 +1,9 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
- * The Registry's registration with one Git Provider, holding the credential
- * pair a Connection is granted against (ADR-0024).
+ * The Registry's registration with a Git Provider, holding the credential
+ * pair a Connection is granted against (ADR-0024, ADR-0025).
  *
  * An Integration is not an Identity Provider, and this is deliberately not a
  * column on `identity_providers`. GitHub is reached through two separate
@@ -10,20 +11,26 @@ import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
  * and the two share nothing but a vendor. A GitLab row can exist here with no
  * `identity_providers` row at all, and vice versa.
  *
- * A row's existence is the only switch. Importing from a Git Provider is
- * available for exactly those providers with a row here; there is no
- * Admin-level flag above it, because an operator who wants no repository
- * credentials in the database simply does not create one (ADR-0024).
+ * A provider's row(s) existing is the only switch. Importing from a Git
+ * Provider is available for exactly those providers with at least one row
+ * here; there is no Admin-level flag above it, because an operator who wants
+ * no repository credentials in the database simply does not create one
+ * (ADR-0024).
+ *
+ * More than one Integration may exist for the same provider — two different
+ * GitHub Apps, say, for two different orgs — so `id` rather than `provider`
+ * is the row's identity (ADR-0025). A writer chooses which one to connect
+ * through; `connections.integration_id` records which app a grant came from.
  */
 export const integrations = pgTable("integrations", {
-  // The provider's own name, and the row's identity: `github`, `gitlab`. A
-  // plain text primary key rather than an enum, so adding a provider is an
-  // insert and not a migration (ADR-0024). The values it may take are the keys
-  // of `GIT_PROVIDERS` in `@skill-registry/shared`, checked in the service —
-  // Postgres constrains `connections.provider` against this column instead,
-  // which is what makes "you cannot connect to a provider this Registry has
-  // not registered" a database invariant.
-  provider: text("provider").primaryKey(),
+  id: uuid("id").primaryKey().default(sql`uuidv7()`),
+  // The Git Provider this app is for: `github`, `gitlab`. Plain text rather
+  // than an enum, so adding a provider is an insert and not a migration
+  // (ADR-0024). The values it may take are the keys of `GIT_PROVIDERS` in
+  // `@skill-registry/shared`, checked in the service. No longer unique — see
+  // ADR-0025 — so it carries no foreign key from `connections` any more;
+  // `connections.integration_id` references `id` instead.
+  provider: text("provider").notNull(),
   display_name: text("display_name").notNull(),
   client_id: text("client_id").notNull(),
   // Stored as given, following listmonk and `identity_providers` (ADR-0015).

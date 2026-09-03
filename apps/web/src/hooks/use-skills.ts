@@ -1,6 +1,7 @@
 import {
   buildSkillBundle,
   SkillDirectoryPageSchema,
+  SkillDirectoryStatsSchema,
   SkillPublishedSchema,
   SkillSchema,
   SkillWithArtifactUrlSchema,
@@ -11,7 +12,7 @@ import {
 } from "@skill-registry/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import { skillDirectoryQueryKey, skillQueryKey, skillsListQueryKey } from "@/lib/query-keys";
+import { skillDirectoryQueryKey, skillQueryKey, skillsListQueryKey, skillStatsQueryKey } from "@/lib/query-keys";
 
 export interface SkillDirectoryFilters {
   /** Trimmed before use; blank is treated as no search term. */
@@ -60,6 +61,26 @@ export function useSkillDirectory(filters: SkillDirectoryFilters) {
       const loaded = lastPage.page * lastPage.page_size;
       return loaded < lastPage.total ? lastPage.page + 1 : undefined;
     },
+  });
+}
+
+/**
+ * Fetches the Skill directory's hero stats: the total Skill count, the
+ * distinct Publisher count, and the total Install count across every Skill.
+ *
+ * @remarks
+ * Unfiltered — the same regardless of any search term or Tag selection in
+ * `useSkillDirectory`, unlike its own `total`. What the home page's stat
+ * cards read.
+ *
+ * @returns The TanStack Query result for `GET /skills/stats`.
+ * @example
+ * const stats = useSkillStats();
+ */
+export function useSkillStats() {
+  return useQuery({
+    queryKey: skillStatsQueryKey,
+    queryFn: () => apiFetch("/skills/stats", SkillDirectoryStatsSchema),
   });
 }
 
@@ -128,6 +149,7 @@ export function usePublishSkill() {
     },
     onSuccess: (skill) => {
       queryClient.invalidateQueries({ queryKey: skillsListQueryKey });
+      queryClient.invalidateQueries({ queryKey: skillStatsQueryKey });
       queryClient.setQueryData(skillQueryKey(skill.name), skill);
     },
   });
@@ -152,6 +174,7 @@ export function useDeleteSkill() {
       apiFetch(`/skills/${encodeURIComponent(id)}`, null, { method: "DELETE" }),
     onSuccess: (_data, { name }) => {
       queryClient.invalidateQueries({ queryKey: skillsListQueryKey });
+      queryClient.invalidateQueries({ queryKey: skillStatsQueryKey });
       queryClient.removeQueries({ queryKey: skillQueryKey(name) });
     },
   });

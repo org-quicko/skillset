@@ -39,8 +39,12 @@ const AppSlug = z
  * so no response can leak it, not even to the Admin who set it. There is no
  * public counterpart to this shape at all — unlike an Identity Provider, an
  * Integration draws no button on an unauthenticated page.
+ *
+ * `id`, not `provider`, is the row's identity: more than one Integration may
+ * exist for the same Git Provider (ADR-0025).
  */
 export const IntegrationSchema = z.object({
+  id: z.string(),
   provider: z.string(),
   display_name: z.string(),
   client_id: z.string(),
@@ -60,8 +64,9 @@ export type IntegrationList = z.infer<typeof IntegrationListSchema>;
  * `POST /integrations` request body.
  *
  * @remarks
- * `provider` is the row's identity, so there is at most one Integration per
- * Git Provider and a second is a conflict rather than an addition.
+ * More than one Integration may be created for the same `provider` (ADR-0025)
+ * — a second GitHub App, say — so this never conflicts on `provider` alone.
+ * The server assigns the row's actual identity, `id`.
  */
 export const IntegrationCreateSchema = z.object({
   provider: Provider,
@@ -74,13 +79,13 @@ export const IntegrationCreateSchema = z.object({
 export type IntegrationCreate = z.infer<typeof IntegrationCreateSchema>;
 
 /**
- * `PATCH /integrations/\{provider\}` request body.
+ * `PATCH /integrations/\{id\}` request body.
  *
  * @remarks
- * `provider` is absent on purpose: it is the Integration's identity, so
- * changing it would repoint an existing registration rather than create a new
- * one. Omitting `client_secret` leaves the stored one untouched, which is what
- * lets an Admin edit an Integration without being shown its secret.
+ * `provider` is absent on purpose: which Git Provider an app is for does not
+ * change once registered, only the app's own details do. Omitting
+ * `client_secret` leaves the stored one untouched, which is what lets an
+ * Admin edit an Integration without being shown its secret.
  *
  * `app_slug` distinguishes absent from `null`: omitting it leaves whatever is
  * stored, while sending `null` clears it.

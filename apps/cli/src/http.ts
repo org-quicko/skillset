@@ -1,26 +1,10 @@
-import { ErrorResponseSchema } from "@skill-registry/shared";
+import { ApiError, apiErrorFrom, parseApiResponse } from "@skill-registry/shared";
 import type { z } from "zod";
 
-/** Mirrors apps/web/src/lib/api.ts's ApiError — same shape, same source (the API's error body). */
-export class ApiError extends Error {
-  status: number;
-  code: string;
-  field?: string;
-
-  /**
-   * @param status - The HTTP status the Registry answered with.
-   * @param code - The API's own error code, e.g. `forbidden` — what callers branch on.
-   * @param message - The API's human-readable message, used as the `Error` message.
-   * @param field - The request field the failure relates to, when the API named one.
-   */
-  constructor(status: number, code: string, message: string, field?: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
-    this.field = field;
-  }
-}
+// Re-exported so the commands keep importing the error they catch from the
+// module they call — the class itself is shared with the web interface
+// (api-client.ts).
+export { ApiError };
 
 /** The registry couldn't be reached at all — a wrong URL or a dead network, not a rejected credential. */
 export class RegistryUnreachableError extends Error {
@@ -42,15 +26,6 @@ export interface RegistryClient {
   token?: string;
 }
 
-/** Decodes the API's error body into an `ApiError`, falling back to the status code when the body isn't one. */
-async function throwApiError(res: Response): Promise<never> {
-  const parsed = ErrorResponseSchema.safeParse(await res.json().catch(() => null));
-  const error = parsed.success
-    ? parsed.data.error
-    : { code: "unknown_error", message: `Request failed with status ${res.status}.`, field: undefined };
-  throw new ApiError(res.status, error.code, error.message, error.field);
-}
-
 function authHeaders(client: RegistryClient): Record<string, string> {
   return client.token ? { authorization: `Bearer ${client.token}` } : {};
 }
@@ -64,7 +39,7 @@ async function send(client: RegistryClient, path: string, init: RequestInit): Pr
     throw new RegistryUnreachableError(client.registry, error);
   }
 
-  if (!res.ok) await throwApiError(res);
+  if (!res.ok) throw await apiErrorFrom(res);
   return res;
 }
 
@@ -84,7 +59,10 @@ async function send(client: RegistryClient, path: string, init: RequestInit): Pr
  *
  * @remarks
  * Mirrors apps/web's `apiFetch`: a schema shapes the success response, and every failure
- * comes back as one of two typed errors (story 44).
+ * comes back as one of two typed errors (story 44). Decoding a refusal and parsing a
+ * success body are both `shared`'s, so the two clients cannot make different sense of the
+ * same response — what is left here is the Bearer Token and the transport failure, which
+ * is all a CLI does differently.
  *
  * @example
  * ```ts
@@ -106,8 +84,7 @@ export async function registryFetch<T>(
     },
   });
 
-  if (schema === null) return undefined as T;
-  return schema.parse(await res.json());
+  return parseApiResponse(res, schema);
 }
 
 /**

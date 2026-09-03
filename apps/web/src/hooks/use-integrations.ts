@@ -57,8 +57,8 @@ export function useCreateIntegration() {
 export function useUpdateIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ provider, body }: { provider: string; body: IntegrationUpdate }) =>
-      apiFetch(`/integrations/${provider}`, IntegrationSchema, {
+    mutationFn: ({ id, body }: { id: string; body: IntegrationUpdate }) =>
+      apiFetch(`/integrations/${id}`, IntegrationSchema, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),

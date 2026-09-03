@@ -55,7 +55,11 @@ export function registerConnectionRoutes(
   });
 
   app.get("/connections/:provider/start", requireAuth(deps), requireRole("writer"), async (c) => {
-    const { redirect_to, nonce } = await deps.connections.start(c.get("user"), c.req.param("provider"));
+    const { redirect_to, nonce } = await deps.connections.start(
+      c.get("user"),
+      c.req.param("provider"),
+      c.req.query("integration_id"),
+    );
 
     setCookie(c, STATE_COOKIE, nonce, {
       httpOnly: true,

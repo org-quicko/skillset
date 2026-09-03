@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { inArray, sql, sum } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { skillAnalytics, skillInstallEvents } from "../db/schemas/index.js";
 import type { Logger } from "../logger.js";
@@ -104,5 +104,31 @@ export class AnalyticsService {
   async getInstallCount(skillId: string): Promise<number> {
     const bySkill = await this.getInstallCountsBySkillIds([skillId]);
     return bySkill.get(skillId) ?? 0;
+  }
+
+  /**
+   * Sums install counts across every Skill, as of the last
+   * `refreshInstallCounts` — the registry-wide counterpart to
+   * `getInstallCount`, for the Skill directory's hero stats.
+   *
+   * @remarks
+   * A Skill with no recorded Install has no row in `skill_analytics` and
+   * simply contributes nothing to the sum, the same as it defaults to `0`
+   * everywhere else (ADR-0012).
+   *
+   * @returns The total Install count across every Skill.
+   * @example
+   * ```ts
+   * const totalInstalls = await analytics.getTotalInstallCount();
+   * ```
+   */
+  async getTotalInstallCount(): Promise<number> {
+    // `sum` maps to `string` (a bigint total could exceed safe integer range
+    // in principle) and reads SQL NULL over zero rows — coalesced back to
+    // `'0'` so an install-free Registry gets a count, not a parse of `null`.
+    const [row] = await this.db
+      .select({ total: sql<string>`coalesce(${sum(skillAnalytics.install_count)}, '0')` })
+      .from(skillAnalytics);
+    return Number(row?.total ?? 0);
   }
 }

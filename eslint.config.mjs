@@ -13,16 +13,40 @@ const unusedVarsRule = [
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/.claude/**", "**/drizzle/**"],
+    // `_ds` is a vendored design-system bundle, not source: 424 of the 429
+    // problems this config reported came from that one file, which is enough
+    // noise to hide every real finding and to leave `bun run lint` — and so
+    // `prebuild` — failing as its normal state.
+    ignores: ["**/dist/**", "**/node_modules/**", "**/.claude/**", "**/drizzle/**", "_ds/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: ["apps/api/**/*.ts", "apps/cli/**/*.ts", "packages/shared/**/*.ts"],
+    // A program to ask, so the rules below can see types. Not the whole
+    // `recommendedTypeChecked` preset: its `no-unsafe-*` rules fire on every
+    // `bun:test` call in this repo, whose types ESLint's program cannot
+    // resolve even though `tsc` does — a thousand findings, none of them real,
+    // which is how a lint config gets ignored.
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
     plugins: { tsdoc },
     rules: {
       "@typescript-eslint/no-unused-vars": unusedVarsRule,
       "tsdoc/syntax": "error",
+      // The two type-aware rules worth the program: a promise nobody awaited,
+      // and one passed where a boolean or a void callback was wanted. Neither
+      // is visible without types, or in review, and both are silent at
+      // runtime until the day the timing matters.
+      //
+      // `await-thenable` and `no-unnecessary-condition` are deliberately left
+      // off, not overlooked. Both report only false positives here today:
+      // ESLint's program does not resolve `bun:test`'s types (so every
+      // `await expect(...)` reads as awaiting a non-promise), and both
+      // `process.stdout.columns` and `Object.values` over an all-optional
+      // object are typed more narrowly than they behave. Turning them on would
+      // buy about fifty suppressions and no defects.
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
     },
   },
   {

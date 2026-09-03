@@ -42,8 +42,8 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
 
   const tabs: { label: string; section: Section; path: string }[] = [
     { label: "Profile", section: "profile", path: PROFILE_PATH },
-    ...(canManageUsers ? [{ label: "Users", section: "users" as const, path: USERS_PATH }] : []),
-    ...(canManageUsers ? [{ label: "Login", section: "login" as const, path: LOGIN_PATH }] : []),
+    ...(canManageUsers ? [{ label: "Team", section: "users" as const, path: USERS_PATH }] : []),
+    ...(canManageUsers ? [{ label: "OIDC", section: "login" as const, path: LOGIN_PATH }] : []),
     ...(canManageUsers
       ? [{ label: "Integrations", section: "integrations" as const, path: INTEGRATIONS_PATH }]
       : []),

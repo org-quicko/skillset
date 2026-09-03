@@ -1,5 +1,6 @@
 Prefer simple solutions always. Good systems tend to be simple in nature. Channel YAGNI
 Use typesafety. Avoid using `any` unless required
+Write tests for testing the behaviour.
 
 ## Agent skills
 
@@ -25,3 +26,5 @@ Exempt from the above: constructors, and methods whose body is a single statemen
 Always use claude in chrome for verification and debugging
 
 Use router instead of useState for navigating between pages
+
+To use python use `py` instead of `python3` or `python` in bash

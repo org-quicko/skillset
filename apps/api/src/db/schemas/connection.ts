@@ -22,14 +22,20 @@ export const connections = pgTable(
     user_id: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // References `integrations` rather than carrying a free string, which is
-    // what makes "you cannot connect to a provider this Registry has not
-    // registered" a database invariant. RESTRICT rather than CASCADE on
-    // purpose: removing an Integration that writers still hold Connections
-    // against must fail loudly, not silently drop their credentials.
-    provider: text("provider")
+    // The Git Provider this grant is for, denormalized from `integrations`:
+    // more than one Integration can exist per provider (ADR-0025), so this is
+    // a plain string rather than a foreign key — `integration_id` below is the
+    // real reference and is what makes "you cannot connect through an app this
+    // Registry has not registered" a database invariant.
+    provider: text("provider").notNull(),
+    // Which Integration (app) this grant was issued through — a writer picks
+    // one when more than one exists for the provider (ADR-0025). RESTRICT
+    // rather than CASCADE on purpose: removing an Integration that writers
+    // still hold Connections against must fail loudly, not silently drop
+    // their credentials.
+    integration_id: uuid("integration_id")
       .notNull()
-      .references(() => integrations.provider, { onDelete: "restrict" }),
+      .references(() => integrations.id, { onDelete: "restrict" }),
     // The provider's own id for the connected account, which survives a rename
     // where the login does not.
     external_account_id: text("external_account_id").notNull(),

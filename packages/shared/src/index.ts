@@ -5,6 +5,7 @@ export * from "./user.js";
 export * from "./setup.js";
 export * from "./auth.js";
 export * from "./error.js";
+export * from "./api-client.js";
 export * from "./token.js";
 export * from "./skill-rules.js";
 export * from "./skill.js";

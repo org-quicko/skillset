@@ -6,9 +6,10 @@ import {
 } from "@skill-registry/shared";
 import { asc, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
-import { isUniqueViolation } from "../db/pg-errors.js";
+import { firstRow } from "../db/rows.js";
+import { isInvalidIdSyntax } from "../db/pg-errors.js";
 import { connections, integrations, type IntegrationRow } from "../db/schemas/index.js";
-import { IntegrationNotFoundError, IntegrationProviderTakenError, ValidationError } from "../http/errors.js";
+import { IntegrationNotFoundError, ValidationError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
 
 /**
@@ -53,7 +54,7 @@ function assertAppSlugPresent(provider: string, appSlug: string | null): void {
 
 /**
  * Configured Integrations: the Registry's registrations with Git Providers
- * (ADR-0024).
+ * (ADR-0024, ADR-0025).
  *
  * @remarks
  * There is no `listEnabled` counterpart and no public shape. An Identity
@@ -61,6 +62,9 @@ function assertAppSlugPresent(provider: string, appSlug: string | null): void {
  * page; an Integration draws nothing, and its mere existence is what makes
  * Importing available — so the only reader is an Admin, and the import service
  * asking whether a row exists.
+ *
+ * More than one Integration may exist per Git Provider (ADR-0025): `id`, not
+ * `provider`, is a row's identity.
  */
 export class IntegrationsService {
   constructor(
@@ -80,45 +84,72 @@ export class IntegrationsService {
   }
 
   /**
-   * The Integration for a Git Provider, or `undefined` when none is
-   * configured.
+   * The Integration by its id, or `undefined` when there is none.
    *
    * @remarks
    * Read per use rather than cached, so creating or editing an Integration
-   * takes effect on the next request with no restart (ADR-0019). A missing row
-   * is the answer "Importing is not available for this provider", which is a
-   * configuration and not an error — hence `undefined` rather than a throw.
+   * takes effect on the next request with no restart (ADR-0019). A malformed
+   * id can never match a row, so it is treated the same as a missing one
+   * rather than surfacing Postgres's syntax error.
    *
-   * @param provider - The Git Provider name.
+   * @param id - The Integration's id.
    * @returns The row, including its `client_secret`, or `undefined`.
    * @example
    * ```ts
-   * const integration = await integrations.find("github");
-   * if (!integration) throw new IntegrationNotConfiguredError("github");
+   * const integration = await integrations.findById(id);
+   * if (!integration) throw new IntegrationNotConfiguredError(provider);
    * ```
    */
-  async find(provider: string): Promise<IntegrationRow | undefined> {
-    const [row] = await this.db
-      .select()
-      .from(integrations)
-      .where(eq(integrations.provider, provider))
-      .limit(1);
-    return row;
+  async findById(id: string): Promise<IntegrationRow | undefined> {
+    try {
+      const [row] = await this.db.select().from(integrations).where(eq(integrations.id, id)).limit(1);
+      return row;
+    } catch (error) {
+      if (isInvalidIdSyntax(error)) return undefined;
+      throw error;
+    }
   }
 
   /**
-   * Registers a Git Provider with this Registry.
+   * Every Integration configured for a Git Provider, oldest first.
    *
    * @remarks
-   * Creating the row is what makes Importing available for that provider —
-   * there is no separate switch, deliberately (ADR-0024). An operator who
-   * wants this Registry to hold no repository credentials for anybody does not
-   * create the row, and that is the off switch.
+   * More than one may exist (ADR-0025) — two different GitHub Apps, say — so
+   * this returns a list rather than at most one row. Empty means "Importing is
+   * not available for this provider", which is a configuration and not an
+   * error.
+   *
+   * @param provider - The Git Provider name.
+   * @returns Every Integration configured for it, oldest first.
+   * @example
+   * ```ts
+   * const configured = await integrations.listByProvider("github");
+   * if (configured.length === 0) throw new IntegrationNotConfiguredError("github");
+   * ```
+   */
+  async listByProvider(provider: string): Promise<IntegrationRow[]> {
+    return this.db
+      .select()
+      .from(integrations)
+      .where(eq(integrations.provider, provider))
+      .orderBy(asc(integrations.created_at));
+  }
+
+  /**
+   * Registers an app with a Git Provider on this Registry.
+   *
+   * @remarks
+   * Creating the first row for a provider is what makes Importing available
+   * for it — there is no separate switch, deliberately (ADR-0024). An operator
+   * who wants this Registry to hold no repository credentials for anybody does
+   * not create one, and that is the off switch.
+   *
+   * More than one Integration may be created for the same provider (ADR-0025)
+   * — a second GitHub App, say — and a writer chooses which one to connect
+   * through.
    *
    * @param input - The provider, display name, credential pair, and app slug.
    * @returns The created row, including its `client_secret`.
-   * @throws IntegrationProviderTakenError if that Git Provider already has an
-   * Integration.
    * @throws ValidationError if the provider's installation URL is built from an
    * app slug and none was supplied.
    * @example
@@ -135,28 +166,23 @@ export class IntegrationsService {
   async create(input: IntegrationCreate): Promise<IntegrationRow> {
     assertAppSlugPresent(input.provider, input.app_slug ?? null);
 
-    try {
-      const [created] = await this.db
-        .insert(integrations)
-        .values({
-          provider: input.provider,
-          display_name: input.display_name,
-          client_id: input.client_id,
-          client_secret: input.client_secret,
-          app_slug: input.app_slug ?? null,
-        })
-        .returning();
-      if (!created) throw new Error("Insert did not return the created Integration.");
+    const inserted = await this.db
+      .insert(integrations)
+      .values({
+        provider: input.provider,
+        display_name: input.display_name,
+        client_id: input.client_id,
+        client_secret: input.client_secret,
+        app_slug: input.app_slug ?? null,
+      })
+      .returning();
+    const created = firstRow(inserted, "Integration insert");
 
-      this.logger.info(
-        { provider: created.provider },
-        "integration created — importing is now available for this git provider",
-      );
-      return created;
-    } catch (error) {
-      if (isUniqueViolation(error)) throw new IntegrationProviderTakenError();
-      throw error;
-    }
+    this.logger.info(
+      { integration_id: created.id, provider: created.provider },
+      "integration created — importing is now available for this git provider",
+    );
+    return created;
   }
 
   /**
@@ -183,35 +209,42 @@ export class IntegrationsService {
    * to the app, not to the grant, so existing tokens stay valid and dropping
    * them would cost every writer a reconnection for nothing.
    *
-   * @param provider - The Git Provider whose Integration to change.
+   * @param id - The Integration's id.
    * @param input - The fields to change; anything absent is left as it is.
    * @returns The updated row.
-   * @throws IntegrationNotFoundError if that Git Provider has no Integration.
+   * @throws IntegrationNotFoundError if no Integration exists by that id.
    * @throws ValidationError if clearing `app_slug` would leave a provider whose
    * installation URL is built from one without it.
    * @example
    * ```ts
    * // Rotating a secret keeps every Connection.
-   * await integrations.update("github", { client_secret: "…" });
-   * // Pointing at another app drops them all; writers must reconnect.
-   * await integrations.update("github", { client_id: "Iv23li…", client_secret: "…" });
+   * await integrations.update(id, { client_secret: "…" });
+   * // Pointing at another app drops the Connections made through it; writers
+   * // holding one through a *different* Integration for the same provider are
+   * // untouched.
+   * await integrations.update(id, { client_id: "Iv23li…", client_secret: "…" });
    * ```
    */
-  async update(provider: string, input: IntegrationUpdate): Promise<IntegrationRow> {
-    // Checked here rather than in the request schema: `provider` is a path
-    // parameter, so Zod cannot see which provider the body is being applied to.
-    if (input.app_slug === null) assertAppSlugPresent(provider, null);
-
+  async update(id: string, input: IntegrationUpdate): Promise<IntegrationRow> {
     return this.db.transaction(async (tx) => {
       // Read before writing, and inside the transaction: `RETURNING` reports
       // the row as it now is, and telling a repoint from a no-op re-save of
-      // the same value needs the `client_id` as it was.
-      const [existing] = await tx
-        .select({ client_id: integrations.client_id })
-        .from(integrations)
-        .where(eq(integrations.provider, provider))
-        .limit(1);
+      // the same value needs the `client_id` as it was. `provider` is read too
+      // — the row's identity is `id`, but `assertAppSlugPresent` still needs to
+      // know which provider's rules apply.
+      let existing: { provider: string; client_id: string } | undefined;
+      try {
+        [existing] = await tx
+          .select({ provider: integrations.provider, client_id: integrations.client_id })
+          .from(integrations)
+          .where(eq(integrations.id, id))
+          .limit(1);
+      } catch (error) {
+        if (!isInvalidIdSyntax(error)) throw error;
+      }
       if (!existing) throw new IntegrationNotFoundError();
+
+      if (input.app_slug === null) assertAppSlugPresent(existing.provider, null);
 
       const [updated] = await tx
         .update(integrations)
@@ -222,21 +255,21 @@ export class IntegrationsService {
           ...(input.app_slug !== undefined ? { app_slug: input.app_slug } : {}),
           updated_at: new Date(),
         })
-        .where(eq(integrations.provider, provider))
+        .where(eq(integrations.id, id))
         .returning();
       if (!updated) throw new IntegrationNotFoundError();
 
-      this.logger.info({ provider: updated.provider }, "integration updated");
+      this.logger.info({ integration_id: id, provider: updated.provider }, "integration updated");
 
       if (input.client_id !== undefined && input.client_id !== existing.client_id) {
         const cleared = await tx
           .delete(connections)
-          .where(eq(connections.provider, provider))
+          .where(eq(connections.integration_id, id))
           .returning({ id: connections.id });
 
         if (cleared.length > 0) {
           this.logger.warn(
-            { provider, cleared: cleared.length },
+            { integration_id: id, cleared: cleared.length },
             "integration repointed at another app, so its connections were cleared and writers must reconnect",
           );
         }

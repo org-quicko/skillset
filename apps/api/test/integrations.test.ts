@@ -17,6 +17,7 @@ interface ApiError {
 }
 
 interface ApiIntegration {
+  id: string;
   provider: string;
   display_name: string;
   client_id: string;
@@ -98,7 +99,7 @@ describe("Integrations (ADR-0024)", () => {
   });
 
   async function clearIntegrations() {
-    // Connections reference `integrations.provider` with RESTRICT, so they go
+    // Connections reference `integrations.id` with RESTRICT, so they go
     // first — that FK exists precisely so a live Integration cannot be removed
     // out from under a writer's grant.
     await context.db.delete(connections);
@@ -113,8 +114,14 @@ describe("Integrations (ADR-0024)", () => {
     });
   }
 
-  function patch(cookie: string, provider: string, body: Record<string, unknown>) {
-    return context.app.request(`/api/integrations/${provider}`, {
+  /** Creates an Integration and returns its id, for tests that only need one to edit. */
+  async function created(cookie: string, body: Record<string, unknown> = {}): Promise<string> {
+    const res = await post(cookie, integrationBody(body));
+    return ((await res.json()) as ApiIntegration).id;
+  }
+
+  function patch(cookie: string, id: string, body: Record<string, unknown>) {
+    return context.app.request(`/api/integrations/${id}`, {
       method: "PATCH",
       headers: { cookie, "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -157,15 +164,24 @@ describe("Integrations (ADR-0024)", () => {
       expect(JSON.stringify(body)).not.toContain("client-secret");
     });
 
-    it("refuses a second Integration for the same Git Provider", async () => {
+    it("allows a second Integration for the same Git Provider (ADR-0025)", async () => {
       await clearIntegrations();
-      expect((await post(admin.cookie, integrationBody())).status).toBe(201);
+      const first = await post(admin.cookie, integrationBody());
+      expect(first.status).toBe(201);
 
       const res = await post(admin.cookie, integrationBody({ display_name: "GitHub again" }));
-      expect(res.status).toBe(409);
-      const body = (await res.json()) as ApiError;
-      expect(body.error.code).toBe("provider_taken");
-      expect(body.error.field).toBe("provider");
+      expect(res.status).toBe(201);
+      const second = (await res.json()) as ApiIntegration;
+      const firstId = ((await first.json()) as ApiIntegration).id;
+      // Two distinct rows, each addressable by its own id — `provider` is no
+      // longer the row's identity.
+      expect(second.id).not.toBe(firstId);
+      expect(second.provider).toBe("github");
+
+      const items = ((await (await context.app.request("/api/integrations", { headers: { cookie: admin.cookie } })).json()) as {
+        items: ApiIntegration[];
+      }).items;
+      expect(items.map((item) => item.id).sort()).toEqual([firstId, second.id].sort());
     });
 
     it("accepts a provider with no installation step, whose app slug is null", async () => {
@@ -199,9 +215,9 @@ describe("Integrations (ADR-0024)", () => {
 
     it("refuses clearing an app slug the install URL still needs", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody());
+      const id = await created(admin.cookie);
 
-      const res = await patch(admin.cookie, "github", { app_slug: null });
+      const res = await patch(admin.cookie, id, { app_slug: null });
       expect(res.status).toBe(400);
       expect((await context.db.select().from(integrations))[0]?.app_slug).toBe("acme-skill-registry");
     });
@@ -238,9 +254,9 @@ describe("Integrations (ADR-0024)", () => {
   describe("editing", () => {
     it("changes a field and leaves the client secret alone when it is omitted", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ client_secret: "original-secret" }));
+      const id = await created(admin.cookie, { client_secret: "original-secret" });
 
-      const res = await patch(admin.cookie, "github", { display_name: "GitHub (work)" });
+      const res = await patch(admin.cookie, id, { display_name: "GitHub (work)" });
       expect(res.status).toBe(200);
       expect(((await res.json()) as ApiIntegration).display_name).toBe("GitHub (work)");
 
@@ -250,9 +266,9 @@ describe("Integrations (ADR-0024)", () => {
 
     it("replaces the client secret when one is given", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ client_secret: "original-secret" }));
+      const id = await created(admin.cookie, { client_secret: "original-secret" });
 
-      expect((await patch(admin.cookie, "github", { client_secret: "rotated-secret" })).status).toBe(200);
+      expect((await patch(admin.cookie, id, { client_secret: "rotated-secret" })).status).toBe(200);
 
       const [row] = await context.db.select().from(integrations);
       expect(row?.client_secret).toBe("rotated-secret");
@@ -260,25 +276,26 @@ describe("Integrations (ADR-0024)", () => {
 
     it("leaves an app slug alone when the field is omitted", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ app_slug: "acme-registry" }));
+      const id = await created(admin.cookie, { app_slug: "acme-registry" });
 
-      expect((await patch(admin.cookie, "github", { display_name: "GitHub" })).status).toBe(200);
+      expect((await patch(admin.cookie, id, { display_name: "GitHub" })).status).toBe(200);
       expect((await context.db.select().from(integrations))[0]?.app_slug).toBe("acme-registry");
     });
 
     it("cannot repoint an Integration at a different Git Provider", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody());
+      const id = await created(admin.cookie);
 
-      // `provider` is the row's identity, so the schema has no such field and
-      // sending one changes nothing rather than moving the registration.
-      expect((await patch(admin.cookie, "github", { provider: "gitlab" })).status).toBe(200);
+      // `provider` is not on the update schema at all, so the schema has no
+      // such field and sending one changes nothing rather than moving the
+      // registration.
+      expect((await patch(admin.cookie, id, { provider: "gitlab" })).status).toBe(200);
       expect((await context.db.select().from(integrations))[0]?.provider).toBe("github");
     });
 
-    it("refuses an edit to a Git Provider with no Integration", async () => {
+    it("refuses an edit to an id with no Integration", async () => {
       await clearIntegrations();
-      const res = await patch(admin.cookie, "gitlab", { display_name: "GitLab" });
+      const res = await patch(admin.cookie, "00000000-0000-0000-0000-000000000000", { display_name: "GitLab" });
 
       expect(res.status).toBe(404);
       expect(((await res.json()) as ApiError).error.code).toBe("not_found");
@@ -286,8 +303,8 @@ describe("Integrations (ADR-0024)", () => {
 
     it("takes effect on the next read, with no restart", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ client_id: "before" }));
-      await patch(admin.cookie, "github", { client_id: "after" });
+      const id = await created(admin.cookie, { client_id: "before" });
+      await patch(admin.cookie, id, { client_id: "after" });
 
       // Credentials are read per use (ADR-0019), so the next reader sees the edit.
       const res = await context.app.request("/api/integrations", { headers: { cookie: admin.cookie } });
@@ -302,11 +319,12 @@ describe("Integrations (ADR-0024)", () => {
    * interface says the remedy has already been taken.
    */
   describe("repointing an Integration at a different app", () => {
-    async function seedConnection() {
+    async function seedConnection(integrationId: string) {
       const [user] = await context.db.select().from(users).where(eq(users.email, "ada@example.com"));
       await context.db.insert(connections).values({
         user_id: user?.id ?? "",
         provider: "github",
+        integration_id: integrationId,
         external_account_id: "1",
         external_account_login: "ada-work",
         access_token: "ciphertext",
@@ -315,31 +333,31 @@ describe("Integrations (ADR-0024)", () => {
 
     it("clears the connections held against it, because their tokens are dead", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ client_id: "Iv1.first-app" }));
-      await seedConnection();
+      const id = await created(admin.cookie, { client_id: "Iv1.first-app" });
+      await seedConnection(id);
 
-      expect((await patch(admin.cookie, "github", { client_id: "Iv1.second-app" })).status).toBe(200);
+      expect((await patch(admin.cookie, id, { client_id: "Iv1.second-app" })).status).toBe(200);
       expect(await context.db.select().from(connections)).toEqual([]);
     });
 
     it("keeps them when only the secret is rotated", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ client_id: "Iv1.first-app" }));
-      await seedConnection();
+      const id = await created(admin.cookie, { client_id: "Iv1.first-app" });
+      await seedConnection(id);
 
       // A secret belongs to the app, not to the grant: the tokens stay valid,
       // so dropping them would cost every writer a reconnection for nothing.
-      expect((await patch(admin.cookie, "github", { client_secret: "rotated" })).status).toBe(200);
+      expect((await patch(admin.cookie, id, { client_secret: "rotated" })).status).toBe(200);
       expect(await context.db.select().from(connections)).toHaveLength(1);
     });
 
     it("keeps them when the same client id is re-saved", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody({ client_id: "Iv1.first-app" }));
-      await seedConnection();
+      const id = await created(admin.cookie, { client_id: "Iv1.first-app" });
+      await seedConnection(id);
 
       // Re-saving an unchanged form must not be destructive.
-      expect((await patch(admin.cookie, "github", { client_id: "Iv1.first-app" })).status).toBe(200);
+      expect((await patch(admin.cookie, id, { client_id: "Iv1.first-app" })).status).toBe(200);
       expect(await context.db.select().from(connections)).toHaveLength(1);
     });
   });
@@ -347,14 +365,14 @@ describe("Integrations (ADR-0024)", () => {
   describe("who may configure one", () => {
     it("refuses a writer and a reader on every route", async () => {
       await clearIntegrations();
-      await post(admin.cookie, integrationBody());
+      const id = await created(admin.cookie);
 
       for (const session of [writer, reader]) {
         expect((await context.app.request("/api/integrations", { headers: { cookie: session.cookie } })).status).toBe(
           403,
         );
         expect((await post(session.cookie, integrationBody({ provider: "gitlab" }))).status).toBe(403);
-        expect((await patch(session.cookie, "github", { display_name: "nope" })).status).toBe(403);
+        expect((await patch(session.cookie, id, { display_name: "nope" })).status).toBe(403);
       }
     });
 

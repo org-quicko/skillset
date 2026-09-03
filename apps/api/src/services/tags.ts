@@ -1,6 +1,7 @@
 import { validateTagName, validateTagNames } from "@skill-registry/shared";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "../db/client.js";
+import { firstRow } from "../db/rows.js";
 import { isInvalidIdSyntax, isUniqueViolation } from "../db/pg-errors.js";
 import { skillTags, skills, tags } from "../db/schemas/index.js";
 import { SkillNotFoundError, TagNameConflictError, TagNotFoundError } from "../http/errors.js";
@@ -128,13 +129,12 @@ export class TagsService {
     const resolved = await this.db.transaction(async (tx) => {
       const resolvedTags: TagSummary[] = [];
       for (const name of names) {
-        const [row] = await tx
+        const upserted = await tx
           .insert(tags)
           .values({ name })
           .onConflictDoUpdate({ target: tags.name, set: { name, updated_at: new Date() } })
           .returning({ id: tags.id, name: tags.name });
-        if (!row) throw new Error("Upsert did not return the Tag.");
-        resolvedTags.push(row);
+        resolvedTags.push(firstRow(upserted, "Tag upsert"));
       }
 
       await tx.delete(skillTags).where(eq(skillTags.skill_id, skillId));

@@ -4,6 +4,7 @@ import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
 import { advisoryLockKey } from "../db/advisory-lock.js";
 import type { Database } from "../db/client.js";
+import { firstRow } from "../db/rows.js";
 import { users, type UserRow } from "../db/schemas/index.js";
 import { AlreadyInitializedError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
@@ -57,7 +58,7 @@ export class SetupService {
         return null;
       }
 
-      const [created] = await tx
+      const inserted = await tx
         .insert(users)
         .values({
           first_name: input.first_name,
@@ -70,7 +71,7 @@ export class SetupService {
           role: "superadmin",
         })
         .returning();
-      if (!created) throw new Error("Insert did not return the created User.");
+      const created = firstRow(inserted, "Superadmin insert");
 
       // Inside the transaction: a superadmin with no credential is an instance
       // nobody can log into and no route can repair.

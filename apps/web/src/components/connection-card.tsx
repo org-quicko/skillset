@@ -1,4 +1,4 @@
-import type { Connection } from "@skill-registry/shared";
+import { GIT_PROVIDERS, type ConnectableProvider, type Connection } from "@skill-registry/shared";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
 import { connectHref, useConnections, useDisconnect } from "@/hooks/use-connections";
@@ -19,28 +19,34 @@ const DISCONNECT_COPY =
   "Disconnecting stops this Registry using the grant. It does not withdraw it at the provider — " +
   "to do that, remove this app from your account there.";
 
+/** What an entry calls itself: the app slug — what actually tells two apps for the same provider apart (ADR-0025) — falling back to its display name when there is none set yet. */
+function entryLabel(entry: ConnectableProvider): string {
+  return entry.app_slug ?? entry.display_name;
+}
+
 function ConnectedRow({
   connection,
-  displayName,
-  manageAccessUrl,
+  entry,
   onDisconnect,
   isPending,
 }: {
   connection: Connection;
-  displayName: string;
-  manageAccessUrl: string | null;
+  entry: ConnectableProvider;
   onDisconnect: () => void;
   isPending: boolean;
 }) {
+  const label = entryLabel(entry);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col">
           <span className="text-sm font-medium">
-            {displayName} · {connection.external_account_login}
+            {label} · {connection.external_account_login}
           </span>
           <span className="text-xs text-muted-foreground">
-            Connected {formatMoment(connection.created_at)}
+            {entry.display_name} · {GIT_PROVIDERS[entry.provider]?.display_name ?? entry.provider} · Connected{" "}
+            {formatMoment(connection.created_at)}
           </span>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -48,9 +54,9 @@ function ConnectedRow({
               repositories grants no credential, so nothing here waits on a
               return. It is the fix for "the app cannot see that project", and
               so is offered while connected. */}
-          {manageAccessUrl && (
+          {entry.manage_access_url && (
             <Button asChild variant="outline" size="sm">
-              <a href={manageAccessUrl} target="_blank" rel="noreferrer">
+              <a href={entry.manage_access_url} target="_blank" rel="noreferrer">
                 Change repositories
               </a>
             </Button>
@@ -62,9 +68,9 @@ function ConnectedRow({
       </div>
       {/* Shown only when there is no link to offer, so the writer is told why
           the action is missing rather than left to wonder. */}
-      {!manageAccessUrl && (
+      {!entry.manage_access_url && (
         <p className="text-xs text-muted-foreground">
-          Choosing repositories needs an app slug on the {displayName} integration, which is not set. An
+          Choosing repositories needs an app slug on the {label} integration, which is not set. An
           administrator configures it under Integrations.
         </p>
       )}
@@ -73,16 +79,20 @@ function ConnectedRow({
   );
 }
 
-function ConnectRow({ provider, displayName }: { provider: string; displayName: string }) {
+function ConnectRow({ entry }: { entry: ConnectableProvider }) {
+  const label = entryLabel(entry);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col">
-          <span className="text-sm font-medium">{displayName}</span>
-          <span className="text-xs text-muted-foreground">Not connected.</span>
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-xs text-muted-foreground">
+            {entry.display_name} · {GIT_PROVIDERS[entry.provider]?.display_name ?? entry.provider} · Not connected.
+          </span>
         </div>
         <Button asChild size="sm" className="shrink-0">
-          <a href={connectHref(provider)}>Connect {displayName}</a>
+          <a href={connectHref(entry.provider, entry.id)}>Connect</a>
         </Button>
       </div>
       {/* Told before connecting, not after: handing over repository access
@@ -104,6 +114,10 @@ function ConnectRow({ provider, displayName }: { provider: string; displayName: 
  * connect or withdraw one (ADR-0024).
  *
  * @remarks
+ * One entry per Integration (app), not per Git Provider (ADR-0025), labeled
+ * by its app slug — the thing that actually tells two apps for the same
+ * provider apart, unlike a display name an Admin need not have kept unique.
+ *
  * Not offered to a reader at all — the settings page hides the whole section
  * below `writer`, and the API refuses them anyway. Inviting a reader to grant
  * a credential they could never use would be worse than useless.
@@ -116,11 +130,13 @@ export function ConnectionCard() {
   const connections = useConnections();
   const disconnect = useDisconnect();
 
-  const byProvider = new Map(connections.data?.items.map((item) => [item.provider, item]));
+  // One Connection per provider (ADR-0025) — which of a provider's several
+  // Integrations it runs through is `integration_id`.
+  const byIntegrationId = new Map(connections.data?.items.map((item) => [item.integration_id, item]));
   const connectable = connections.data?.connectable ?? [];
 
   return (
-    <div className="flex max-w-xl flex-col gap-3.5">
+    <div className="flex flex-col gap-3.5">
       <div className="flex flex-col gap-1">
         <h2 className="text-sm font-medium">Connections</h2>
         <p className="text-xs text-muted-foreground">
@@ -141,20 +157,19 @@ export function ConnectionCard() {
         </Panel>
       )}
 
-      {connectable.map(({ provider, display_name, manage_access_url }) => {
-        const connection = byProvider.get(provider);
+      {connectable.map((entry) => {
+        const connection = byIntegrationId.get(entry.id);
         return (
-          <Panel key={provider}>
+          <Panel key={entry.id}>
             {connection ? (
               <ConnectedRow
                 connection={connection}
-                displayName={display_name}
-                manageAccessUrl={manage_access_url}
-                isPending={disconnect.isPending && disconnect.variables === provider}
-                onDisconnect={() => disconnect.mutate(provider)}
+                entry={entry}
+                isPending={disconnect.isPending && disconnect.variables === entry.provider}
+                onDisconnect={() => disconnect.mutate(entry.provider)}
               />
             ) : (
-              <ConnectRow provider={provider} displayName={display_name} />
+              <ConnectRow entry={entry} />
             )}
           </Panel>
         );

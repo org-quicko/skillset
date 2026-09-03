@@ -12,7 +12,7 @@ import {
 } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
-import { ValidationError } from "../http/errors.js";
+import { parseBody } from "../http/body.js";
 import type { UsersService } from "../services/users.js";
 
 export type UsersRouteDependencies = AuthDependencies & { users: UsersService };
@@ -30,12 +30,8 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
   });
 
   app.post("/users", requireAuth(deps), requireRole("admin"), async (c) => {
-    const parsed = UserCreateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      throw new ValidationError("first_name, last_name, email, and role are required.");
-    }
-
-    const result = await deps.users.create(parsed.data);
+    const input = await parseBody(c, UserCreateSchema, "first_name, last_name, email, and role are required.");
+    const result = await deps.users.create(input);
     return c.json(UserCreatedSchema.parse(result), 201);
   });
 
@@ -53,12 +49,8 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
   );
 
   app.patch("/users/me", requireAuth(deps), async (c) => {
-    const parsed = UserUpdateNameSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      throw new ValidationError("first_name or last_name is required.");
-    }
-
-    const updated = await deps.users.updateOwnName(c.get("user"), parsed.data);
+    const input = await parseBody(c, UserUpdateNameSchema, "first_name or last_name is required.");
+    const updated = await deps.users.updateOwnName(c.get("user"), input);
     return c.json(UserSchema.parse(updated));
   });
 
@@ -68,12 +60,12 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
     // while that flag is still set (docs/data-model.md).
     requireAuth(deps, { allowPendingPasswordChange: true }),
     async (c) => {
-      const parsed = PasswordReplaceSchema.safeParse(await c.req.json().catch(() => null));
-      if (!parsed.success) {
-        throw new ValidationError("current_password and new_password (at least 12 characters) are required.");
-      }
-
-      await deps.users.replaceOwnPassword(c.get("user"), parsed.data);
+      const input = await parseBody(
+        c,
+        PasswordReplaceSchema,
+        "current_password and new_password (at least 12 characters) are required.",
+      );
+      await deps.users.replaceOwnPassword(c.get("user"), input);
       return c.body(null, 204);
     },
   );
@@ -88,12 +80,8 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
   });
 
   app.post("/users/me/tokens", requireAuth(deps), async (c) => {
-    const parsed = TokenMintSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      throw new ValidationError("name is required.", "name");
-    }
-
-    const { token, secret } = await deps.users.mintToken(c.get("user"), parsed.data.name);
+    const input = await parseBody(c, TokenMintSchema, "name is required.");
+    const { token, secret } = await deps.users.mintToken(c.get("user"), input.name);
     return c.json(TokenCreatedSchema.parse({ ...token, secret }), 201);
   });
 
@@ -103,12 +91,8 @@ export function registerUsersRoutes(app: Hono<{ Variables: AuthVariables }>, dep
   });
 
   app.patch("/users/:user_id", requireAuth(deps), requireRole("admin"), async (c) => {
-    const parsed = UserRoleUpdateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      throw new ValidationError("role is required.", "role");
-    }
-
-    const updated = await deps.users.updateRole(c.get("user"), c.req.param("user_id"), parsed.data.role);
+    const input = await parseBody(c, UserRoleUpdateSchema, "role is required.");
+    const updated = await deps.users.updateRole(c.get("user"), c.req.param("user_id"), input.role);
     return c.json(UserSchema.parse(updated));
   });
 

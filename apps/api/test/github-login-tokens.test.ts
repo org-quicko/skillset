@@ -223,16 +223,20 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
     it("leaves a Connection untouched, so a writer who connected can still import", async () => {
       await context.db.delete(connections);
       await context.db.delete(integrations);
-      await context.db.insert(integrations).values({
-        provider: "github",
-        display_name: "GitHub",
-        client_id: "Iv1.client",
-        client_secret: "the-secret",
-        app_slug: "acme-registry",
-      });
+      const [integration] = await context.db
+        .insert(integrations)
+        .values({
+          provider: "github",
+          display_name: "GitHub",
+          client_id: "Iv1.client",
+          client_secret: "the-secret",
+          app_slug: "acme-registry",
+        })
+        .returning();
       await context.db.insert(connections).values({
         user_id: writer.id,
         provider: "github",
+        integration_id: integration?.id ?? "",
         external_account_id: "1",
         external_account_login: "ada-work",
         access_token: "ciphertext",

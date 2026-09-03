@@ -43,6 +43,13 @@
       "when": 1788339540901,
       "tag": "0005_forget_github_login_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788437799461,
+      "tag": "0006_polite_ultimatum",
+      "breakpoints": true
     }
   ]
 }

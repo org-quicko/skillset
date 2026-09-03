@@ -1,13 +1,21 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SearchIcon, UploadIcon, XIcon } from "lucide-react";
 import { SkillList } from "@/components/skill-list";
 import { TagFilter } from "@/components/tag-filter";
 import { Button } from "@/components/ui/button";
-import { useSkillDirectory, type SkillDirectoryFilters } from "@/hooks/use-skills";
+import { useSkillStats, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useTags } from "@/hooks/use-tags";
 
-/** Filters with nothing selected — what the hero's Skill count is always taken against, so it doesn't move as the reader searches. */
-const UNFILTERED: SkillDirectoryFilters = { q: "", tagIds: [], sortBy: "installs", sortOrder: "desc" };
+/**
+ * How long typing has to pause before the search term reaches the URL.
+ *
+ * @remarks
+ * The URL is the query key, so every value that lands there costs one request.
+ * Without this the field issued one per keystroke and the reader watched a
+ * table redraw under their fingers; the field itself stays immediate, because
+ * only the push downstream is delayed.
+ */
+const SEARCH_DEBOUNCE_MS = 300;
 
 /**
  * The masked dot grid behind the hero (1px dots, 20px grid, fading in
@@ -20,6 +28,18 @@ const DOT_GRID_STYLE: React.CSSProperties = {
   WebkitMaskImage: "linear-gradient(to right, transparent 20%, #000 100%)",
   maskImage: "linear-gradient(to right, transparent 20%, #000 100%)",
 };
+
+/** One of the hero's stat cards — a count and its label, singular below 2. */
+function HeroStat({ value, singular, plural }: { value: number; singular: string; plural: string }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-1 rounded-lg border bg-card px-5 py-3.5">
+      <span className="text-[22px] font-medium">{value.toLocaleString()}</span>
+      <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">
+        {value === 1 ? singular : plural}
+      </span>
+    </div>
+  );
+}
 
 export function SkillsHome({
   filters,
@@ -35,8 +55,33 @@ export function SkillsHome({
   onPublish: () => void;
 }) {
   const tags = useTags();
-  const total = useSkillDirectory(UNFILTERED).data?.pages[0]?.total;
+  const stats = useSkillStats().data;
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // What the field shows, which is not yet what the list is filtered by. The
+  // URL still owns the applied term; this is only the keystrokes ahead of it.
+  const [term, setTerm] = useState(filters.q);
+
+  // Read through a ref so the timer below depends on the term alone. Closing
+  // over `filters` instead would restart the debounce on every unrelated
+  // re-render, which is the one thing a debounce must not do.
+  const latest = useRef({ filters, onFiltersChange });
+  latest.current = { filters, onFiltersChange };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const { filters: applied, onFiltersChange: apply } = latest.current;
+      if (term !== applied.q) apply({ ...applied, q: term });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [term]);
+
+  // The applied term can change without a keystroke — the back button, or a
+  // shared link. Re-running our own push is a no-op, since `term` already
+  // equals it by then.
+  useEffect(() => {
+    setTerm(filters.q);
+  }, [filters.q]);
 
   // ⌘K / Ctrl+K focuses the search box — the hint in the field, made real.
   useEffect(() => {
@@ -70,12 +115,11 @@ export function SkillsHome({
                 </Button>
               )}
             </div>
-            {total !== undefined && (
-              <div className="flex shrink-0 flex-col gap-1 rounded-lg border bg-card px-5 py-3.5">
-                <span className="text-[22px] font-medium">{total.toLocaleString()}</span>
-                <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">
-                  {total === 1 ? "Skill" : "Skills"}
-                </span>
+            {stats && (
+              <div className="flex shrink-0 flex-wrap gap-3">
+                <HeroStat value={stats.skills} singular="Skill" plural="Skills" />
+                <HeroStat value={stats.publishers} singular="Publisher" plural="Publishers" />
+                <HeroStat value={stats.installs} singular="Install" plural="Installs" />
               </div>
             )}
           </div>
@@ -85,16 +129,22 @@ export function SkillsHome({
             <input
               ref={searchRef}
               type="text"
-              value={filters.q}
-              onChange={(event) => onFiltersChange({ ...filters, q: event.target.value })}
+              value={term}
+              onChange={(event) => setTerm(event.target.value)}
               placeholder="Search skills, tags or publishers"
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
-            {filters.q && (
+            {term && (
               <button
                 type="button"
                 aria-label="Clear search"
-                onClick={() => onFiltersChange({ ...filters, q: "" })}
+                // Applied immediately as well as cleared in the field:
+                // clearing is a decision, not a keystroke, so it should not
+                // sit behind the debounce.
+                onClick={() => {
+                  setTerm("");
+                  onFiltersChange({ ...filters, q: "" });
+                }}
                 className="flex shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
               >
                 <XIcon className="size-4" />

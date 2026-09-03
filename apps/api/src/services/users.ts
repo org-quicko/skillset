@@ -12,6 +12,7 @@ import { getPasswordCredential, setPasswordCredential } from "../auth/credential
 import { generateInitialPassword, hashPassword, verifyPassword } from "../auth/password.js";
 import { generateTokenSecret, hashTokenSecret } from "../auth/token.js";
 import type { Database } from "../db/client.js";
+import { firstRow } from "../db/rows.js";
 import { isUniqueViolation } from "../db/pg-errors.js";
 import {
   connections, tokens, users, type TokenRow, type UserRow } from "../db/schemas/index.js";
@@ -128,12 +129,12 @@ export class UsersService {
     const initial_password = generateInitialPassword();
     const password_hash = await hashPassword(initial_password);
 
-    let created: UserRow | undefined;
+    let created: UserRow;
     try {
       // The row and its credential are written together: a User with no
       // password could not log in, and no route creates one afterwards.
       created = await this.db.transaction(async (tx) => {
-        const [row] = await tx
+        const inserted = await tx
           .insert(users)
           .values({
             first_name: input.first_name,
@@ -149,7 +150,7 @@ export class UsersService {
             must_change_password: true,
           })
           .returning();
-        if (!row) throw new Error("Insert did not return the created User.");
+        const row = firstRow(inserted, "User insert");
 
         await setPasswordCredential(tx, row.id, password_hash);
         return row;
@@ -158,7 +159,6 @@ export class UsersService {
       if (isUniqueViolation(cause)) throw new EmailTakenError();
       throw cause;
     }
-    if (!created) throw new Error("Insert did not return the created User.");
 
     this.logger.info({ user_id: created.id, role: created.role }, "user created");
     return { user: created, initial_password };
@@ -176,13 +176,12 @@ export class UsersService {
    * ```
    */
   async updateOwnName(user: UserRow, input: UserUpdateName): Promise<UserRow> {
-    const [updated] = await this.db
+    const rows = await this.db
       .update(users)
       .set({ ...input, updated_at: new Date() })
       .where(eq(users.id, user.id))
       .returning();
-    if (!updated) throw new Error("Update did not return the User.");
-    return updated;
+    return firstRow(rows, "User name update");
   }
 
   /**
@@ -251,12 +250,12 @@ export class UsersService {
     const target = await this.getOrThrow(userId);
     if (target.role === "superadmin") throw new SuperadminProtectedError();
 
-    const [updated] = await this.db
+    const rows = await this.db
       .update(users)
       .set({ role, updated_at: new Date() })
       .where(eq(users.id, userId))
       .returning();
-    if (!updated) throw new Error("Update did not return the User.");
+    const updated = firstRow(rows, "User role update");
 
     this.logger.info({ user_id: userId, role }, "user role changed");
     return updated;
@@ -311,11 +310,11 @@ export class UsersService {
    */
   async mintToken(owner: UserRow, name: string): Promise<{ token: TokenRow; secret: string }> {
     const secret = generateTokenSecret();
-    const [created] = await this.db
+    const inserted = await this.db
       .insert(tokens)
       .values({ user_id: owner.id, name, token_hash: hashTokenSecret(secret) })
       .returning();
-    if (!created) throw new Error("Insert did not return the created Token.");
+    const created = firstRow(inserted, "Token insert");
 
     this.logger.info({ user_id: owner.id, token_id: created.id }, "token minted");
     return { token: created, secret };

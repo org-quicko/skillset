@@ -5,7 +5,14 @@ import { eq } from "drizzle-orm";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
 import { skillInstallEvents, skills, users } from "../src/db/schemas/index.js";
-import { SIGN_IN_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "./setup.js";
+import {
+  refreshInstallCounts,
+  SIGN_IN_PATH,
+  startTestContext,
+  stopTestContext,
+  type TestContext,
+  SESSION_COOKIE_NAME,
+} from "./setup.js";
 
 interface ApiPublisher {
   user_id: string | null;
@@ -667,6 +674,79 @@ describe("Listing Skills (ticket 03)", () => {
   it("lists without a session", async () => {
     // Zero-friction browsing is the point of ADR-0013; only writes stay gated.
     const res = await context.app.request("/api/skills");
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("Reading the Skill directory's hero stats (GET /skills/stats)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        email: "ada@example.com",
+        password: PASSWORD,
+      }),
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("counts Skills, distinct Publishers by their email snapshot, and total Installs", async () => {
+    const [one] = await context.db
+      .insert(skills)
+      .values({
+        name: "stats-skill-one",
+        description: "First.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "grace@example.com",
+        published_by_name: "Grace Hopper",
+      })
+      .returning();
+    const [two] = await context.db
+      .insert(skills)
+      .values({
+        name: "stats-skill-two",
+        description: "Second, same Publisher as the first.",
+        body: "Body.\n",
+        published_by: null,
+        published_by_email: "grace@example.com",
+        published_by_name: "Grace Hopper",
+      })
+      .returning();
+    if (!one || !two) throw new Error("Insert did not return the created Skills.");
+
+    await context.db
+      .insert(skillInstallEvents)
+      .values([
+        { skill_id: one.id, source: "web" },
+        { skill_id: one.id, source: "cli" },
+        { skill_id: two.id, source: "web" },
+      ]);
+    await refreshInstallCounts(context);
+
+    const res = await context.app.request("/api/skills/stats");
+    expect(res.status).toBe(200);
+    const stats = (await res.json()) as { skills: number; publishers: number; installs: number };
+    expect(stats.skills).toBe(2);
+    expect(stats.publishers).toBe(1);
+    expect(stats.installs).toBe(3);
+  });
+
+  it("is readable without a session, same as every other Skill read (ADR-0013)", async () => {
+    const res = await context.app.request("/api/skills/stats");
     expect(res.status).toBe(200);
   });
 });

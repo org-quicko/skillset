@@ -633,6 +633,20 @@
         }
       }
     },
+    "/skills/stats": {
+      "get": {
+        "tags": ["skills"],
+        "summary": "Read the Skill directory's hero stats",
+        "description": "Registry-wide counts: how many Skills exist, how many distinct Publishers have published one, and how many Installs have been recorded in total. Unfiltered — unaffected by any search term or Tag selection, unlike `GET /skills`'s `total`. Unauthenticated (ADR-0013).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The registry-wide counts",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SkillDirectoryStats" } } }
+          }
+        }
+      }
+    },
     "/skills/{id}": {
       "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
       "get": {
@@ -772,7 +786,8 @@
       "get": {
         "tags": ["tags"],
         "summary": "List the Tag catalog",
-        "description": "Every Tag in the Registry, alphabetical by name — registry-wide, not scoped to any one Skill (ADR-0011). What a tag editor's autocomplete filters against.",
+        "description": "Every Tag in the Registry, alphabetical by name — registry-wide, not scoped to any one Skill (ADR-0011). What a tag editor's autocomplete filters against. Unauthenticated (ADR-0013).",
+        "security": [],
         "responses": {
           "200": {
             "description": "The whole Tag catalog",
@@ -787,8 +802,7 @@
                 }
               }
             }
-          },
-          "401": { "$ref": "#/components/responses/Unauthenticated" }
+          }
         }
       }
     },
@@ -1027,7 +1041,7 @@
       "post": {
         "tags": ["integrations"],
         "summary": "Register a Git Provider",
-        "description": "Requires at least the admin role.\n\nAn Integration's existence is the only switch Importing has: it is available for exactly those Git Providers with a row, and there is deliberately no `import_enabled` flag above it (ADR-0024). An operator who wants this Registry to hold no repository credentials for anybody creates no Integration.\n\nThis is not an Identity Provider and is configured separately. Signing in with GitHub and Importing from GitHub are two registrations that share nothing but a vendor, so either may exist without the other.\n\nAt most one Integration per Git Provider — `provider` is the row's identity, so a second is a conflict rather than an addition. It must name a Git Provider this Registry reads from; that list is `GIT_PROVIDERS` in the shared package, and a provider is added there rather than by migration.",
+        "description": "Requires at least the admin role.\n\nAn Integration's existence is the only switch Importing has: it is available for exactly those Git Providers with at least one row, and there is deliberately no `import_enabled` flag above it (ADR-0024). An operator who wants this Registry to hold no repository credentials for anybody creates no Integration.\n\nThis is not an Identity Provider and is configured separately. Signing in with GitHub and Importing from GitHub are two registrations that share nothing but a vendor, so either may exist without the other.\n\nMore than one Integration may be registered for the same Git Provider — e.g. two different GitHub Apps — and a writer chooses which to connect through (ADR-0025). `provider` must name a Git Provider this Registry reads from; that list is `GIT_PROVIDERS` in the shared package, and a provider is added there rather than by migration.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1063,28 +1077,24 @@
           },
           "400": { "$ref": "#/components/responses/ValidationFailed" },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
-          "403": { "$ref": "#/components/responses/AdminOnly" },
-          "409": {
-            "description": "An Integration for that Git Provider is already configured",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
-          }
+          "403": { "$ref": "#/components/responses/AdminOnly" }
         }
       }
     },
-    "/integrations/{provider}": {
+    "/integrations/{id}": {
       "parameters": [
         {
-          "name": "provider",
+          "name": "id",
           "in": "path",
           "required": true,
-          "schema": { "type": "string", "enum": ["github", "gitlab"] },
-          "description": "The Git Provider whose Integration to change."
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The Integration's id."
         }
       ],
       "patch": {
         "tags": ["integrations"],
         "summary": "Change an Integration's configuration",
-        "description": "Requires at least the admin role.\n\n`provider` cannot be changed: it is the Integration's identity, so altering it would repoint an existing registration rather than create a new one.\n\nOmitting `client_secret` leaves the stored one untouched, which is what lets an Admin edit an Integration without being shown its secret. `app_slug` distinguishes absent from null — absent leaves whatever is stored, null clears it.\n\nCredentials are read per use, so an edit takes effect on the next request with no restart (ADR-0019).\n\nThere is deliberately no delete route, matching `/identity-providers`. Removing an Integration that writers still hold Connections against would strand those credentials, and the `ON DELETE RESTRICT` on `connections.provider` refuses it at the database.",
+        "description": "Requires at least the admin role.\n\n`provider` is not on this request body at all: which Git Provider an app is for does not change once registered, only the app's own details do.\n\nOmitting `client_secret` leaves the stored one untouched, which is what lets an Admin edit an Integration without being shown its secret. `app_slug` distinguishes absent from null — absent leaves whatever is stored, null clears it.\n\nCredentials are read per use, so an edit takes effect on the next request with no restart (ADR-0019).\n\nThere is deliberately no delete route, matching `/identity-providers`. Removing an Integration that writers still hold Connections against would strand those credentials, and the `ON DELETE RESTRICT` on `connections.integration_id` refuses it at the database.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1110,7 +1120,7 @@
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": { "$ref": "#/components/responses/AdminOnly" },
           "404": {
-            "description": "No Integration is configured for that Git Provider",
+            "description": "No Integration exists by that id",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -1142,7 +1152,16 @@
       }
     },
     "/connections/{provider}/start": {
-      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "parameters": [
+        { "$ref": "#/components/parameters/GitProvider" },
+        {
+          "name": "integration_id",
+          "in": "query",
+          "required": false,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Which Integration (app) to connect through, when the provider has more than one configured (ADR-0025). Omit when it has exactly one — there is nothing to choose."
+        }
+      ],
       "get": {
         "tags": ["connections"],
         "summary": "Begin connecting a Git Provider",
@@ -1159,7 +1178,7 @@
             }
           },
           "400": {
-            "description": "That Git Provider has no credentialed flow at all — it is public-read only, and no configuration changes that",
+            "description": "That Git Provider has no credentialed flow at all, or more than one Integration is configured for it and `integration_id` was not given",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
@@ -1409,6 +1428,24 @@
           }
         }
       },
+      "SkillDirectoryStats": {
+        "type": "object",
+        "description": "Registry-wide counts for the Skill directory's hero stats. Unfiltered — unlike GET /skills's `total`, unaffected by any search term or Tag selection.",
+        "required": ["skills", "publishers", "installs"],
+        "properties": {
+          "skills": { "type": "integer", "minimum": 0, "description": "Total Skill count." },
+          "publishers": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct Publishers who have published a Skill, counted by their email snapshot (docs/data-model.md) so a removed User's Skills still count."
+          },
+          "installs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total Install count across every Skill. Same lag caveat as SkillSummary.installs (ADR-0012)."
+          }
+        }
+      },
       "SkillSummary": {
         "type": "object",
         "required": [
@@ -1583,13 +1620,14 @@
       },
       "Integration": {
         "type": "object",
-        "description": "The Registry's registration with one Git Provider, holding the credential pair a Connection is granted against (ADR-0024). `client_secret` is deliberately absent from this and every other response: it is written and never read back.",
-        "required": ["provider", "display_name", "client_id", "app_slug", "created_at", "updated_at"],
+        "description": "The Registry's registration with a Git Provider, holding the credential pair a Connection is granted against (ADR-0024). `client_secret` is deliberately absent from this and every other response: it is written and never read back. More than one Integration may exist for the same `provider` (ADR-0025) — `id` is the row's identity.",
+        "required": ["id", "provider", "display_name", "client_id", "app_slug", "created_at", "updated_at"],
         "properties": {
+          "id": { "type": "string", "format": "uuid" },
           "provider": {
             "type": "string",
             "example": "github",
-            "description": "The Git Provider, and the row's identity. Plain text rather than an enum, so registering a new provider is an insert and not a migration."
+            "description": "The Git Provider this app is for. Plain text rather than an enum, so registering a new provider is an insert and not a migration."
           },
           "display_name": { "type": "string", "example": "GitHub" },
           "client_id": { "type": "string", "example": "Iv1.a1b2c3d4e5f6" },
@@ -1627,9 +1665,14 @@
       "Connection": {
         "type": "object",
         "description": "A writer's own grant of repository access (ADR-0024). There is no token field, and no variant of this shape has one — a Connection's tokens never leave the server in any response, on any route.",
-        "required": ["provider", "external_account_login", "created_at", "updated_at"],
+        "required": ["provider", "integration_id", "external_account_login", "created_at", "updated_at"],
         "properties": {
           "provider": { "type": "string", "example": "github" },
+          "integration_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Which Integration (app) this grant was issued through — a provider may have more than one configured (ADR-0025)."
+          },
           "external_account_login": {
             "type": "string",
             "example": "ada-work",

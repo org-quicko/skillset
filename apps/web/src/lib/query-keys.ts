@@ -46,6 +46,9 @@ export function skillQueryKey(name: string) {
   return ["skills", "detail", name] as const;
 }
 
+/** The Skill directory's hero stats — unfiltered, unlike `skillsListQueryKey`'s pages. */
+export const skillStatsQueryKey = ["skills", "stats"] as const;
+
 /** The whole Tag catalog — what a tag editor's autocomplete filters against. */
 export const tagsListQueryKey = ["tags", "list"] as const;
 

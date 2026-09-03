@@ -135,6 +135,21 @@ export const SkillDirectoryPageSchema = z.object({
 export type SkillDirectoryPage = z.infer<typeof SkillDirectoryPageSchema>;
 
 /**
+ * Registry-wide counts for the Skill directory's hero stats: how many
+ * Skills exist, how many distinct Publishers have published one, and how
+ * many Installs have been recorded in total. Unfiltered — unaffected by any
+ * search term or Tag selection, unlike `SkillDirectoryPage.total`.
+ * `installs` carries the same periodic-refresh lag as every other install
+ * count (ADR-0012).
+ */
+export const SkillDirectoryStatsSchema = z.object({
+  skills: z.number().int().nonnegative(),
+  publishers: z.number().int().nonnegative(),
+  installs: z.number().int().nonnegative(),
+});
+export type SkillDirectoryStats = z.infer<typeof SkillDirectoryStatsSchema>;
+
+/**
  * PUT /skills/\{name\} request body. The name comes from the path. The four
  * frontmatter extras are optional and unvalidated at this layer — the
  * shared validation rules (`validateSkillLicense` and friends) are what

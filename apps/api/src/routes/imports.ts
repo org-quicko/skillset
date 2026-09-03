@@ -1,7 +1,7 @@
 import { SkillFilesSchema, SkillSourceLocationSchema } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
-import { ValidationError } from "../http/errors.js";
+import { parseValue, readJsonObject } from "../http/body.js";
 import type { ImportsService } from "../services/imports.js";
 
 export type ImportRouteDependencies = AuthDependencies & {
@@ -40,16 +40,13 @@ export type ImportRouteDependencies = AuthDependencies & {
  */
 export function registerImportRoutes(app: Hono<{ Variables: AuthVariables }>, deps: ImportRouteDependencies): void {
   app.post("/imports/:provider/skill-files", requireAuth(deps), requireRole("writer"), async (c) => {
-    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-
     // Spread first, provider second: the path wins.
-    const parsed = SkillSourceLocationSchema.safeParse({ ...(body ?? {}), provider: c.req.param("provider") });
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ValidationError(issue?.message ?? "Invalid project location.", issue?.path.join("."));
-    }
+    const location = parseValue(
+      { ...(await readJsonObject(c)), provider: c.req.param("provider") },
+      SkillSourceLocationSchema,
+    );
 
-    const files = await deps.imports.fetchSkillFiles(c.get("user").id, parsed.data);
+    const files = await deps.imports.fetchSkillFiles(c.get("user").id, location);
     const items = files.map((file) => ({
       path: file.path,
       content_base64: Buffer.from(file.bytes).toString("base64"),

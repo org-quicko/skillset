@@ -2,7 +2,7 @@ import { SetupInitSchema, SetupStateSchema, UserSchema } from "@skill-registry/s
 import type { Hono } from "hono";
 import type { AuthRegistry } from "../auth/instance.js";
 import type { AuthVariables } from "../auth/middleware.js";
-import { ValidationError } from "../http/errors.js";
+import { parseBody } from "../http/body.js";
 import type { SetupService } from "../services/setup.js";
 
 export interface SetupRouteDependencies {
@@ -24,13 +24,8 @@ export function registerSetupRoutes(app: Hono<{ Variables: AuthVariables }>, dep
   });
 
   app.post("/setup", async (c) => {
-    const parsed = SetupInitSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ValidationError(issue?.message ?? "Invalid request body.", String(issue?.path[0]));
-    }
-
-    const user = await deps.setup.initializeSuperadmin(parsed.data);
+    const input = await parseBody(c, SetupInitSchema);
+    const user = await deps.setup.initializeSuperadmin(input);
 
     // The session comes from Better Auth's own sign-in rather than from
     // anything written here (ADR-0016), so the first login in an instance's
@@ -38,7 +33,7 @@ export function registerSetupRoutes(app: Hono<{ Variables: AuthVariables }>, dep
     // second way to mint a session that could drift from the real one.
     const auth = await deps.auth.current();
     const signedIn = await auth.api.signInEmail({
-      body: { email: parsed.data.email, password: parsed.data.password },
+      body: { email: input.email, password: input.password },
       asResponse: true,
     });
     for (const cookie of signedIn.headers.getSetCookie()) {

@@ -128,8 +128,8 @@ export class ImportsService {
     location: SkillSourceLocation,
     fetchImpl?: typeof fetch,
   ): Promise<SkillFile[]> {
-    const integration = await this.integrations.find(location.provider);
-    if (!integration) {
+    const configured = await this.integrations.listByProvider(location.provider);
+    if (configured.length === 0) {
       this.logger.info(
         { user_id: userId, provider: location.provider },
         "refused an import because no integration is configured for that git provider",
@@ -144,7 +144,12 @@ export class ImportsService {
       files = await readSkillFolder(location, { token, fetch: fetchImpl });
     } catch (cause) {
       if (cause instanceof SkillFolderError) {
-        throw await this.refusal(cause, userId, location, integration.app_slug, token, fetchImpl);
+        // The writer's *own* app, not an arbitrary Integration configured for
+        // the provider (ADR-0025) — a sibling app for the same provider may
+        // carry a different slug, and the install link must point at the one
+        // this Connection actually runs through.
+        const integration = await this.connections.integrationFor(userId, location.provider);
+        throw await this.refusal(cause, userId, location, integration?.app_slug ?? null, token, fetchImpl);
       }
       throw cause;
     }

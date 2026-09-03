@@ -6,7 +6,7 @@ import {
 } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
-import { ValidationError } from "../http/errors.js";
+import { parseBody } from "../http/body.js";
 import type { IntegrationsService } from "../services/integrations.js";
 
 export type IntegrationRouteDependencies = AuthDependencies & {
@@ -42,24 +42,13 @@ export function registerIntegrationRoutes(
   });
 
   app.post("/integrations", requireAuth(deps), requireRole("admin"), async (c) => {
-    const parsed = IntegrationCreateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ValidationError(issue?.message ?? "Invalid Integration.", issue?.path.join("."));
-    }
-
-    const integration = await deps.integrations.create(parsed.data);
+    const integration = await deps.integrations.create(await parseBody(c, IntegrationCreateSchema));
     return c.json(IntegrationSchema.parse(integration), 201);
   });
 
-  app.patch("/integrations/:provider", requireAuth(deps), requireRole("admin"), async (c) => {
-    const parsed = IntegrationUpdateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ValidationError(issue?.message ?? "Invalid Integration.", issue?.path.join("."));
-    }
-
-    const integration = await deps.integrations.update(c.req.param("provider"), parsed.data);
+  app.patch("/integrations/:id", requireAuth(deps), requireRole("admin"), async (c) => {
+    const input = await parseBody(c, IntegrationUpdateSchema);
+    const integration = await deps.integrations.update(c.req.param("id"), input);
     return c.json(IntegrationSchema.parse(integration));
   });
 }

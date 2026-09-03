@@ -3,7 +3,7 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { ConnectionList, Role } from "@skill-registry/shared";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { and, eq } from "drizzle-orm";
-import { connections, integrations, users, type UserRow } from "../src/db/schemas/index.js";
+import { connections, integrations, users, type IntegrationRow, type UserRow } from "../src/db/schemas/index.js";
 import { createLogger } from "../src/logger.js";
 import { ConnectionsService } from "../src/services/connections.js";
 import { IntegrationsService } from "../src/services/integrations.js";
@@ -139,20 +139,32 @@ describe("Connections (ADR-0024)", () => {
     await stopTestContext(context, container);
   });
 
-  async function seedIntegration(provider = "github", app_slug: string | null = "acme-registry") {
+  async function seedIntegration(
+    provider = "github",
+    app_slug: string | null = "acme-registry",
+  ): Promise<IntegrationRow> {
     await context.db.delete(connections);
     await context.db.delete(integrations);
-    await context.db.insert(integrations).values({
-      provider,
-      display_name: provider,
-      client_id: "Iv1.client",
-      client_secret: "the-secret",
-      app_slug,
-    });
+    const [row] = await context.db
+      .insert(integrations)
+      .values({
+        provider,
+        display_name: provider,
+        client_id: "Iv1.client",
+        client_secret: "the-secret",
+        app_slug,
+      })
+      .returning();
+    if (!row) throw new Error("Integration insert did not return a row.");
+    return row;
   }
 
-  function start(cookie: string, provider = "github") {
-    return context.app.request(`/api/connections/${provider}/start`, { headers: { cookie }, redirect: "manual" });
+  function start(cookie: string, provider = "github", integrationId?: string) {
+    const query = integrationId ? `?integration_id=${integrationId}` : "";
+    return context.app.request(`/api/connections/${provider}/start${query}`, {
+      headers: { cookie },
+      redirect: "manual",
+    });
   }
 
   function callback(cookie: string, query: string, provider = "github") {
@@ -225,7 +237,7 @@ describe("Connections (ADR-0024)", () => {
     // Unreachable through the API, which refuses this at configuration time —
     // seeded directly to pin down what a writer gets if it ever is reached.
     async function seedWithoutSlug() {
-      await seedIntegration("github", null);
+      return seedIntegration("github", null);
     }
 
     it("still lets a writer connect, because authorizing needs no app slug", async () => {
@@ -237,7 +249,7 @@ describe("Connections (ADR-0024)", () => {
     });
 
     it("offers no repository-management URL, rather than a malformed one", async () => {
-      await seedWithoutSlug();
+      const integration = await seedWithoutSlug();
 
       // Never `https://github.com/apps//installations/new`, which is a provider
       // 404 a writer cannot diagnose. Null is what makes the interface say
@@ -245,7 +257,7 @@ describe("Connections (ADR-0024)", () => {
       const res = await context.app.request("/api/connections", { headers: { cookie: writerCookie } });
       const body = (await res.json()) as ConnectionList;
       expect(body.connectable).toEqual([
-        { provider: "github", display_name: "github", manage_access_url: null },
+        { id: integration.id, provider: "github", display_name: "github", app_slug: null, manage_access_url: null },
       ]);
     });
   });
@@ -534,10 +546,11 @@ describe("Connections (ADR-0024)", () => {
 
   describe("using a Connection's token", () => {
     async function seedConnection(overrides: Record<string, unknown> = {}) {
-      await seedIntegration();
+      const integration = await seedIntegration();
       await context.db.insert(connections).values({
         user_id: writer.id,
         provider: "github",
+        integration_id: integration.id,
         external_account_id: "1",
         external_account_login: "ada-work",
         access_token: await encrypt("ghu_stored_access"),
@@ -752,14 +765,82 @@ describe("Connections (ADR-0024)", () => {
     });
   });
 
+  describe("choosing between multiple Integrations for a provider (ADR-0025)", () => {
+    async function seedSecondIntegration() {
+      const [row] = await context.db
+        .insert(integrations)
+        .values({
+          provider: "github",
+          display_name: "GitHub (second app)",
+          client_id: "Iv2.client",
+          client_secret: "the-second-secret",
+          app_slug: "acme-registry-2",
+        })
+        .returning();
+      if (!row) throw new Error("Integration insert did not return a row.");
+      return row;
+    }
+
+    it("refuses to start without saying which app, when more than one is configured", async () => {
+      await seedIntegration();
+      await seedSecondIntegration();
+
+      const res = await start(writerCookie);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as ApiError).error.code).toBe("integration_choice_required");
+    });
+
+    it("starts using the app named by integration_id", async () => {
+      await seedIntegration();
+      const second = await seedSecondIntegration();
+
+      const res = await start(writerCookie, "github", second.id);
+      expect(res.status).toBe(302);
+      const location = res.headers.get("location") ?? "";
+      expect(new URL(location).searchParams.get("client_id")).toBe("Iv2.client");
+    });
+
+    it("lists one connectable entry per app, not one per provider", async () => {
+      const first = await seedIntegration();
+      const second = await seedSecondIntegration();
+
+      const res = await context.app.request("/api/connections", { headers: { cookie: writerCookie } });
+      const body = (await res.json()) as ConnectionList;
+      expect(body.connectable.map((entry) => entry.id).sort()).toEqual([first.id, second.id].sort());
+      expect(body.connectable.every((entry) => entry.provider === "github")).toBe(true);
+    });
+
+    it("records which app a Connection was completed through", async () => {
+      await seedIntegration();
+      const second = await seedSecondIntegration();
+
+      const { state, nonce } = await service.start(writer, "github", second.id);
+      await service.complete(
+        writer,
+        "github",
+        { code: "c", state, nonce, error: undefined },
+        stub({ [TOKEN_URL]: exchange(), [USER_URL]: ACCOUNT }).fetch,
+      );
+
+      const [row] = await context.db.select().from(connections);
+      expect(row?.integration_id).toBe(second.id);
+    });
+  });
+
   describe("invariants the schema carries", () => {
-    it("cannot hold a Connection to an unregistered Git Provider", async () => {
+    it("cannot hold a Connection through an unregistered Integration", async () => {
       await seedIntegration();
       await expect(
         (async () =>
           context.db.insert(connections).values({
             user_id: writer.id,
-            provider: "bitbucket",
+            provider: "github",
+            // A well-formed id naming no Integration at all, not a malformed
+            // one — this is `integration_id`'s foreign key doing the work,
+            // which is what makes "you cannot connect through an app this
+            // Registry has not registered" a database invariant now that
+            // `provider` alone (ADR-0025) no longer carries one.
+            integration_id: "00000000-0000-0000-0000-000000000000",
             external_account_id: "1",
             external_account_login: "x",
             access_token: "cipher",
@@ -768,10 +849,11 @@ describe("Connections (ADR-0024)", () => {
     });
 
     it("refuses to remove an Integration writers are still connected against", async () => {
-      await seedIntegration();
+      const integration = await seedIntegration();
       await context.db.insert(connections).values({
         user_id: writer.id,
         provider: "github",
+        integration_id: integration.id,
         external_account_id: "1",
         external_account_login: "x",
         access_token: await encrypt("ghu_x"),
@@ -780,12 +862,12 @@ describe("Connections (ADR-0024)", () => {
       // RESTRICT, not CASCADE: silently dropping a writer's credential when an
       // Admin tidies up configuration is the failure mode worth being loud about.
       await expect(
-        (async () => context.db.delete(integrations).where(eq(integrations.provider, "github")))(),
+        (async () => context.db.delete(integrations).where(eq(integrations.id, integration.id)))(),
       ).rejects.toThrow();
     });
 
     it("removes a User's Connections with the User", async () => {
-      await seedIntegration();
+      const integration = await seedIntegration();
       const doomed = await seedUserWithPassword(context, {
         first_name: "Gone",
         last_name: "Soon",
@@ -796,6 +878,7 @@ describe("Connections (ADR-0024)", () => {
       await context.db.insert(connections).values({
         user_id: doomed.id,
         provider: "github",
+        integration_id: integration.id,
         external_account_id: "1",
         external_account_login: "x",
         access_token: await encrypt("ghu_x"),

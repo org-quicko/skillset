@@ -6,6 +6,7 @@ import {
 } from "@skill-registry/shared";
 import { asc, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
+import { firstRow } from "../db/rows.js";
 import { isInvalidIdSyntax, isUniqueViolation } from "../db/pg-errors.js";
 import { identityProviders, type IdentityProviderRow } from "../db/schemas/index.js";
 import { IdentityProviderKindTakenError, IdentityProviderNotFoundError } from "../http/errors.js";
@@ -109,7 +110,7 @@ export class IdentityProvidersService {
     const enabled = input.enabled ?? false;
 
     try {
-      const [created] = await this.db
+      const inserted = await this.db
         .insert(identityProviders)
         .values({
           kind: input.kind,
@@ -120,7 +121,7 @@ export class IdentityProvidersService {
           enabled,
         })
         .returning();
-      if (!created) throw new Error("Insert did not return the created Identity Provider.");
+      const created = firstRow(inserted, "Identity Provider insert");
 
       this.logger.info({ identity_provider_id: created.id, kind: created.kind }, "identity provider created");
       this.warnIfUngated(created);

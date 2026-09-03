@@ -2,7 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@skill-registry/shared";
 import { symmetricEncrypt } from "better-auth/crypto";
-import { connections, identityProviders, integrations, type UserRow } from "../src/db/schemas/index.js";
+import {
+  connections,
+  identityProviders,
+  integrations,
+  type IntegrationRow,
+  type UserRow,
+} from "../src/db/schemas/index.js";
 import { createLogger } from "../src/logger.js";
 import { ConnectionsService } from "../src/services/connections.js";
 import { ImportsService } from "../src/services/imports.js";
@@ -133,20 +139,29 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
     await context.db.delete(identityProviders);
   }
 
-  async function seedIntegration(app_slug: string | null = "acme-registry") {
-    await context.db.insert(integrations).values({
-      provider: "github",
-      display_name: "GitHub",
-      client_id: "Iv1.client",
-      client_secret: "the-secret",
-      app_slug,
-    });
+  async function seedIntegration(app_slug: string | null = "acme-registry"): Promise<IntegrationRow> {
+    const [row] = await context.db
+      .insert(integrations)
+      .values({
+        provider: "github",
+        display_name: "GitHub",
+        client_id: "Iv1.client",
+        client_secret: "the-secret",
+        app_slug,
+      })
+      .returning();
+    if (!row) throw new Error("Integration insert did not return a row.");
+    return row;
   }
 
-  async function seedConnection(overrides: Record<string, unknown> = {}) {
+  // No default `integrationId`: a caller with no Integration seeded must name
+  // one explicitly (even a nonexistent one) to prove the foreign key, rather
+  // than silently succeeding against nothing.
+  async function seedConnection(overrides: Record<string, unknown> = {}, integrationId?: string) {
     await context.db.insert(connections).values({
       user_id: writer.id,
       provider: "github",
+      integration_id: integrationId ?? "00000000-0000-0000-0000-000000000000",
       external_account_id: "1",
       external_account_login: "ada-work",
       access_token: await symmetricEncrypt({ key: TEST_AUTH_SECRET, data: "ghu_writer_token" }),
@@ -160,8 +175,8 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
   /** Ready to import: an Integration and a Connection for the writer. */
   async function ready() {
     await clearAll();
-    await seedIntegration();
-    await seedConnection();
+    const integration = await seedIntegration();
+    await seedConnection({}, integration.id);
   }
 
   function post(cookie: string, body: unknown, path = IMPORT_PATH) {
@@ -306,6 +321,21 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
       await expect(imports.fetchSkillFiles(writer.id, location(), provider.fetch)).rejects.toThrow(/acme/);
       await expect(imports.fetchSkillFiles(writer.id, location(), provider.fetch)).rejects.toThrow(
         /apps\/acme-registry\/installations\/new/,
+      );
+    });
+
+    it("builds the install link from the writer's own app, not another Integration for the same provider (ADR-0025)", async () => {
+      await clearAll();
+      // Two GitHub Apps configured; the writer connected through the second
+      // one. The install link must point at *that* app's slug — a sibling
+      // Integration for the same provider may well have a different one.
+      await seedIntegration("acme-registry-one");
+      const second = await seedIntegration("acme-registry-two");
+      await seedConnection({}, second.id);
+
+      const provider = stub({ [INSTALLATIONS]: { total_count: 0, installations: [] } });
+      await expect(imports.fetchSkillFiles(writer.id, location(), provider.fetch)).rejects.toThrow(
+        /apps\/acme-registry-two\/installations\/new/,
       );
     });
 

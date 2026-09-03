@@ -57,12 +57,15 @@ export function useDisconnect() {
  * authorization that changes nothing about what the app can see (ADR-0024).
  *
  * @param provider - The Git Provider to connect.
+ * @param integrationId - Which Integration (app) to connect through, when the
+ * provider has more than one (ADR-0025). Omit when it has exactly one.
  * @returns The absolute path to navigate to.
  * @example
  * ```tsx
- * <a href={connectHref("github")}>Connect GitHub</a>
+ * <a href={connectHref("github", integration.id)}>Connect GitHub</a>
  * ```
  */
-export function connectHref(provider: string): string {
-  return `/api/connections/${provider}/start`;
+export function connectHref(provider: string, integrationId?: string): string {
+  const query = integrationId ? `?integration_id=${integrationId}` : "";
+  return `/api/connections/${provider}/start${query}`;
 }

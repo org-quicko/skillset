@@ -6,7 +6,7 @@ import {
 } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
-import { ValidationError } from "../http/errors.js";
+import { parseBody } from "../http/body.js";
 import type { IdentityProvidersService } from "../services/identity-providers.js";
 
 export type IdentityProviderRouteDependencies = AuthDependencies & {
@@ -38,24 +38,13 @@ export function registerIdentityProviderRoutes(
   });
 
   app.post("/identity-providers", requireAuth(deps), requireRole("admin"), async (c) => {
-    const parsed = IdentityProviderCreateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ValidationError(issue?.message ?? "Invalid Identity Provider.", issue?.path.join("."));
-    }
-
-    const provider = await deps.identityProviders.create(parsed.data);
+    const provider = await deps.identityProviders.create(await parseBody(c, IdentityProviderCreateSchema));
     return c.json(IdentityProviderSchema.parse(provider), 201);
   });
 
   app.patch("/identity-providers/:id", requireAuth(deps), requireRole("admin"), async (c) => {
-    const parsed = IdentityProviderUpdateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ValidationError(issue?.message ?? "Invalid Identity Provider.", issue?.path.join("."));
-    }
-
-    const provider = await deps.identityProviders.update(c.req.param("id"), parsed.data);
+    const input = await parseBody(c, IdentityProviderUpdateSchema);
+    const provider = await deps.identityProviders.update(c.req.param("id"), input);
     return c.json(IdentityProviderSchema.parse(provider));
   });
 }

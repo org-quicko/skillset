@@ -1,11 +1,4 @@
 import {
-  isSkillDirectorySortField,
-  isSkillDirectorySortOrder,
-  SKILL_DIRECTORY_DEFAULT_PAGE_SIZE,
-  SKILL_DIRECTORY_MAX_PAGE_SIZE,
-  SKILL_DIRECTORY_MIN_PAGE_SIZE,
-  SKILL_DIRECTORY_SORT_FIELDS,
-  SKILL_DIRECTORY_SORT_ORDERS,
   validateSkillAllowedTools,
   validateSkillBody,
   validateSkillCompatibility,
@@ -14,14 +7,14 @@ import {
   validateSkillMetadata,
   validateSkillName,
   type Page,
-  type SkillDirectorySortField,
-  type SkillDirectorySortOrder,
 } from "@skill-registry/shared";
-import { and, asc, count, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { isInvalidIdSyntax } from "../db/pg-errors.js";
+import { firstRow } from "../db/rows.js";
 import { skillDirectory, skillTags, skills, users, type UserRow } from "../db/schemas/index.js";
-import { ArtifactMissingError, SkillDeleteFailedError, SkillNotFoundError, ValidationError } from "../http/errors.js";
+import { ArtifactMissingError, SkillDeleteFailedError, SkillNotFoundError } from "../http/errors.js";
+import type { SkillDirectoryQuery } from "../http/skill-directory-query.js";
 import type { Logger } from "../logger.js";
 import type { AnalyticsService } from "./analytics.js";
 import type { TagsService, TagSummary } from "./tags.js";
@@ -95,6 +88,13 @@ interface SkillUpload {
   expires_in_seconds: number;
 }
 
+/** `GET /skills/stats`'s shape — see `SkillsService.getStats`. */
+interface SkillDirectoryStats {
+  skills: number;
+  publishers: number;
+  installs: number;
+}
+
 /**
  * One row of `GET /skills` (ticket 23) — deliberately not `SkillSummary`
  * above: sourced from `skill_directory`, which trades the full Publisher
@@ -109,78 +109,6 @@ interface SkillDirectoryEntry {
   updated_at: Date;
   installs: number;
   tags: TagSummary[];
-}
-
-export interface ListSkillsOptions {
-  /** The requested page number, as a string straight from a query parameter. */
-  page?: string;
-  /** The raw `q` search term, or `undefined`/blank for no search. */
-  q?: string;
-  /** Repeatable `tag_id` query parameters — a Skill qualifies if it carries any one of them. */
-  tagIds?: string[];
-  /** `"installs"` or `"updated_at"`; defaults to `"installs"`. */
-  sortBy?: string;
-  /** `"asc"` or `"desc"`; defaults to `"desc"`. */
-  sortOrder?: string;
-  /** Clamped to [1, 100]; defaults to 10. */
-  pageSize?: string;
-}
-
-/** A page below 1 — or not a number at all — is the first page, not an error. */
-function parsePage(raw: string | undefined): number {
-  const page = Number(raw ?? "1");
-  return Number.isInteger(page) && page >= 1 ? page : 1;
-}
-
-/** Only a well-formed UUID can match a `tags.id` — anything else is dropped rather than sent to Postgres. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Silently drops malformed ids from a client-supplied, repeatable `tag_id` list rather than rejecting the whole request over one bad value. */
-function parseTagIds(raw: string[] | undefined): string[] {
-  return (raw ?? []).filter((id) => UUID_PATTERN.test(id));
-}
-
-/**
- * `sort_by` is one of `SKILL_DIRECTORY_SORT_FIELDS`, or absent for the
- * default — anything else is a validation failure, not a silent fallback
- * (ticket 23).
- *
- * @throws ValidationError if `raw` is present and not a recognised value.
- */
-function parseSortBy(raw: string | undefined): SkillDirectorySortField {
-  if (raw === undefined) return "installs";
-  if (!isSkillDirectorySortField(raw)) {
-    throw new ValidationError(`sort_by must be one of: ${SKILL_DIRECTORY_SORT_FIELDS.join(", ")}.`, "sort_by");
-  }
-  return raw;
-}
-
-/**
- * `sort_order` is one of `SKILL_DIRECTORY_SORT_ORDERS`, or absent for the
- * default — anything else is a validation failure, not a silent fallback
- * (ticket 23).
- *
- * @throws ValidationError if `raw` is present and not a recognised value.
- */
-function parseSortOrder(raw: string | undefined): SkillDirectorySortOrder {
-  if (raw === undefined) return "desc";
-  if (!isSkillDirectorySortOrder(raw)) {
-    throw new ValidationError(`sort_order must be one of: ${SKILL_DIRECTORY_SORT_ORDERS.join(", ")}.`, "sort_order");
-  }
-  return raw;
-}
-
-/** Clamped to [1, 100] rather than rejected — unlike `sort_by`/`sort_order` (ticket 23). Anything not a whole number falls back to the default. */
-function parsePageSize(raw: string | undefined): number {
-  const size = Number(raw);
-  if (!Number.isInteger(size)) return SKILL_DIRECTORY_DEFAULT_PAGE_SIZE;
-  return Math.min(SKILL_DIRECTORY_MAX_PAGE_SIZE, Math.max(SKILL_DIRECTORY_MIN_PAGE_SIZE, size));
-}
-
-/** A blank or all-whitespace search term is treated as no search term at all. */
-function parseQuery(raw: string | undefined): string | undefined {
-  const trimmed = raw?.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 /**
@@ -277,32 +205,30 @@ export class SkillsService {
    * `sql` does not, and an unquoted hyphenated term matches any Skill carrying
    * all of its words. A blank or missing term is no search at all.
    *
-   * `options.tagIds`, when non-empty, narrows to Skills carrying at least one
+   * `query.tagIds`, when non-empty, narrows to Skills carrying at least one
    * of those Tags — checked against `skill_tags` directly, not against
    * `skill_directory.tags` (docs/data-model.md). Ordering is governed by
-   * `sort_by`/`sort_order` even with a search term active; there is no
+   * `sortBy`/`sortOrder` even with a search term active; there is no
    * relevance ranking.
    *
-   * @param options - The raw, unvalidated query parameters this endpoint accepts.
+   * Every member arrives already coerced, defaulted, and within range —
+   * `parseSkillDirectoryQuery` is what produces one, and there is no way to
+   * call this with a value it has not been through.
+   *
+   * @param query - The validated query: page, page size, search term, Tag
+   * ids, and sort choice.
    * @returns The matching page of Skills, alongside the page number, page
    * size, and the total count of matches (not the unfiltered table).
-   * @throws ValidationError if `options.sortBy` or `options.sortOrder` is
-   * present and not a recognised value.
    * @example
    * ```ts
    * // GET /skills?q=%22code%20review%22&tag_id=<id>&sort_by=updated_at&page=2
-   * await skillsService.list({ q: '"code review"', tagIds: ["<id>"], sortBy: "updated_at", page: "2" });
+   * await skillsService.list(parseSkillDirectoryQuery(c));
    * ```
    */
-  async list(options: ListSkillsOptions): Promise<Page<SkillDirectoryEntry>> {
-    const page = parsePage(options.page);
-    const query = parseQuery(options.q);
-    const tagIds = parseTagIds(options.tagIds);
-    const sortBy = parseSortBy(options.sortBy);
-    const sortOrder = parseSortOrder(options.sortOrder);
-    const pageSize = parsePageSize(options.pageSize);
+  async list(query: SkillDirectoryQuery): Promise<Page<SkillDirectoryEntry>> {
+    const { page, pageSize, tagIds, sortBy, sortOrder } = query;
 
-    const matches = query ? buildSearchCondition(query) : undefined;
+    const matches = query.q ? buildSearchCondition(query.q) : undefined;
     const tagFilter =
       tagIds.length > 0
         ? inArray(
@@ -337,6 +263,40 @@ export class SkillsService {
     const [totals] = await this.db.select({ total: count() }).from(skillDirectory).where(where);
 
     return { items: rows, page, page_size: pageSize, total: totals?.total ?? 0 };
+  }
+
+  /**
+   * Registry-wide counts for the Skill directory's hero stats: how many
+   * Skills exist, how many distinct Publishers have published one, and how
+   * many Installs have been recorded in total.
+   *
+   * @remarks
+   * Unauthenticated, like every other read (ADR-0013), and unfiltered —
+   * unlike `list`'s `total`, nothing here is narrowed by a search term or Tag
+   * selection. `publishers` counts distinct `published_by_email` values on
+   * `skills` — the snapshot that survives a Publisher's User row being
+   * removed (docs/data-model.md) — rather than `published_by`, which goes
+   * null in that case and would undercount.
+   *
+   * @returns The total Skill count, the distinct Publisher count, and the
+   * total Install count across every Skill.
+   * @example
+   * ```ts
+   * const stats = await skillsService.getStats();
+   * ```
+   */
+  async getStats(): Promise<SkillDirectoryStats> {
+    const [rows, installs] = await Promise.all([
+      this.db
+        .select({
+          skills: count(),
+          publishers: countDistinct(skills.published_by_email),
+        })
+        .from(skills),
+      this.analytics.getTotalInstallCount(),
+    ]);
+
+    return { skills: rows[0]?.skills ?? 0, publishers: rows[0]?.publishers ?? 0, installs };
   }
 
   /**
@@ -462,20 +422,20 @@ export class SkillsService {
   async publish(
     publisher: UserRow,
     rawName: string,
-    payload: Record<string, unknown> | null,
+    payload: Record<string, unknown>,
   ): Promise<{ skill: SkillDetail; upload: SkillUpload }> {
     // The caller parsed the name out of the SKILL.md frontmatter. The API does
     // not read the Artifact to confirm the two agree (ADR-0001).
     const name = validateSkillName(rawName);
-    const description = validateSkillDescription(payload?.description);
-    const body = validateSkillBody(payload?.body);
+    const description = validateSkillDescription(payload.description);
+    const body = validateSkillBody(payload.body);
     // Coerced to `null`, not left `undefined`: a republish fully replaces the
     // frontmatter (ADR-0002), so a field the payload no longer sets must clear
     // what an earlier publish stored.
-    const license = validateSkillLicense(payload?.license) ?? null;
-    const compatibility = validateSkillCompatibility(payload?.compatibility) ?? null;
-    const metadata = validateSkillMetadata(payload?.metadata) ?? null;
-    const allowed_tools = validateSkillAllowedTools(payload?.allowed_tools) ?? null;
+    const license = validateSkillLicense(payload.license) ?? null;
+    const compatibility = validateSkillCompatibility(payload.compatibility) ?? null;
+    const metadata = validateSkillMetadata(payload.metadata) ?? null;
+    const allowed_tools = validateSkillAllowedTools(payload.allowed_tools) ?? null;
 
     // `tags` appears in neither the insert nor the conflict update: it is not a
     // column on `skills`, and no publish path writes it (ADR-0008, ADR-0011),
@@ -484,7 +444,7 @@ export class SkillsService {
     // Snapshotted like published_by_email: a display name the Skill list and
     // search can use without joining `users`, surviving a rename or removal.
     const published_by_name = `${publisher.first_name} ${publisher.last_name}`;
-    const [row] = await this.db
+    const upserted = await this.db
       .insert(skills)
       .values({
         name,
@@ -516,7 +476,7 @@ export class SkillsService {
         },
       })
       .returning();
-    if (!row) throw new Error("Upsert did not return the published Skill.");
+    const row = firstRow(upserted, "Skill upsert");
 
     const url = await this.storage.presignUpload(artifactKey(name), {
       expiresInSeconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS,
