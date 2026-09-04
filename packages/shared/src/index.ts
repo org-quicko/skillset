@@ -28,6 +28,7 @@ export * from "./git-provider.js";
 export * from "./skill-import.js";
 export * from "./skill-source.js";
 export * from "./skill-source-folder.js";
+export * from "./skill-discovery.js";
 export * from "./extract.js";
 export * from "./agents/table.js";
 export * from "./identity-provider.js";

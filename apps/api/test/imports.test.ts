@@ -511,6 +511,97 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
     const res = await post(writerCookie, { owner: "acme", repo: "skills", ref: "main", path: "" }, "/api/github/skill-files");
     expect(res.status).toBe(404);
   });
+
+  /**
+   * `listSkillFolders` shares `fetchSkillFiles`'s preconditions and refusal
+   * diagnosis wholesale — both are backed by the same Connection and the same
+   * `refusal` method — so what is worth proving here is the route's wiring and
+   * the one piece of behaviour that is genuinely new: a walk that finds
+   * nothing means "no Skill found", not "that folder is empty".
+   */
+  describe("Discovering Skill folders (POST /imports/:provider/skills)", () => {
+    const DISCOVER_PATH = "/api/imports/github/skills";
+    const ROOT_CONTENTS = "https://api.github.com/repos/acme/skills/contents/?ref=main";
+    const rootDir = (path: string): Record<string, unknown> => ({ path, type: "dir", download_url: null });
+    const rootBody = (overrides: Record<string, unknown> = {}) => ({ project: "acme/skills", ref: "main", path: "", ...overrides });
+    const rootLocation = () => ({ provider: "github", project: "acme/skills", ref: "main", path: "" });
+
+    it("returns every Skill folder found, shaped as locations ready for /skill-files", async () => {
+      await ready();
+      const provider = stub({
+        [ROOT_CONTENTS]: [rootDir("apps")],
+        "https://api.github.com/repos/acme/skills/contents/apps?ref=main": [rootDir("apps/code-review")],
+        "https://api.github.com/repos/acme/skills/contents/apps/code-review?ref=main": [file("apps/code-review/SKILL.md")],
+      });
+
+      const found = await imports.listSkillFolders(writer.id, rootLocation(), provider.fetch);
+
+      expect(found).toEqual([{ provider: "github", project: "acme/skills", ref: "main", path: "apps/code-review" }]);
+    });
+
+    it("reports that no Skill was found, distinct from an empty folder", async () => {
+      await ready();
+      const provider = stub({ [ROOT_CONTENTS]: [{ path: "README.md", type: "file", download_url: null }] });
+
+      await expect(imports.listSkillFolders(writer.id, rootLocation(), provider.fetch)).rejects.toMatchObject({
+        code: "import_rejected",
+        status: 422,
+      });
+      await expect(imports.listSkillFolders(writer.id, rootLocation(), provider.fetch)).rejects.toThrow(
+        /No Skill was found/,
+      );
+    });
+
+    it("refuses when no Integration is configured, before looking for a Connection", async () => {
+      await clearAll();
+      const res = await post(writerCookie, rootBody(), DISCOVER_PATH);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ApiError).error.code).toBe("integration_not_configured");
+    });
+
+    it("refuses a writer who holds no Connection", async () => {
+      await clearAll();
+      await seedIntegration();
+      const res = await post(writerCookie, rootBody(), DISCOVER_PATH);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ApiError).error.code).toBe("not_connected");
+    });
+
+    it("diagnoses a 404 the same way fetchSkillFiles does, reusing the same refusal", async () => {
+      await ready();
+      const provider = stub({ [INSTALLATIONS]: { total_count: 0, installations: [] } });
+
+      await expect(imports.listSkillFolders(writer.id, rootLocation(), provider.fetch)).rejects.toMatchObject({
+        code: "app_not_installed",
+      });
+    });
+
+    it("refuses a reader, and an unauthenticated caller", async () => {
+      await ready();
+      expect((await post(readerCookie, rootBody(), DISCOVER_PATH)).status).toBe(403);
+
+      const res = await context.app.request(DISCOVER_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(rootBody()),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects a traversing path before any outbound request, same as /skill-files", async () => {
+      await ready();
+      const res = await post(writerCookie, rootBody({ path: "../etc" }), DISCOVER_PATH);
+      expect(res.status).toBe(400);
+    });
+
+    it("cannot be moved to a different provider by the body", async () => {
+      await ready();
+      const res = await post(writerCookie, { ...rootBody(), provider: "gitlab", url: "https://evil.example.com" }, DISCOVER_PATH);
+      // Reaches the walk (and fails there against no stub) rather than being pointed
+      // anywhere: what matters is that it is not a 200 from evil.example.com.
+      expect([409, 502]).toContain(res.status);
+    });
+  });
 });
 
 /** The location the stubs above are written for. */

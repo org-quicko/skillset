@@ -1,5 +1,7 @@
 import {
+  discoverSkillFolders,
   SkillFilesSchema,
+  SkillSourcesSchema,
   parseSkillSourceUrl,
   readSkillFolder,
   SkillFolderError,
@@ -43,8 +45,24 @@ const ANONYMOUS_MESSAGES: Record<Exclude<SkillFolderReason, "not_found">, string
 };
 
 /**
- * Fetches a Skill's files from a Git Provider, given the URL a writer pasted
- * on the publish screen.
+ * `ANONYMOUS_MESSAGES`'s two folder-shaped sentences, reworded for a walk that
+ * searches a project rather than reading one named folder — `empty_folder`
+ * means no Skill was found anywhere in it, and `too_many_entries` means the
+ * walk gave up rather than that one folder is oversized.
+ */
+const DISCOVERY_MESSAGES: Partial<Record<Exclude<SkillFolderReason, "not_found">, string>> = {
+  empty_folder: "No Skill was found under that project or folder.",
+  too_many_entries: "That project has more to search than a discovery walk will look through.",
+};
+
+/** The sentence for a reason a discovery walk refused on. */
+function discoveryFailureMessage(reason: Exclude<SkillFolderReason, "not_found">): string {
+  return DISCOVERY_MESSAGES[reason] ?? ANONYMOUS_MESSAGES[reason];
+}
+
+/**
+ * Fetches a Skill's files from a Git Provider, given the already-parsed
+ * location a writer's pasted URL named, or that a discovery walk found.
  *
  * @remarks
  * GitHub goes through the Registry, which attaches the writer's Connection
@@ -64,25 +82,21 @@ const ANONYMOUS_MESSAGES: Record<Exclude<SkillFolderReason, "not_found">, string
  * relative to the published folder, not the project root — so it feeds the same
  * publishing pipeline unchanged.
  *
- * @param url - A repository, project, or folder URL, as accepted by
- * `parseSkillSourceUrl`.
+ * @param location - The provider, project, ref, and folder to read.
  * @returns The folder's files as `SkillFile[]`.
- * @throws Error if `url` isn't a recognised Git Provider URL (from
- * `parseSkillSourceUrl`), or, on the anonymous path, carrying the
- * `ANONYMOUS_MESSAGES` sentence for whatever the walk refused on.
+ * @throws Error, on the anonymous path, carrying the `ANONYMOUS_MESSAGES`
+ * sentence for whatever the walk refused on.
  * @throws ApiError if the import fails under the writer's own grant, and —
  * when the anonymous path cannot see the project either — if no token was sent
  * because they hold no Connection or import is not configured.
  * @example
  * ```ts
- * const files = await fetchSkillSourceFiles(
- *   "https://github.com/org/repo/tree/main/skills/code-review",
- * );
+ * const files = await fetchSkillFilesAt({
+ *   provider: "github", project: "org/repo", ref: "main", path: "skills/code-review",
+ * });
  * ```
  */
-export async function fetchSkillSourceFiles(url: string): Promise<SkillFile[]> {
-  const location = parseSkillSourceUrl(url);
-
+export async function fetchSkillFilesAt(location: SkillSourceLocation): Promise<SkillFile[]> {
   // Only GitHub has a credentialed path (ADR-0024). Anything else is public-only,
   // so there is nothing to try first.
   if (location.provider !== "github") return readAnonymously(location);
@@ -105,6 +119,98 @@ export async function fetchSkillSourceFiles(url: string): Promise<SkillFile[]> {
       if (anonymous.reason === "not_found") throw error;
       throw new Error(ANONYMOUS_MESSAGES[anonymous.reason]);
     }
+  }
+}
+
+/**
+ * Fetches a Skill's files from a Git Provider, given the URL a writer pasted
+ * on the publish screen.
+ *
+ * @remarks
+ * Parses `url` and delegates to `fetchSkillFilesAt` — see there for how the
+ * credentialed and anonymous paths are chosen between.
+ *
+ * @param url - A repository, project, or folder URL, as accepted by
+ * `parseSkillSourceUrl`.
+ * @returns The folder's files as `SkillFile[]`.
+ * @throws Error if `url` isn't a recognised Git Provider URL (from
+ * `parseSkillSourceUrl`), or whatever `fetchSkillFilesAt` throws.
+ * @throws ApiError as `fetchSkillFilesAt` documents.
+ * @example
+ * ```ts
+ * const files = await fetchSkillSourceFiles(
+ *   "https://github.com/org/repo/tree/main/skills/code-review",
+ * );
+ * ```
+ */
+export async function fetchSkillSourceFiles(url: string): Promise<SkillFile[]> {
+  return fetchSkillFilesAt(parseSkillSourceUrl(url));
+}
+
+/**
+ * Finds every Skill folder under the location a writer's pasted URL names —
+ * the discovery companion to `fetchSkillSourceFiles`, for a URL that may hold
+ * more than one Skill (a repository root, or a folder several Skills sit
+ * inside) rather than exactly one.
+ *
+ * @remarks
+ * Chooses between the credentialed and anonymous walk exactly as
+ * `fetchSkillFilesAt` does, and for the same reason (ADR-0024): a discovery
+ * walk spends roughly one request per directory visited, so the sixty
+ * requests an hour an anonymous browser gets exhausts far sooner than a
+ * single-folder read would.
+ *
+ * @param url - A repository, project, or folder URL, as accepted by
+ * `parseSkillSourceUrl`.
+ * @returns Every Skill folder found, each ready to hand to `fetchSkillFilesAt`.
+ * @throws Error if `url` isn't a recognised Git Provider URL, or, on the
+ * anonymous path, carrying the `ANONYMOUS_MESSAGES` sentence for whatever the
+ * walk refused on — including finding no Skill at all.
+ * @throws ApiError if the walk fails under the writer's own grant, and — when
+ * the anonymous path cannot see the project either — if no token was sent
+ * because they hold no Connection or import is not configured.
+ * @example
+ * ```ts
+ * const found = await discoverSkillSources("https://github.com/org/repo");
+ * ```
+ */
+export async function discoverSkillSources(url: string): Promise<SkillSourceLocation[]> {
+  const location = parseSkillSourceUrl(url);
+
+  if (location.provider !== "github") return discoverAnonymously(location);
+
+  try {
+    const { items } = await apiFetch(`/imports/${location.provider}/skills`, SkillSourcesSchema, {
+      method: "POST",
+      body: JSON.stringify({ project: location.project, ref: location.ref, path: location.path }),
+    });
+    return items;
+  } catch (error) {
+    if (!(error instanceof ApiError) || !SENT_NO_TOKEN.has(error.code)) throw error;
+
+    try {
+      return await discoverSkillFolders(location);
+    } catch (anonymous) {
+      if (!(anonymous instanceof SkillFolderError)) throw anonymous;
+      if (anonymous.reason === "not_found") throw error;
+      throw new Error(discoveryFailureMessage(anonymous.reason));
+    }
+  }
+}
+
+/** `discoverSkillSources`'s anonymous path — see `readAnonymously`, its `fetchSkillFilesAt` counterpart. */
+async function discoverAnonymously(location: SkillSourceLocation): Promise<SkillSourceLocation[]> {
+  try {
+    return await discoverSkillFolders(location);
+  } catch (error) {
+    if (!(error instanceof SkillFolderError)) throw error;
+    if (error.reason === "not_found") {
+      throw new Error(
+        "That project or folder could not be found. This Registry can only read public projects from " +
+          "this host, so a private one has to be published by uploading its folder.",
+      );
+    }
+    throw new Error(discoveryFailureMessage(error.reason));
   }
 }
 

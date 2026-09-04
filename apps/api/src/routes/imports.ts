@@ -1,4 +1,4 @@
-import { SkillFilesSchema, SkillSourceLocationSchema } from "@skill-registry/shared";
+import { SkillFilesSchema, SkillSourceLocationSchema, SkillSourcesSchema } from "@skill-registry/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { parseValue, readJsonObject } from "../http/body.js";
@@ -9,9 +9,9 @@ export type ImportRouteDependencies = AuthDependencies & {
 };
 
 /**
- * Registers `POST /imports/:provider/skill-files`: reading a Skill folder out
- * of a project the caller's Connection can see, private ones included
- * (ADR-0024).
+ * Registers `POST /imports/:provider/skill-files` and `POST /imports/:provider/skills`:
+ * reading a Skill folder, and finding every Skill folder under a location, out of a project
+ * the caller's Connection can see, private ones included (ADR-0024).
  *
  * @remarks
  * Note what the body is, and is not. It carries `{ project, ref, path }` and
@@ -27,6 +27,12 @@ export type ImportRouteDependencies = AuthDependencies & {
  *
  * `writer`, not `reader`: this exists to publish, and reading a Skill needs no
  * identity at all (ADR-0013), so there is no reason for a reader to reach it.
+ *
+ * `/skills` takes the same body shape and answers with locations, not files —
+ * a writer pastes a URL that may hold more than one Skill, picks which of the
+ * ones found to publish, and each pick becomes its own `/skill-files` request.
+ * It shares every precondition and diagnosis `/skill-files` has, since both
+ * routes are backed by the same Connection and the same walk.
  *
  * Public projects come through here too, for a writer who holds a Connection —
  * the token is worth sending either way, since it is the same access and it
@@ -52,5 +58,16 @@ export function registerImportRoutes(app: Hono<{ Variables: AuthVariables }>, de
       content_base64: Buffer.from(file.bytes).toString("base64"),
     }));
     return c.json(SkillFilesSchema.parse({ items }));
+  });
+
+  app.post("/imports/:provider/skills", requireAuth(deps), requireRole("writer"), async (c) => {
+    // Spread first, provider second: the path wins.
+    const location = parseValue(
+      { ...(await readJsonObject(c)), provider: c.req.param("provider") },
+      SkillSourceLocationSchema,
+    );
+
+    const items = await deps.imports.listSkillFolders(c.get("user").id, location);
+    return c.json(SkillSourcesSchema.parse({ items }));
   });
 }

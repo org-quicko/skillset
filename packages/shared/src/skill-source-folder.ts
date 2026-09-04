@@ -1,10 +1,12 @@
-import { ARTIFACT_MAX_ENTRIES, ARTIFACT_MAX_UNCOMPRESSED_BYTES, type SkillFile } from "./artifact.js";
+import { ARTIFACT_MAX_ENTRIES, ARTIFACT_MAX_UNCOMPRESSED_BYTES, isExcludedPath, type SkillFile } from "./artifact.js";
 import { gitProviderConfig } from "./git-provider.js";
 import type { GitHubContentsEntry } from "./github-contents-entry.js";
 import type { GitLabTreeEntry } from "./gitlab-tree-entry.js";
+import { SKILL_DISCOVERY_MAX_DEPTH } from "./skill-discovery.js";
 import type { SkillFolderOptions } from "./skill-folder-options.js";
 import type { SkillFolderReason } from "./skill-folder-reason.js";
 import type { SkillFolderTransport } from "./skill-folder-transport.js";
+import { SKILL_FILE_NAME } from "./skill-rules.js";
 import type { SkillSourceLocation } from "./skill-source-location.js";
 
 /**
@@ -16,6 +18,22 @@ const USER_AGENT = "skill-registry";
 
 /** GitLab pages its tree listing; this is its maximum page size. */
 const GITLAB_PAGE_SIZE = 100;
+
+/**
+ * Builds the transport both walks share.
+ *
+ * @remarks
+ * `fetch` is bound, not a bare reference: called as `transport.fetch(...)`,
+ * an unbound native `fetch` throws "Illegal invocation" in a real browser,
+ * which no test using an injected stub would ever catch.
+ */
+function buildTransport(location: SkillSourceLocation, options: SkillFolderOptions): SkillFolderTransport {
+  return {
+    fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
+    token: options.token,
+    config: gitProviderConfig(location.provider),
+  };
+}
 
 /** Thrown when a folder could not be read, carrying the specific `reason` a caller branches on. */
 export class SkillFolderError extends Error {
@@ -337,11 +355,7 @@ export async function readSkillFolder(
   location: SkillSourceLocation,
   options: SkillFolderOptions = {},
 ): Promise<SkillFile[]> {
-  const transport: SkillFolderTransport = {
-    fetch: options.fetch ?? globalThis.fetch,
-    token: options.token,
-    config: gitProviderConfig(location.provider),
-  };
+  const transport = buildTransport(location, options);
   const files = collect(
     options.maxFiles ?? ARTIFACT_MAX_ENTRIES,
     options.maxBytes ?? ARTIFACT_MAX_UNCOMPRESSED_BYTES,
@@ -358,4 +372,212 @@ export async function readSkillFolder(
     throw new SkillFolderError("empty_folder", "That folder is empty, or doesn't exist at that ref.");
   }
   return files.files;
+}
+
+/** The last segment of a `/`-delimited path. */
+function basename(path: string): string {
+  const index = path.lastIndexOf("/");
+  return index === -1 ? path : path.slice(index + 1);
+}
+
+/**
+ * A discovered Skill directory's path, relative to `location.path` — `""`
+ * when the directory *is* `location.path`.
+ */
+function relativeToLocation(location: SkillSourceLocation, dir: string): string {
+  if (dir === location.path) return "";
+  return location.path === "" ? dir : dir.slice(location.path.length + 1);
+}
+
+/**
+ * Walks a GitHub folder through the Contents API, looking for `SKILL.md`
+ * rather than fetching bytes — one request per directory visited, same as
+ * {@link readGitHub}, but a directory is never visited once it is found to
+ * hold a Skill.
+ *
+ * @remarks
+ * Bounded by directories visited, not just by depth: `SKILL_DISCOVERY_MAX_DEPTH`
+ * caps how far down the walk looks, but a wide tree (many directories at the
+ * same level) is otherwise unbounded in request count, unlike
+ * {@link discoverGitLab}'s single listing, which `maxEntries` already caps.
+ * One `contents` call is one request, so counting those is what keeps a
+ * pathologically wide project from costing the caller (or, server-side, this
+ * Registry) an unbounded number of upstream requests.
+ *
+ * @throws SkillFolderError as `discoverSkillFolders` documents.
+ */
+async function discoverGitHub(
+  transport: SkillFolderTransport,
+  location: SkillSourceLocation,
+  ref: string,
+  maxRequests: number,
+): Promise<SkillSourceLocation[]> {
+  const { api_base } = transport.config;
+  let requests = 0;
+
+  const contents = async (path: string): Promise<GitHubContentsEntry[]> => {
+    requests += 1;
+    if (requests > maxRequests) {
+      throw new SkillFolderError(
+        "too_many_entries",
+        `That project holds more directories than a discovery walk will search.`,
+      );
+    }
+
+    const url = `${api_base}/repos/${location.project}/contents/${path}?ref=${encodeURIComponent(ref)}`;
+    const res = await request(transport, url);
+    if (!res.ok) throw failure(transport, res);
+
+    const body = (await res.json()) as GitHubContentsEntry | GitHubContentsEntry[];
+    return Array.isArray(body) ? body : [body];
+  };
+
+  const found: SkillSourceLocation[] = [];
+
+  const walk = async (path: string, depth: number): Promise<void> => {
+    const entries = await contents(path);
+
+    if (entries.some((entry) => entry.type === "file" && basename(entry.path) === SKILL_FILE_NAME)) {
+      found.push({ ...location, path, ref });
+      return;
+    }
+    if (depth >= SKILL_DISCOVERY_MAX_DEPTH) return;
+
+    for (const entry of entries) {
+      if (entry.type !== "dir" || isExcludedPath(basename(entry.path))) continue;
+      await walk(entry.path, depth + 1);
+    }
+  };
+
+  await walk(location.path, 0);
+  return found;
+}
+
+/**
+ * Finds every Skill directory in a GitLab project from one recursive tree
+ * listing, rather than one request per directory as GitHub's walk needs.
+ *
+ * @remarks
+ * The listing already scopes to `location.path` (its `path` query parameter),
+ * so what is left here is purely local: depth, exclusion, and — because one
+ * listing sees the whole tree at once rather than stopping descent as it
+ * goes — dropping any match nested inside a shorter one after the fact.
+ *
+ * @throws SkillFolderError as `discoverSkillFolders` documents.
+ */
+async function discoverGitLab(
+  transport: SkillFolderTransport,
+  location: SkillSourceLocation,
+  ref: string,
+  maxEntries: number,
+): Promise<SkillSourceLocation[]> {
+  const { api_base } = transport.config;
+  const base = `${api_base}/projects/${projectId(location)}/repository`;
+
+  const entries: GitLabTreeEntry[] = [];
+  let page = 1;
+  while (page > 0) {
+    const url =
+      `${base}/tree?recursive=true&per_page=${GITLAB_PAGE_SIZE}&page=${page}` +
+      `&ref=${encodeURIComponent(ref)}&path=${encodeURIComponent(location.path)}`;
+    const res = await request(transport, url);
+    if (!res.ok) throw failure(transport, res);
+
+    entries.push(...((await res.json()) as GitLabTreeEntry[]));
+    if (entries.length > maxEntries) {
+      throw new SkillFolderError(
+        "too_many_entries",
+        `That project holds more than ${maxEntries} entries, which is more than a discovery walk will search.`,
+      );
+    }
+
+    const next = Number(res.headers.get("x-next-page") ?? "");
+    page = Number.isSafeInteger(next) && next > page ? next : 0;
+  }
+
+  const skillDirs = entries
+    .filter((entry) => entry.type === "blob" && basename(entry.path) === SKILL_FILE_NAME)
+    .map((entry) => entry.path.slice(0, -(SKILL_FILE_NAME.length + 1)));
+
+  const withinBounds = skillDirs
+    .map((dir) => ({ dir, rel: relativeToLocation(location, dir) }))
+    .filter(({ rel }) => {
+      if (rel === "") return true;
+      const segments = rel.split("/");
+      return segments.length <= SKILL_DISCOVERY_MAX_DEPTH && !segments.some((segment) => isExcludedPath(segment));
+    });
+
+  // A directory nested inside a shorter match is dropped, so a Skill's own
+  // supporting directories are never mistaken for Skills of their own — the
+  // one thing GitHub's walk gets for free by never descending into a match,
+  // and this walk has to restore after the fact.
+  const kept: string[] = [];
+  for (const { dir, rel } of withinBounds.sort((a, b) => a.rel.length - b.rel.length)) {
+    const nested = kept.some((keptDir) => {
+      const keptRel = relativeToLocation(location, keptDir);
+      return rel !== keptRel && (keptRel === "" || rel.startsWith(`${keptRel}/`));
+    });
+    if (!nested) kept.push(dir);
+  }
+
+  return kept.map((dir) => ({ ...location, path: dir, ref }));
+}
+
+/**
+ * Finds every Skill folder under a location in a project at a Git Provider.
+ *
+ * @remarks
+ * A companion to {@link readSkillFolder} for a location that may hold more
+ * than one Skill — a repository root, or any folder several Skills live
+ * inside. A folder is a Skill the moment it holds a `SKILL.md`, and the walk
+ * never descends into one once it has found it, so a Skill's own supporting
+ * directories are never mistaken for Skills of their own. It looks up to
+ * `SKILL_DISCOVERY_MAX_DEPTH` levels below `location.path`, and skips version
+ * control metadata, dependency directories, and dotfile directories — the
+ * same rule `isExcludedPath` already applies to a Skill's own files.
+ *
+ * If `location.path` itself holds a `SKILL.md`, that is the only result and
+ * the walk does not run any further — the given folder already names exactly
+ * one Skill.
+ *
+ * @param location - The provider, project, ref, and folder to search from. A
+ * `null` ref resolves the project's default branch.
+ * @param options - The caller's token and a `fetch` to use. `maxFiles` bounds
+ * how much work the walk will do before giving up: tree entries examined on
+ * GitLab, whose one-shot listing is not itself bounded by depth the way
+ * GitHub's per-directory walk is, and directories visited (one request each)
+ * on GitHub, whose depth limit alone does not bound a wide tree's request
+ * count. Defaults to `ARTIFACT_MAX_ENTRIES` either way.
+ * @returns Every Skill folder found, each as a `SkillSourceLocation` sharing
+ * `location`'s provider and project, with `ref` resolved.
+ * @throws SkillFolderError with reason `not_found`, `unauthorized`,
+ * `rate_limited`, or `request_failed` if the provider refuses a request;
+ * `too_many_entries` if the walk exceeds `maxFiles`' worth of work; or
+ * `empty_folder` if no Skill is found under `location.path`.
+ * @throws Error if `location.provider` is not a known Git Provider.
+ * @example
+ * ```ts
+ * const found = await discoverSkillFolders({
+ *   provider: "github", project: "acme/skills", ref: null, path: "",
+ * });
+ * // -> [{ provider: "github", project: "acme/skills", ref: "main", path: "code-review" }, ...]
+ * ```
+ */
+export async function discoverSkillFolders(
+  location: SkillSourceLocation,
+  options: SkillFolderOptions = {},
+): Promise<SkillSourceLocation[]> {
+  const transport = buildTransport(location, options);
+  const ref = location.ref ?? (await defaultBranch(transport, location));
+  const maxEntries = options.maxFiles ?? ARTIFACT_MAX_ENTRIES;
+
+  const found =
+    location.provider === "github"
+      ? await discoverGitHub(transport, location, ref, maxEntries)
+      : await discoverGitLab(transport, location, ref, maxEntries);
+
+  if (found.length === 0) {
+    throw new SkillFolderError("empty_folder", "That folder is empty, or doesn't exist at that ref.");
+  }
+  return found;
 }

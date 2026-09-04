@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  discoverSkillFolders,
   readSkillFolder,
   SkillFolderError,
   type SkillFolderReason,
@@ -414,6 +415,194 @@ describe("what a provider's refusals mean", () => {
   it("throws rather than refuses on a provider it does not know, which is a caller bug", async () => {
     await expect(
       readSkillFolder({ ...GITHUB, provider: "bitbucket" }, { fetch: stub({}).fetch }),
+    ).rejects.toThrow(/Unknown Git Provider/);
+  });
+});
+
+/**
+ * `discoverSkillFolders` is `readSkillFolder`'s companion for a location that
+ * may hold more than one Skill — a repository root, or a folder several
+ * Skills sit inside.
+ */
+describe("Finding every Skill folder under a location", () => {
+  const ROOT_GITHUB: SkillSourceLocation = { provider: "github", project: "acme/skills", ref: "main", path: "" };
+  const rootContents = (path: string) => `https://api.github.com/repos/acme/skills/contents/${path}?ref=main`;
+  const dir = (path: string): Record<string, unknown> => ({ path, type: "dir", download_url: null });
+
+  const ROOT_GITLAB: SkillSourceLocation = {
+    provider: "gitlab",
+    project: "acme/platform/skills",
+    ref: "main",
+    path: "",
+  };
+  const ROOT_GL_API = "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fskills/repository";
+  const rootTree = (page: number) => `${ROOT_GL_API}/tree?recursive=true&per_page=100&page=${page}&ref=main&path=`;
+
+  describe("on GitHub", () => {
+    it("returns exactly the given folder when it itself holds a SKILL.md, and walks no further", async () => {
+      const github = stub({ [rootContents("")]: [file("SKILL.md"), dir("other")] });
+
+      const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch });
+
+      expect(found).toEqual([{ ...ROOT_GITHUB, path: "", ref: "main" }]);
+      expect(github.urls).toEqual([rootContents("")]);
+    });
+
+    it("finds every Skill folder without descending into one it already found", async () => {
+      const github = stub({
+        [rootContents("")]: [dir("apps"), file("README.md")],
+        [rootContents("apps")]: [dir("apps/code-review"), dir("apps/pdf-tools")],
+        [rootContents("apps/code-review")]: [file("apps/code-review/SKILL.md"), dir("apps/code-review/refs")],
+        [rootContents("apps/pdf-tools")]: [file("apps/pdf-tools/SKILL.md")],
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch });
+
+      expect(found.map((location) => location.path).sort()).toEqual(["apps/code-review", "apps/pdf-tools"]);
+      expect(github.urls).not.toContain(rootContents("apps/code-review/refs"));
+    });
+
+    it("finds a Skill exactly three levels below the starting folder", async () => {
+      const github = stub({
+        [rootContents("")]: [dir("a")],
+        [rootContents("a")]: [dir("a/b")],
+        [rootContents("a/b")]: [dir("a/b/c")],
+        [rootContents("a/b/c")]: [file("a/b/c/SKILL.md")],
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch });
+
+      expect(found.map((location) => location.path)).toEqual(["a/b/c"]);
+    });
+
+    it("does not look past the depth limit", async () => {
+      const github = stub({
+        [rootContents("")]: [dir("a")],
+        [rootContents("a")]: [dir("a/b")],
+        [rootContents("a/b")]: [dir("a/b/c")],
+        [rootContents("a/b/c")]: [dir("a/b/c/d")],
+        [rootContents("a/b/c/d")]: [file("a/b/c/d/SKILL.md")],
+      });
+
+      await expectReason(discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch }), "empty_folder");
+      expect(github.urls).not.toContain(rootContents("a/b/c/d"));
+    });
+
+    it("skips version-control, dependency, and dotfile directories", async () => {
+      const github = stub({
+        [rootContents("")]: [dir(".git"), dir("node_modules"), dir("skills")],
+        [rootContents("skills")]: [file("skills/SKILL.md")],
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch });
+
+      expect(found.map((location) => location.path)).toEqual(["skills"]);
+      expect(github.urls).not.toContain(rootContents(".git"));
+      expect(github.urls).not.toContain(rootContents("node_modules"));
+    });
+
+    it("refuses a project wide enough to need more directory requests than the walk will make", async () => {
+      // Depth alone does not bound a wide tree: three directories at the same
+      // level is already one request over a ceiling of three (the root's own
+      // listing counts as the first).
+      const github = stub({
+        [rootContents("")]: [dir("a"), dir("b"), dir("c")],
+        [rootContents("a")]: [file("a/x.md")],
+        [rootContents("b")]: [file("b/x.md")],
+        [rootContents("c")]: [file("c/x.md")],
+      });
+
+      await expectReason(discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch, maxFiles: 3 }), "too_many_entries");
+      // Refused on the request that would have exceeded the ceiling: the
+      // fourth directory (the root plus its first two children) is never
+      // actually requested.
+      expect(github.urls).toHaveLength(3);
+    });
+
+    it("throws empty_folder when no Skill is found", async () => {
+      const github = stub({ [rootContents("")]: [file("README.md")] });
+      await expectReason(discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch }), "empty_folder");
+    });
+
+    it("resolves the default branch and carries it on every result", async () => {
+      const github = stub({
+        "https://api.github.com/repos/acme/skills": { default_branch: "trunk" },
+        "https://api.github.com/repos/acme/skills/contents/?ref=trunk": [file("SKILL.md")],
+      });
+
+      const found = await discoverSkillFolders({ ...ROOT_GITHUB, ref: null }, { fetch: github.fetch });
+
+      expect(found).toEqual([{ ...ROOT_GITHUB, path: "", ref: "trunk" }]);
+    });
+  });
+
+  describe("on GitLab", () => {
+    it("returns exactly the given folder when it itself holds a SKILL.md, from one listing", async () => {
+      const gitlab = stub({
+        [rootTree(1)]: [
+          { path: "SKILL.md", type: "blob" },
+          { path: "other", type: "tree" },
+        ],
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITLAB, { fetch: gitlab.fetch });
+
+      expect(found).toEqual([{ ...ROOT_GITLAB, path: "", ref: "main" }]);
+    });
+
+    it("finds every Skill folder, dropping any nested inside another", async () => {
+      const gitlab = stub({
+        [rootTree(1)]: [
+          { path: "apps/code-review/SKILL.md", type: "blob" },
+          { path: "apps/code-review/refs/SKILL.md", type: "blob" },
+          { path: "apps/pdf-tools/SKILL.md", type: "blob" },
+        ],
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITLAB, { fetch: gitlab.fetch });
+
+      expect(found.map((location) => location.path).sort()).toEqual(["apps/code-review", "apps/pdf-tools"]);
+    });
+
+    it("finds a Skill exactly at the depth limit, but not past it", async () => {
+      const atLimit = stub({ [rootTree(1)]: [{ path: "a/b/c/SKILL.md", type: "blob" }] });
+      const found = await discoverSkillFolders(ROOT_GITLAB, { fetch: atLimit.fetch });
+      expect(found.map((location) => location.path)).toEqual(["a/b/c"]);
+
+      const pastLimit = stub({ [rootTree(1)]: [{ path: "a/b/c/d/SKILL.md", type: "blob" }] });
+      await expectReason(discoverSkillFolders(ROOT_GITLAB, { fetch: pastLimit.fetch }), "empty_folder");
+    });
+
+    it("skips dependency and dotfile directories", async () => {
+      const gitlab = stub({
+        [rootTree(1)]: [
+          { path: "node_modules/left-pad/SKILL.md", type: "blob" },
+          { path: ".git/SKILL.md", type: "blob" },
+          { path: "skills/SKILL.md", type: "blob" },
+        ],
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITLAB, { fetch: gitlab.fetch });
+
+      expect(found.map((location) => location.path)).toEqual(["skills"]);
+    });
+
+    it("refuses a project holding more entries than the walk will search", async () => {
+      const entries = Array.from({ length: 5 }, (_, index) => ({ path: `skills/${index}/x.md`, type: "blob" as const }));
+      const gitlab = stub({ [rootTree(1)]: entries });
+
+      await expectReason(discoverSkillFolders(ROOT_GITLAB, { fetch: gitlab.fetch, maxFiles: 3 }), "too_many_entries");
+    });
+
+    it("throws empty_folder when no Skill is found", async () => {
+      const gitlab = stub({ [rootTree(1)]: [{ path: "README.md", type: "blob" }] });
+      await expectReason(discoverSkillFolders(ROOT_GITLAB, { fetch: gitlab.fetch }), "empty_folder");
+    });
+  });
+
+  it("throws rather than refuses on a provider it does not know, which is a caller bug", async () => {
+    await expect(
+      discoverSkillFolders({ ...ROOT_GITHUB, provider: "bitbucket" }, { fetch: stub({}).fetch }),
     ).rejects.toThrow(/Unknown Git Provider/);
   });
 });
