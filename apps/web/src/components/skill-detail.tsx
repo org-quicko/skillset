@@ -4,14 +4,42 @@ import { useMemo, useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
 import { Panel } from "@/components/panel";
+import { Reveal } from "@/components/reveal";
 import { SkillInstallCard } from "@/components/skill-install-card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useDownloadSkillArtifact, useSkill } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
 import { renderSkillBody } from "@/lib/render-skill-body";
 import { formatDate } from "@/lib/utils";
+
+/** The placeholder page shown while a Skill loads — mirrors the real two-column layout. */
+function SkillDetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-3.5">
+      <Skeleton className="h-3 w-28" />
+      <Skeleton className="h-8 w-64" />
+      <div className="flex gap-1.5">
+        <Skeleton className="h-5 w-16 rounded-full" />
+        <Skeleton className="h-5 w-20 rounded-full" />
+      </div>
+      <div className="mt-2 grid gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-72 w-full rounded-xl" />
+        </div>
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-9 w-full rounded-lg" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** A Publisher's display name, falling back to their email once the User row is gone (docs/data-model.md). */
 function publisherName(publisher: Publisher): string {
@@ -96,34 +124,38 @@ export function SkillDetail({
 
   const bodyHtml = useMemo(() => (skill.data ? renderSkillBody(skill.data.body) : ""), [skill.data]);
 
-  if (skill.isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (skill.isPending) return <SkillDetailSkeleton />;
   if (skill.isError) return <p className="text-sm text-destructive">{apiErrorMessage(skill.error)}</p>;
 
   const data = skill.data;
 
   return (
     <div className="flex flex-col gap-3.5">
-      <nav className="flex items-center gap-2 text-xs text-muted-foreground">
-        <button type="button" onClick={onBack} className="cursor-pointer hover:text-foreground">
-          skills
-        </button>
-        <span>/</span>
-        <span>{data.name}</span>
-      </nav>
+      <Reveal delayMs={0} className="flex items-center gap-2 text-xs text-muted-foreground">
+        <nav className="flex items-center gap-2">
+          <button type="button" onClick={onBack} className="cursor-pointer hover:text-foreground">
+            skills
+          </button>
+          <span>/</span>
+          <span>{data.name}</span>
+        </nav>
+      </Reveal>
 
-      <h1 className="text-3xl font-medium tracking-tight">{data.name}</h1>
+      <Reveal delayMs={50} className="text-3xl font-medium tracking-tight text-balance">
+        <h1>{data.name}</h1>
+      </Reveal>
 
       {data.tags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <Reveal delayMs={100} className="flex flex-wrap items-center gap-1.5">
           {data.tags.map((tag) => (
             <Badge key={tag.id} variant="outline">
               {tag.name}
             </Badge>
           ))}
-        </div>
+        </Reveal>
       )}
 
-      <div className="mt-2 grid gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <Reveal delayMs={150} className="mt-2 grid gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="flex min-w-0 flex-col gap-4">
           <SkillInstallCard name={data.name} />
 
@@ -134,7 +166,7 @@ export function SkillDetail({
 
           <Panel title="SKILL.md">
             <div
-              className="text-sm leading-relaxed [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_li]:ml-4 [&_p]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_ul]:list-disc"
+              className="text-sm leading-relaxed text-pretty [&_a]:underline [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_img]:outline [&_img]:outline-1 [&_img]:-outline-offset-1 [&_img]:outline-[oklch(0_0_0/0.1)] dark:[&_img]:outline-[oklch(1_0_0/0.1)] [&_li]:ml-4 [&_p]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_ul]:list-disc [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1"
               dangerouslySetInnerHTML={{ __html: bodyHtml }}
             />
           </Panel>
@@ -142,7 +174,7 @@ export function SkillDetail({
 
         <div className="flex flex-col gap-4">
           <Panel title="Installs">
-            <span className="text-[28px] font-medium">{data.installs.toLocaleString()}</span>
+            <span className="text-[28px] font-medium tabular-nums">{data.installs.toLocaleString()}</span>
             <span className="mt-1 block text-xs text-muted-foreground">
               {data.installs === 1 ? "install" : "installs"} recorded
             </span>
@@ -185,7 +217,7 @@ export function SkillDetail({
             )}
           </div>
         </div>
-      </div>
+      </Reveal>
 
       {canDelete && (
         <DeleteSkillDialog

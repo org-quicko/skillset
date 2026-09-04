@@ -3,8 +3,8 @@ import { asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { firstRow } from "../db/rows.js";
 import { isInvalidIdSyntax, isUniqueViolation } from "../db/pg-errors.js";
-import { skillTags, skills, tags } from "../db/schemas/index.js";
-import { SkillNotFoundError, TagNameConflictError, TagNotFoundError } from "../http/errors.js";
+import { resourceTags, resources, tags } from "../db/schemas/index.js";
+import { ResourceNotFoundError, TagNameConflictError, TagNotFoundError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
 
 export interface TagSummary {
@@ -12,7 +12,7 @@ export interface TagSummary {
   name: string;
 }
 
-/** The Tag catalog, and the `skill_tags` join that attaches it to Skills (ADR-0011). */
+/** The Tag catalog, and the `resource_tags` join that attaches it to Skills (ADR-0011). */
 export class TagsService {
   constructor(
     private readonly db: Database,
@@ -25,7 +25,7 @@ export class TagsService {
    * @remarks
    * Every Skill read path (list, get, publish's response) calls this instead
    * of reading a `tags` column — a Skill's tags are always a join through
-   * `skill_tags`, never stored redundantly on the Skill's own row (ADR-0011).
+   * `resource_tags`, never stored redundantly on the Skill's own row (ADR-0011).
    * One query for however many Skill ids are passed, not one per Skill.
    *
    * @param skillIds - The Skill ids to fetch Tags for. An empty array
@@ -42,17 +42,17 @@ export class TagsService {
     if (skillIds.length === 0) return new Map();
 
     const rows = await this.db
-      .select({ skill_id: skillTags.skill_id, id: tags.id, name: tags.name })
-      .from(skillTags)
-      .innerJoin(tags, eq(skillTags.tag_id, tags.id))
-      .where(inArray(skillTags.skill_id, skillIds))
+      .select({ resource_id: resourceTags.resource_id, id: tags.id, name: tags.name })
+      .from(resourceTags)
+      .innerJoin(tags, eq(resourceTags.tag_id, tags.id))
+      .where(inArray(resourceTags.resource_id, skillIds))
       .orderBy(asc(tags.name));
 
     const bySkill = new Map<string, TagSummary[]>();
     for (const row of rows) {
-      const forSkill = bySkill.get(row.skill_id) ?? [];
+      const forSkill = bySkill.get(row.resource_id) ?? [];
       forSkill.push({ id: row.id, name: row.name });
-      bySkill.set(row.skill_id, forSkill);
+      bySkill.set(row.resource_id, forSkill);
     }
     return bySkill;
   }
@@ -105,7 +105,7 @@ export class TagsService {
    * @param rawNames - The full desired set of tag names, typically a request
    * body's `tags` field and not yet known to be an array.
    * @returns The Skill's resolved Tags, alphabetical by name.
-   * @throws SkillNotFoundError if `skillId` is not a well-formed UUID, or no
+   * @throws ResourceNotFoundError if `skillId` is not a well-formed UUID, or no
    * Skill exists by it.
    * @throws TagValidationError if `rawNames` isn't an array, or any element
    * fails validation.
@@ -117,12 +117,12 @@ export class TagsService {
   async setSkillTags(skillId: string, rawNames: unknown): Promise<TagSummary[]> {
     let skill: { id: string } | undefined;
     try {
-      [skill] = await this.db.select({ id: skills.id }).from(skills).where(eq(skills.id, skillId)).limit(1);
+      [skill] = await this.db.select({ id: resources.id }).from(resources).where(eq(resources.id, skillId)).limit(1);
     } catch (cause) {
-      if (isInvalidIdSyntax(cause)) throw new SkillNotFoundError();
+      if (isInvalidIdSyntax(cause)) throw new ResourceNotFoundError();
       throw cause;
     }
-    if (!skill) throw new SkillNotFoundError();
+    if (!skill) throw new ResourceNotFoundError();
 
     const names = validateTagNames(rawNames);
 
@@ -137,9 +137,9 @@ export class TagsService {
         resolvedTags.push(firstRow(upserted, "Tag upsert"));
       }
 
-      await tx.delete(skillTags).where(eq(skillTags.skill_id, skillId));
+      await tx.delete(resourceTags).where(eq(resourceTags.resource_id, skillId));
       if (resolvedTags.length > 0) {
-        await tx.insert(skillTags).values(resolvedTags.map((tag) => ({ skill_id: skillId, tag_id: tag.id })));
+        await tx.insert(resourceTags).values(resolvedTags.map((tag) => ({ resource_id: skillId, tag_id: tag.id })));
       }
 
       return resolvedTags;
@@ -154,7 +154,7 @@ export class TagsService {
    * Renames a Tag in place.
    *
    * @remarks
-   * Every Skill carrying this Tag picks up the new name: `skill_tags`
+   * Every Skill carrying this Tag picks up the new name: `resource_tags`
    * references it by `id`, so only `tags.name` changes (ADR-0011).
    *
    * Conflicts come from the unique constraint, not a check-then-write, so two

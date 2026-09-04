@@ -6,12 +6,20 @@ export const meQueryKey = ["me"] as const;
 /** A User's own Tokens. Discarded with the rest of the cache when a session ends. */
 export const tokensQueryKey = ["tokens"] as const;
 
-/** One page of the Skill list. A shared prefix so publishing can invalidate every page at once. */
-export const skillsListQueryKey = ["skills", "list"] as const;
+/**
+ * The root key over every cached Resource shape — list pages, individual
+ * details, and stats alike, since all three are keyed under `["resources", ...]`.
+ * Use this over {@link resourcesListQueryKey} when an invalidation needs to
+ * reach detail entries too (e.g. a Tag rename, which can touch any Resource).
+ */
+export const resourcesQueryKey = ["resources"] as const;
+
+/** One page of the Resource list. A shared prefix so publishing can invalidate every page at once. */
+export const resourcesListQueryKey = ["resources", "list"] as const;
 
 /**
- * Keys the infinite Skill directory query for one filter/sort combination
- * (ticket 23).
+ * Keys the infinite Resource directory query for one filter/sort combination
+ * (ticket 23, ADR-0026).
  *
  * Every filter is part of the key — not just the URL — so switching between
  * search terms, Tag filters, or sort choices is cached as a distinct entry
@@ -20,20 +28,21 @@ export const skillsListQueryKey = ["skills", "list"] as const;
  * same set of Tags in a different pick order still hits the same entry.
  *
  * @param filters - The search term, selected Tag ids, and sort choice.
- * @returns A query key rooted at {@link skillsListQueryKey}, so invalidating
- * that shared prefix still invalidates every filter/sort combination.
+ * @returns A query key rooted at {@link resourcesListQueryKey}, so
+ * invalidating that shared prefix still invalidates every filter/sort
+ * combination.
  * @example
- * skillDirectoryQueryKey({ q: "code review", tagIds: [], sortBy: "installs", sortOrder: "desc" })
- * // => ["skills", "list", "code review", [], "installs", "desc"]
+ * resourceDirectoryQueryKey({ q: "code review", tagIds: [], sortBy: "installs", sortOrder: "desc" })
+ * // => ["resources", "list", "code review", [], "installs", "desc"]
  */
-export function skillDirectoryQueryKey(filters: {
+export function resourceDirectoryQueryKey(filters: {
   q: string;
   tagIds: string[];
   sortBy: string;
   sortOrder: string;
 }) {
   return [
-    ...skillsListQueryKey,
+    ...resourcesListQueryKey,
     filters.q,
     [...filters.tagIds].sort(),
     filters.sortBy,
@@ -42,12 +51,12 @@ export function skillDirectoryQueryKey(filters: {
 }
 
 /** A single Skill, with its `SKILL.md` body. */
-export function skillQueryKey(name: string) {
-  return ["skills", "detail", name] as const;
+export function resourceQueryKey(name: string) {
+  return ["resources", "detail", name] as const;
 }
 
-/** The Skill directory's hero stats — unfiltered, unlike `skillsListQueryKey`'s pages. */
-export const skillStatsQueryKey = ["skills", "stats"] as const;
+/** The catalog's hero stats — unfiltered, unlike `resourcesListQueryKey`'s pages. */
+export const resourceStatsQueryKey = ["resources", "stats"] as const;
 
 /** The whole Tag catalog — what a tag editor's autocomplete filters against. */
 export const tagsListQueryKey = ["tags", "list"] as const;

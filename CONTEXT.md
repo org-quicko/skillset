@@ -1,27 +1,59 @@
 # Skillset
 
-A self-hosted registry for Agent Skills. Skills are published from the CLI or the web
-interface, stored in object storage, and discovered by members of a single team.
+A self-hosted registry for the things a coding agent loads — Skills, MCP Servers, and Plugins.
+Resources are published from the CLI or the web interface, stored as rows and (for the Kinds that
+have bytes) in object storage, and discovered by members of a single team.
 
 ## Language
 
+**Resource**:
+Anything the Registry holds and a coding agent can obtain. Every Resource has a Kind, a `name`
+unique within that Kind, a description, a publisher, optional markdown documentation (`body`),
+and any number of Tags; everything else about it lives in its Kind-specific payload (ADR-0026).
+Not every Resource has an Artifact (ADR-0027).
+_Avoid_: Package, entry, item, asset, artifact (which is the zip, not the thing)
+
+**Kind**:
+Which of the three things a Resource is — `skill`, `mcp-server`, or `plugin`. A Kind fixes the
+shape of the payload, the rules `name` and `description` must satisfy, whether there is an
+Artifact, and what `skillreg add` does. Stored as plain text rather than an enum, so a fourth
+Kind is an insert rather than a migration (ADR-0026, following ADR-0024).
+_Avoid_: Type, category, class, resource type
+
 **Skill**:
-A directory bundle whose root holds a `SKILL.md` with YAML frontmatter, alongside any
-supporting files it needs.
+The Kind whose payload is a directory bundle: a root `SKILL.md` with YAML frontmatter, alongside
+any supporting files it needs. Has an Artifact.
 _Avoid_: Prompt, template, doc, package
 
 **SKILL.md**:
-The mandatory file at the root of a Skill. Its frontmatter is the source of truth for the
-Skill's `name` and `description`, plus the four optional fields the Agent Skills spec
-defines (`license`, `compatibility`, `metadata`, `allowed-tools`); anything else in the
-file is ignored.
+The mandatory file at the root of a Skill. Its frontmatter is the source of truth for the Skill's
+`name` and `description`, plus the four optional fields the Agent Skills spec defines (`license`,
+`compatibility`, `metadata`, `allowed-tools`); anything else in the file is ignored. Everything
+below the frontmatter becomes the Resource's `body`.
 _Avoid_: Manifest, metadata file
 
+**MCP Server**:
+The Kind that is pure metadata — a `server.json`-shaped record naming where a Model Context
+Protocol server actually comes from: either `packages[]` (an npm, PyPI, OCI, NuGet, Cargo or MCPB
+identifier with its transport, arguments and environment variables) or `remotes[]` (a URL and
+transport). **The Registry stores no bytes for it** (ADR-0027) — it is a pointer, exactly as the
+public MCP registry is. Its `name` is reverse-DNS with a single slash and its `description` is
+capped at 100 characters, both fixed by the upstream specification and neither compatible with a
+Skill's rules.
+_Avoid_: MCP, server, tool server, connector
+
+**Plugin**:
+The Kind that bundles Resources for an agent to load together — a repository with a
+`.claude-plugin/plugin.json` manifest and any of `skills/`, `commands/`, `agents/`, `hooks/`,
+`.mcp.json`. Has an Artifact, and the Registry never looks inside it (ADR-0001): the Skills a
+Plugin contains are its own business, not rows in this Registry.
+_Avoid_: Bundle, pack, extension, marketplace (which is the document that lists Plugins)
+
 **Tag**:
-A short label a Skill can carry for browsing and filtering, never written into its SKILL.md.
-Drawn from a catalog shared by the whole Registry, not private to one Skill — a Skill's Tags
-are a many-to-many relationship to that catalog, so renaming a Tag changes it everywhere it's
-attached.
+A short label a Resource can carry for browsing and filtering, never written into its payload.
+Drawn from one catalog shared by the whole Registry — shared across Kinds too, so a Skill and an
+MCP Server can carry the same Tag — and a Resource's Tags are a many-to-many relationship to that
+catalog, so renaming a Tag changes it everywhere it's attached.
 _Avoid_: Label, category, topic
 
 **User**:
@@ -31,7 +63,7 @@ address are the same User, whichever Identity Provider asserted it.
 _Avoid_: Account, member, person
 
 **Admin**:
-A User who can create and manage readers and writers, and delete Skills.
+A User who can create and manage readers and writers, and delete Resources.
 _Avoid_: Owner, root
 
 **Superadmin**:
@@ -41,24 +73,32 @@ transferred, reassigned, or removed.
 _Avoid_: Owner, root, superuser
 
 **Registry**:
-The self-hosted service that holds Skills. Reading a Skill needs no identity; publishing,
+The self-hosted service that holds Resources. Reading a Resource needs no identity; publishing,
 deleting, and administration are restricted to the Users who hold the right role. There is
 one Registry per deployment, serving one team.
 _Avoid_: Server, hub, marketplace, repository
 
 **Artifact**:
-The zip archive of a Skill, uploaded directly to object storage by the client and stored
-as a single object per Skill.
+The zip archive of a Resource of a Kind that has one — Skill and Plugin. Uploaded directly to
+object storage by the client and stored as a single object per Resource, keyed by the Resource's
+`id` (ADR-0026). An MCP Server has no Artifact at all (ADR-0027).
 _Avoid_: Bundle, package, tarball, blob
 
 **Install**:
-A recorded, countable instance of a Skill being obtained — one event per occurrence,
-produced by a web Download of its Artifact or (once the CLI exists) `skillreg add`. A
-Skill's install count is the total number of Install events recorded for it. "Download"
-still names the plain act of fetching the Artifact's bytes; every Download produces one
-Install event, but Install is the countable unit the log, the count, and the API's
-`installs` field are named after.
+A recorded, countable instance of a Resource being obtained — one event per occurrence. What
+"obtained" means depends on the Kind: a Download of the Artifact for a Skill or a Plugin, and the
+config being written or revealed for an MCP Server. Counts are therefore **not comparable across
+Kinds** (ADR-0028), and no longer order the catalog by default. "Download" still names the plain
+act of fetching an Artifact's bytes; every Download produces one Install event, but Install is
+the countable unit the log, the count, and the API's `installs` field are named after.
 _Avoid_: Download (as the countable unit — Download is the action, Install is the count)
+
+**Marketplace**:
+The `.claude-plugin/marketplace.json` document the Registry serves so an off-the-shelf agent can
+install from it natively, without `skillreg` (ADR-0030). It lists Skills and Plugins as plugin
+entries with `archive` sources; MCP Servers are not listed, because listing one would mean
+synthesising bytes the Registry deliberately does not have.
+_Avoid_: Index, catalog (which is the Registry's own browse surface), discovery, feed
 
 **Token**:
 A secret a User mints to let the CLI act as them. Shown once, stored only as a hash, and
@@ -69,12 +109,13 @@ _Avoid_: API key, credential, secret
 A coding agent that reads Skills from a conventional directory on a developer's machine.
 The offered list is the full Agent → directory table vendored from `vercel-labs/skills`
 (ADR-0022). `add` writes to the canonical `.agents/skills` and symlinks the chosen Agent's
-own directory to it.
+own directory to it. The table is about **Skills only**: an MCP Server is installed by merging
+a project's `.mcp.json` and names no Agent (ADR-0029).
 _Avoid_: Client, tool, editor, IDE
 
 **Scope**:
-Where a Skill is installed on a machine — either the current project, or the Agent's
-user-level directory.
+Where a Resource is installed on a machine — either the current project, or the Agent's
+user-level directory. An MCP Server has project Scope only (ADR-0029).
 _Avoid_: Target, location, level, destination
 
 **Identity Provider**:
@@ -88,10 +129,10 @@ and the two are registered, granted, and revoked separately.
 _Avoid_: SSO, social login, connection, OIDC provider (as the domain term)
 
 **Git Provider**:
-A hosted git service the Registry can read a Skill's folder from. GitHub and GitLab are the two it
-knows. A Git Provider is not an Identity Provider, even where the same company is both: GitHub is
-reached through two separate registrations, one for signing in and one for Importing, and neither
-knows about the other.
+A hosted git service the Registry can read a Resource's folder from. GitHub and GitLab are the two
+it knows. A Git Provider is not an Identity Provider, even where the same company is both: GitHub
+is reached through two separate registrations, one for signing in and one for Importing, and
+neither knows about the other.
 _Avoid_: Source, repository host, VCS, forge
 
 **Integration**:
@@ -110,9 +151,11 @@ grant at the Git Provider.
 _Avoid_: Link, linked account, authorisation, integration
 
 **Import**:
-A one-time copy of a Skill's files out of a Git Provider and into the Registry. It is not a link:
-what was published keeps no reference to where it came from, and nothing is ever re-read. A public
-folder needs no Connection; a private one is read as the writer's own Connection.
+A one-time copy of a Skill's or a Plugin's files out of a Git Provider and into the Registry. It is
+not a link: what was published keeps no reference to where it came from, and nothing is ever
+re-read. A public folder needs no Connection; a private one is read as the writer's own
+Connection. An MCP Server is never Imported — its whole payload is a `server.json` a writer
+pastes.
 _Avoid_: Sync, clone, pull, link
 
 **Permitted Organisation**:

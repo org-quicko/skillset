@@ -1,5 +1,11 @@
 # No Agent Skills Discovery Protocol
 
+> **Superseded by ADR-0030.** The Registry now serves a Claude Code plugin marketplace. The
+> premise below — that discovery and download are plain `fetch` with no `Authorization`
+> header — is true of `npx skills add` and false of `claude plugin marketplace add`, whose
+> `url` sources support `headers` and `headersHelper`. The agent-skills discovery protocol
+> described here is still not served, for the reason below, unchanged.
+
 `vercel-labs/skills` defines a discovery protocol — `GET /.well-known/agent-skills/index.json`
 with `$schema: https://schemas.agentskills.io/discovery/0.2.0/schema.json` — and any server
 that serves it is installable by `npx skills add <url>` into roughly 70 agents. We are not

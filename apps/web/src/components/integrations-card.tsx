@@ -4,8 +4,25 @@ import { IntegrationDialog } from "@/components/integration-dialog";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useIntegrations } from "@/hooks/use-integrations";
 import { apiErrorMessage } from "@/lib/api";
+
+/** Placeholder integration tiles while `useIntegrations` is in flight. */
+function IntegrationTilesSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <Card key={index}>
+          <CardHeader>
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="mt-1.5 h-3 w-40" />
+          </CardHeader>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
 /**
  * One configured Integration, identified by its app slug — what actually
@@ -89,6 +106,8 @@ export function IntegrationsCard() {
       {integrations.isError && (
         <p className="text-sm text-destructive">{apiErrorMessage(integrations.error)}</p>
       )}
+
+      {integrations.isPending && <IntegrationTilesSkeleton />}
 
       {integrations.isSuccess && configured.length === 0 && (
         <Panel>

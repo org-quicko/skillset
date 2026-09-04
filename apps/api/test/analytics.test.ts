@@ -4,7 +4,7 @@ import type { Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
-import { skillInstallEvents, users } from "../src/db/schemas/index.js";
+import { resourceInstallEvents, users } from "../src/db/schemas/index.js";
 import {
   refreshInstallCounts,
   SIGN_IN_PATH,
@@ -69,7 +69,7 @@ async function createUserAndLogIn(
 }
 
 async function publish(context: TestContext, session: Session, name: string): Promise<string> {
-  const res = await context.app.request(`/api/skills/${name}`, {
+  const res = await context.app.request(`/api/resources/skill/${name}`, {
     method: "PUT",
     headers: { cookie: session.cookie, "content-type": "application/json" },
     body: JSON.stringify({ description: "A Skill.", body: "Body.\n" }),
@@ -79,14 +79,14 @@ async function publish(context: TestContext, session: Session, name: string): Pr
 }
 
 async function download(context: TestContext, session: Session, skillId: string): Promise<Response> {
-  return context.app.request(`/api/skills/${skillId}/artifact`, {
+  return context.app.request(`/api/resources/${skillId}/artifact`, {
     headers: { cookie: session.cookie },
     redirect: "manual",
   });
 }
 
 async function getSkill(context: TestContext, session: Session, skillId: string): Promise<ApiSkill> {
-  const res = await context.app.request(`/api/skills/${skillId}`, { headers: { cookie: session.cookie } });
+  const res = await context.app.request(`/api/resources/${skillId}`, { headers: { cookie: session.cookie } });
   return (await res.json()) as ApiSkill;
 }
 
@@ -144,14 +144,14 @@ describe("Recording installs (ticket 22)", () => {
     const skill = await getSkill(context, reader, skillId);
     expect(skill.installs).toBe(0);
 
-    const page = await context.app.request("/api/skills?page=1", { headers: { cookie: reader.cookie } });
+    const page = await context.app.request("/api/resources?page=1", { headers: { cookie: reader.cookie } });
     const { items } = (await page.json()) as ApiPage;
     expect(items.find((item) => item.id === skillId)?.installs).toBe(0);
   });
 
   it("does not reflect a download until skill_analytics is next refreshed", async () => {
     const skillId = await publish(context, writer, "lagging-skill");
-    await context.storage.put("skills/lagging-skill.zip", new Uint8Array([1]));
+    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
     await refreshInstallCounts(context);
 
     await download(context, reader, skillId);
@@ -165,7 +165,7 @@ describe("Recording installs (ticket 22)", () => {
 
   it("increments by 1 each time the Artifact is downloaded, once refreshed", async () => {
     const skillId = await publish(context, writer, "counted-skill");
-    await context.storage.put("skills/counted-skill.zip", new Uint8Array([1]));
+    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
 
     const first = await download(context, reader, skillId);
     expect(first.status).toBe(302);
@@ -180,7 +180,7 @@ describe("Recording installs (ticket 22)", () => {
 
   it("accumulates correctly under concurrent downloads — no lost updates", async () => {
     const skillId = await publish(context, writer, "concurrent-skill");
-    await context.storage.put("skills/concurrent-skill.zip", new Uint8Array([1]));
+    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
 
     await Promise.all(Array.from({ length: 10 }, () => download(context, reader, skillId)));
     await refreshInstallCounts(context);
@@ -202,11 +202,11 @@ describe("Recording installs (ticket 22)", () => {
 
   it("survives a republish of the same Skill unchanged", async () => {
     const skillId = await publish(context, writer, "republished-analytics-skill");
-    await context.storage.put("skills/republished-analytics-skill.zip", new Uint8Array([1]));
+    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
     await download(context, reader, skillId);
     await refreshInstallCounts(context);
 
-    const republished = await context.app.request("/api/skills/republished-analytics-skill", {
+    const republished = await context.app.request("/api/resources/skill/republished-analytics-skill", {
       method: "PUT",
       headers: { cookie: writer.cookie, "content-type": "application/json" },
       body: JSON.stringify({ description: "Updated.", body: "New body.\n" }),
@@ -217,12 +217,12 @@ describe("Recording installs (ticket 22)", () => {
 
   it("records every download as its own event, tagged with source 'web'", async () => {
     const skillId = await publish(context, writer, "event-sourced-skill");
-    await context.storage.put("skills/event-sourced-skill.zip", new Uint8Array([1]));
+    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
 
     await download(context, reader, skillId);
     await download(context, reader, skillId);
 
-    const events = await context.db.select().from(skillInstallEvents).where(eq(skillInstallEvents.skill_id, skillId));
+    const events = await context.db.select().from(resourceInstallEvents).where(eq(resourceInstallEvents.resource_id, skillId));
     expect(events.length).toBe(2);
     expect(events.every((event) => event.source === "web")).toBe(true);
   });
@@ -230,7 +230,7 @@ describe("Recording installs (ticket 22)", () => {
   it("exposes no public endpoint to record an install directly", async () => {
     const skillId = await publish(context, writer, "no-public-endpoint-skill");
 
-    const res = await context.app.request(`/api/skills/${skillId}/installs`, {
+    const res = await context.app.request(`/api/resources/${skillId}/installs`, {
       method: "POST",
       headers: { cookie: reader.cookie, "content-type": "application/json" },
       body: JSON.stringify({}),

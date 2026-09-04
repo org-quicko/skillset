@@ -73,7 +73,7 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
             onClick={() => navigate(tab.path)}
             aria-current={section === tab.section}
             className={cn(
-              "-mb-px cursor-pointer border-b-2 pb-2.5 text-sm outline-none focus-visible:text-foreground",
+              "-mb-px cursor-pointer rounded-sm border-b-2 pb-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
               section === tab.section
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",
@@ -85,12 +85,17 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
       </nav>
 
       <div className="pt-1">
-        {section === "profile" && <ProfileCard user={user} />}
-        {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
-        {section === "login" && canManageUsers && <IdentityProvidersCard />}
-        {section === "integrations" && canManageUsers && <IntegrationsCard />}
-        {section === "connections" && canImport && <ConnectionCard />}
-        {section === "tokens" && <TokensCard />}
+        <div
+          key={section}
+          className="fill-mode-both animate-in fade-in-0 slide-in-from-bottom-1 duration-200 [animation-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:animate-none"
+        >
+          {section === "profile" && <ProfileCard user={user} />}
+          {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
+          {section === "login" && canManageUsers && <IdentityProvidersCard />}
+          {section === "integrations" && canManageUsers && <IntegrationsCard />}
+          {section === "connections" && canImport && <ConnectionCard />}
+          {section === "tokens" && <TokensCard />}
+        </div>
       </div>
     </div>
   );

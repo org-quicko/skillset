@@ -1,5 +1,9 @@
 # Overwrite Instead of Versioning
 
+> **Amended by ADR-0026.** `name` is now unique per Kind rather than registry-wide, and
+> it no longer keys the Artifact in storage — the Resource's `id` does. Overwrite instead
+> of versioning, hard delete, and bucket versioning as the recovery path are unchanged.
+
 A Skill is identified by the flat `name` from its frontmatter, with no namespacing and no
 version history: pushing a Skill replaces the Artifact and the row that are already there,
 and deleting one removes both permanently. We chose this because the Registry serves a

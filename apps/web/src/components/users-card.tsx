@@ -11,11 +11,53 @@ import { RemoveUserDialog } from "@/components/remove-user-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useUpdateUserRole, useUsers } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
 
 const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase";
+
+/** Placeholder user table while `useUsers` is in flight. */
+function UsersTableSkeleton() {
+  return (
+    <Panel contentClassName="p-0">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={HEAD_CLASS}>Name</TableHead>
+            <TableHead className={HEAD_CLASS}>Email</TableHead>
+            <TableHead className={HEAD_CLASS}>Role</TableHead>
+            <TableHead className={HEAD_CLASS}>Connections</TableHead>
+            <TableHead className={HEAD_CLASS} />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <TableRow key={index} className="hover:bg-transparent">
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Skeleton className="size-[26px] rounded-full" />
+                  <Skeleton className="h-3.5 w-28" />
+                </div>
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-3.5 w-40" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-7 w-24 rounded-md" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-3.5 w-10" />
+              </TableCell>
+              <TableCell />
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Panel>
+  );
+}
 
 function initials(user: User): string {
   return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
@@ -90,6 +132,8 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
 
       {users.isError && <p className="text-sm text-destructive">{apiErrorMessage(users.error)}</p>}
       {updateRole.isError && <p className="text-sm text-destructive">{apiErrorMessage(updateRole.error)}</p>}
+
+      {users.isPending && <UsersTableSkeleton />}
 
       {users.isSuccess && (
         <Panel contentClassName="p-0">

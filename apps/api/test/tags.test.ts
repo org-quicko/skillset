@@ -62,7 +62,7 @@ async function createUserAndLogIn(
 }
 
 async function publish(context: TestContext, session: Session, name: string): Promise<string> {
-  const res = await context.app.request(`/api/skills/${name}`, {
+  const res = await context.app.request(`/api/resources/skill/${name}`, {
     method: "PUT",
     headers: { cookie: session.cookie, "content-type": "application/json" },
     body: JSON.stringify({ description: "A Skill.", body: "Body.\n" }),
@@ -72,7 +72,7 @@ async function publish(context: TestContext, session: Session, name: string): Pr
 }
 
 async function setTags(context: TestContext, session: Session, skillId: string, names: unknown): Promise<Response> {
-  return context.app.request(`/api/skills/${skillId}/tags`, {
+  return context.app.request(`/api/resources/${skillId}/tags`, {
     method: "PUT",
     headers: { cookie: session.cookie, "content-type": "application/json" },
     body: JSON.stringify({ tags: names }),
@@ -80,13 +80,13 @@ async function setTags(context: TestContext, session: Session, skillId: string, 
 }
 
 async function getSkill(context: TestContext, session: Session, skillId: string): Promise<ApiSkill> {
-  const res = await context.app.request(`/api/skills/${skillId}`, { headers: { cookie: session.cookie } });
+  const res = await context.app.request(`/api/resources/${skillId}`, { headers: { cookie: session.cookie } });
   return (await res.json()) as ApiSkill;
 }
 
 const PASSWORD = "correct-horse-battery";
 
-describe("Setting a Skill's tags (PUT /skills/{id}/tags)", () => {
+describe("Setting a Skill's tags (PUT /resources/{id}/tags)", () => {
   let container: StartedPostgreSqlContainer;
   let context: TestContext;
   let admin: Session;

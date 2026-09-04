@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { access, lstat, mkdtemp, readFile, readlink, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { installSkill, sanitizeSkillDirectoryName } from "../src/install.js";
 
@@ -58,6 +58,40 @@ describe("installSkill — canonical directory (ADR-0022)", () => {
   });
 });
 
+describe("installSkill — alsoServes names the other Agents a directory already serves", () => {
+  it("is empty for an Agent whose directory nothing else shares", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "claude-code", {
+        copy: false,
+      });
+
+      expect(report.alsoServes).toEqual([]);
+    });
+  });
+
+  it("names a sibling Agent that coincidentally shares the same directory of its own", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "qoder", {
+        copy: false,
+      });
+
+      expect(report.alsoServes).toEqual(["qoder-cn"]);
+    });
+  });
+
+  it("names every other Agent reading the canonical directory directly", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", {
+        copy: false,
+      });
+
+      expect(report.alsoServes.length).toBeGreaterThan(1);
+      expect(report.alsoServes).toContain("cline");
+      expect(report.alsoServes).not.toContain("codex");
+    });
+  });
+});
+
 describe("installSkill — non-universal Agents get a symlink", () => {
   it("symlinks .claude/skills/<name> at the canonical copy at project scope", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
@@ -68,7 +102,11 @@ describe("installSkill — non-universal Agents get a symlink", () => {
       const linkPath = join(cwd, ".claude", "skills", "code-review");
       expect(report.link).toEqual({ kind: "symlink", path: linkPath });
       expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
-      expect(await readlink(linkPath)).toBe(join("..", "..", ".agents", "skills", "code-review"));
+      // Relative on POSIX, so the tree stays portable; a Windows junction needs an
+      // absolute target instead (`symlinkInto`'s own doc comment explains why).
+      const canonicalTarget = join(cwd, ".agents", "skills", "code-review");
+      const expectedLinkTarget = platform() === "win32" ? canonicalTarget : join("..", "..", ".agents", "skills", "code-review");
+      expect(await readlink(linkPath)).toBe(expectedLinkTarget);
       // The link resolves to the real files.
       expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toContain("code-review");
     });

@@ -1,5 +1,6 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { IconSwap } from "@/components/icon-swap";
 import { Panel } from "@/components/panel";
 import { cn } from "@/lib/utils";
 
@@ -45,7 +46,7 @@ export function SkillInstallCard({ name }: { name: string }) {
               type="button"
               onClick={() => setTab(value)}
               className={cn(
-                "cursor-pointer capitalize",
+                "cursor-pointer rounded-sm capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 tab === value ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -62,9 +63,13 @@ export function SkillInstallCard({ name }: { name: string }) {
           type="button"
           aria-label="Copy to clipboard"
           onClick={copy}
-          className="flex shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+          className="relative flex shrink-0 cursor-pointer rounded-md p-2 -m-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
         >
-          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+          <IconSwap
+            showAlt={copied}
+            base={<CopyIcon className="size-4" />}
+            alt={<CheckIcon className="size-4" />}
+          />
         </button>
       </div>
     </Panel>

@@ -15,9 +15,9 @@ import { SKILL_FILE_NAME, SkillValidationError } from "./skill-rules.js";
  * body, built once, so there is no longer a second way to spell it.
  */
 export interface SkillBundle {
-  /** The Skill's name, from its frontmatter — the `PUT /skills/{name}` path segment. */
+  /** The Skill's name, from its frontmatter — the `PUT /resources/skill/{name}` path segment. */
   name: string;
-  /** The `PUT /skills/{name}` request body, exactly as the wire takes it. */
+  /** The `PUT /resources/skill/{name}` request body, exactly as the wire takes it. */
   request: SkillPublish;
   /** The zipped Skill, uploaded straight to storage rather than through the API (ADR-0001). */
   artifact: Uint8Array;
@@ -52,7 +52,7 @@ export interface SkillBundle {
  * @example
  * ```ts
  * const bundle = buildSkillBundle(files);
- * await fetch(`/api/skills/${encodeURIComponent(bundle.name)}`, {
+ * await fetch(`/api/resources/skill/${encodeURIComponent(bundle.name)}`, {
  *   method: "PUT",
  *   body: JSON.stringify(bundle.request),
  * });

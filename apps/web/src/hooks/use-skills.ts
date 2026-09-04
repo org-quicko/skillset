@@ -12,7 +12,7 @@ import {
 } from "@skill-registry/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import { skillDirectoryQueryKey, skillQueryKey, skillsListQueryKey, skillStatsQueryKey } from "@/lib/query-keys";
+import { resourceDirectoryQueryKey, resourceQueryKey, resourcesListQueryKey, resourceStatsQueryKey } from "@/lib/query-keys";
 
 export interface SkillDirectoryFilters {
   /** Trimmed before use; blank is treated as no search term. */
@@ -28,12 +28,15 @@ export interface SkillDirectoryFilters {
  * sorted by install count or last-updated.
  *
  * @remarks
- * Every filter rides the query key (`skillDirectoryQueryKey`), so changing
+ * Every filter rides the query key (`resourceDirectoryQueryKey`), so changing
  * the search term, Tag filter, or sort choice starts a fresh accumulation of
  * pages from page 1 rather than appending to, or reusing, a previous
  * combination's pages — matching the requirement that changing any of them
  * resets the list. `page_size` is left to the API's own default; nothing
  * here exposes a control for it (out of scope, ticket 23).
+ *
+ * No `?kind=` is sent: `skill` is the only registered Kind (ADR-0026), so an
+ * unfiltered `GET /resources` already lists exactly what this page shows.
  *
  * @param filters - The search term, selected Tag ids, and sort choice —
  * normally the URL's own query-string state (see `SkillsPanel`).
@@ -45,7 +48,7 @@ export interface SkillDirectoryFilters {
  */
 export function useSkillDirectory(filters: SkillDirectoryFilters) {
   return useInfiniteQuery({
-    queryKey: skillDirectoryQueryKey(filters),
+    queryKey: resourceDirectoryQueryKey(filters),
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams({
         page: String(pageParam),
@@ -54,7 +57,7 @@ export function useSkillDirectory(filters: SkillDirectoryFilters) {
       });
       if (filters.q) params.set("q", filters.q);
       for (const tagId of filters.tagIds) params.append("tag_id", tagId);
-      return apiFetch(`/skills?${params.toString()}`, SkillDirectoryPageSchema);
+      return apiFetch(`/resources?${params.toString()}`, SkillDirectoryPageSchema);
     },
     initialPageParam: 1,
     getNextPageParam: (lastPage) => {
@@ -65,34 +68,35 @@ export function useSkillDirectory(filters: SkillDirectoryFilters) {
 }
 
 /**
- * Fetches the Skill directory's hero stats: the total Skill count, the
- * distinct Publisher count, and the total Install count across every Skill.
+ * Fetches the catalog's hero stats: the total Resource count, the distinct
+ * Publisher count, and the total Install count across every Resource.
  *
  * @remarks
  * Unfiltered — the same regardless of any search term or Tag selection in
  * `useSkillDirectory`, unlike its own `total`. What the home page's stat
  * cards read.
  *
- * @returns The TanStack Query result for `GET /skills/stats`.
+ * @returns The TanStack Query result for `GET /resources/stats`.
  * @example
  * const stats = useSkillStats();
  */
 export function useSkillStats() {
   return useQuery({
-    queryKey: skillStatsQueryKey,
-    queryFn: () => apiFetch("/skills/stats", SkillDirectoryStatsSchema),
+    queryKey: resourceStatsQueryKey,
+    queryFn: () => apiFetch("/resources/stats", SkillDirectoryStatsSchema),
   });
 }
 
 /**
  * Fetches a single Skill by name — the browser URL is always `/skills/<name>`
  * (ADR-0002's flat identity is still what a person types or bookmarks), and
- * `GET /skills/by-name/<name>` returns the same full Skill shape reading by
- * `id` would (ticket 16), so there's no separate id lookup to do first: an
- * indexed lookup on the unique `name` column is exactly as cheap as one on
- * the `id` primary key. `id` itself is only needed once the Skill is already
- * in hand, for the Delete and Download actions (`skill.id` off this query's
- * result) — see `useDeleteSkill` and `useDownloadSkillArtifact`.
+ * `GET /resources/skill/by-name/<name>` returns the same full Skill shape
+ * reading by `id` would (ticket 16), so there's no separate id lookup to do
+ * first: an indexed lookup on the unique `(kind, name)` pair is exactly as
+ * cheap as one on the `id` primary key. `id` itself is only needed once the
+ * Skill is already in hand, for the Delete and Download actions (`skill.id`
+ * off this query's result) — see `useDeleteSkill` and
+ * `useDownloadSkillArtifact`.
  *
  * @param name - The Skill's name, from the `/skills/<name>` URL.
  * @returns The TanStack Query result for that Skill.
@@ -100,8 +104,8 @@ export function useSkillStats() {
  */
 export function useSkill(name: string) {
   return useQuery({
-    queryKey: skillQueryKey(name),
-    queryFn: () => apiFetch(`/skills/by-name/${encodeURIComponent(name)}`, SkillSchema),
+    queryKey: resourceQueryKey(name),
+    queryFn: () => apiFetch(`/resources/skill/by-name/${encodeURIComponent(name)}`, SkillSchema),
     // A publish already writes this exact response into the cache
     // (usePublishSkill's onSuccess) — avoid an immediate, redundant refetch
     // of what was just returned when the reader lands straight on it.
@@ -130,7 +134,7 @@ export function usePublishSkill() {
     mutationFn: async (files: SkillFile[]): Promise<Skill> => {
       const bundle = buildSkillBundle(files);
 
-      const published = await apiFetch(`/skills/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
+      const published = await apiFetch(`/resources/skill/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
         method: "PUT",
         body: JSON.stringify(bundle.request),
       });
@@ -148,9 +152,9 @@ export function usePublishSkill() {
       return published.skill;
     },
     onSuccess: (skill) => {
-      queryClient.invalidateQueries({ queryKey: skillsListQueryKey });
-      queryClient.invalidateQueries({ queryKey: skillStatsQueryKey });
-      queryClient.setQueryData(skillQueryKey(skill.name), skill);
+      queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
+      queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
+      queryClient.setQueryData(resourceQueryKey(skill.name), skill);
     },
   });
 }
@@ -171,11 +175,11 @@ export function useDeleteSkill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id }: { id: string; name: string }) =>
-      apiFetch(`/skills/${encodeURIComponent(id)}`, null, { method: "DELETE" }),
+      apiFetch(`/resources/${encodeURIComponent(id)}`, null, { method: "DELETE" }),
     onSuccess: (_data, { name }) => {
-      queryClient.invalidateQueries({ queryKey: skillsListQueryKey });
-      queryClient.invalidateQueries({ queryKey: skillStatsQueryKey });
-      queryClient.removeQueries({ queryKey: skillQueryKey(name) });
+      queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
+      queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
+      queryClient.removeQueries({ queryKey: resourceQueryKey(name) });
     },
   });
 }
@@ -185,15 +189,15 @@ export function useDeleteSkill() {
  *
  * @remarks
  * Requests the `Accept: application/json` representation of
- * `GET /skills/{id}/artifact` rather than following its ordinary redirect —
- * that representation is the Skill itself, reflecting the install this same
- * request just recorded, alongside `url` to actually fetch the Artifact
- * from. Once that resolves (confirming the install was recorded), the
- * Skill's fresh state is written straight into the cache — the same
- * `setQueryData` `usePublishSkill` already uses — and only then does the
- * browser navigate to `url`, a plain top-level navigation rather than a
- * second `fetch`, so the actual transfer is never subject to storage's CORS
- * policy (see the route's own comment).
+ * `GET /resources/{id}/artifact` rather than following its ordinary
+ * redirect — that representation is the Skill itself, reflecting the
+ * install this same request just recorded, alongside `url` to actually
+ * fetch the Artifact from. Once that resolves (confirming the install was
+ * recorded), the Skill's fresh state is written straight into the cache —
+ * the same `setQueryData` `usePublishSkill` already uses — and only then
+ * does the browser navigate to `url`, a plain top-level navigation rather
+ * than a second `fetch`, so the actual transfer is never subject to
+ * storage's CORS policy (see the route's own comment).
  * @example
  * downloadArtifact.mutate({ id: skill.id })
  */
@@ -201,11 +205,11 @@ export function useDownloadSkillArtifact() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id }: { id: string }) =>
-      apiFetch(`/skills/${encodeURIComponent(id)}/artifact`, SkillWithArtifactUrlSchema, {
+      apiFetch(`/resources/${encodeURIComponent(id)}/artifact`, SkillWithArtifactUrlSchema, {
         headers: { accept: "application/json" },
       }),
     onSuccess: ({ url, ...skill }) => {
-      queryClient.setQueryData(skillQueryKey(skill.name), skill);
+      queryClient.setQueryData(resourceQueryKey(skill.name), skill);
       window.location.href = url;
     },
   });

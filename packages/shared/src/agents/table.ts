@@ -230,3 +230,32 @@ export function agentSkillsDir(agentId: AgentId, scope: Scope, ctx: ResolveConte
   const agent = getAgent(agentId);
   return scope === "project" ? `${ctx.projectRoot}/${agent.projectSkillsDir}` : agent.userSkillsDir(ctx.env, ctx.homeDir);
 }
+
+/**
+ * Every other Agent that reads Skills from the same directory as `agentId` at `scope`.
+ *
+ * @remarks
+ * Dozens of Agents share `.agents/skills` outright (ADR-0022's canonical directory), and a
+ * few coincidentally point at the same directory of their own (`qoder`/`qoder-cn`,
+ * `trae`/`trae-cn`, `zencoder`/`zenflow`) — installing once already serves every Agent this
+ * returns, which is what lets `add` say so instead of leaving the next run to discover it
+ * (ticket 09).
+ *
+ * @param agentId - The Agent just installed for.
+ * @param scope - The Scope it was installed at.
+ * @param ctx - The environment, home directory, and project root to resolve against.
+ * @returns The ids of every other Agent whose own directory at `scope` resolves to the same
+ * path as `agentId`'s, or `[]` if none — including when `agentId` has no directory at `scope`.
+ * @example
+ * ```ts
+ * agentsSharingDirectory("cline", "project", { env: {}, homeDir: "/home/dev", projectRoot: "/repo" });
+ * // -> ["amp", "antigravity", ..., "warp", "zed"] — every other Agent reading .agents/skills
+ * ```
+ */
+export function agentsSharingDirectory(agentId: AgentId, scope: Scope, ctx: ResolveContext): AgentId[] {
+  const target = agentSkillsDir(agentId, scope, ctx);
+  if (target === null) return [];
+  return AGENTS.filter((agent) => agent.id !== agentId && agentSkillsDir(agent.id, scope, ctx) === target).map(
+    (agent) => agent.id,
+  );
+}

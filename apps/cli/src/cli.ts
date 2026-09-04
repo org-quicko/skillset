@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
+import { getAgent } from "@skill-registry/shared";
 import { Command } from "commander";
 import { homedir } from "node:os";
 import pc from "picocolors";
@@ -120,6 +121,10 @@ program
         p.log.message(pc.dim(`${report.agent}: copied into ${report.link.path}${why}`));
       } else {
         p.log.message(pc.dim(`${report.agent} reads .agents/skills directly`));
+      }
+      if (report.alsoServes.length > 0) {
+        const names = report.alsoServes.map((id) => getAgent(id).displayName).join(", ");
+        p.log.message(pc.dim(`Also serves: ${names} — no need to run this again for them.`));
       }
       p.outro("Done");
     } catch (error) {

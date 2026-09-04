@@ -8,7 +8,14 @@
  * that broke it. Those two land verbatim in the API's error body as `code`
  * and `field`, which is how a caller reports the specific rule rather than
  * "invalid request".
+ *
+ * Skill's `name` and `description` rules build on the generic checks in
+ * `resource-rules.ts` — required, non-blank, and bounded by length — since
+ * every Kind repeats that shape with only the ceiling and pattern differing
+ * (ADR-0026). What stays here is what's genuinely Skill-specific: the exact
+ * pattern and ceilings, the rule codes, and the messages a User reads.
  */
+import { isNonBlankString, isWithinMaxLength, matchesPattern } from "./resource-rules.js";
 
 export const SKILL_NAME_MAX_LENGTH = 64;
 export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
@@ -83,14 +90,14 @@ export function validateSkillName(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new SkillValidationError("name_required", "A Skill needs a name in its SKILL.md frontmatter.", "name");
   }
-  if (value.length > SKILL_NAME_MAX_LENGTH) {
+  if (!isWithinMaxLength(value, SKILL_NAME_MAX_LENGTH)) {
     throw new SkillValidationError(
       "name_too_long",
       `A Skill's name is at most ${SKILL_NAME_MAX_LENGTH} characters.`,
       "name",
     );
   }
-  if (!SKILL_NAME_PATTERN.test(value)) {
+  if (!matchesPattern(value, SKILL_NAME_PATTERN)) {
     throw new SkillValidationError(
       "name_invalid",
       "A Skill's name is lowercase alphanumerics and hyphens, with no leading, trailing, or doubled hyphen.",
@@ -111,14 +118,14 @@ export function validateSkillName(value: unknown): string {
  * exceeds `SKILL_DESCRIPTION_MAX_LENGTH` characters.
  */
 export function validateSkillDescription(value: unknown): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
+  if (!isNonBlankString(value)) {
     throw new SkillValidationError(
       "description_required",
       "A Skill needs a description in its SKILL.md frontmatter.",
       "description",
     );
   }
-  if (value.length > SKILL_DESCRIPTION_MAX_LENGTH) {
+  if (!isWithinMaxLength(value, SKILL_DESCRIPTION_MAX_LENGTH)) {
     throw new SkillValidationError(
       "description_too_long",
       `A Skill's description is at most ${SKILL_DESCRIPTION_MAX_LENGTH} characters.`,
@@ -138,7 +145,7 @@ export function validateSkillDescription(value: unknown): string {
  * missing, not a string, or blank.
  */
 export function validateSkillBody(value: unknown): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
+  if (!isNonBlankString(value)) {
     throw new SkillValidationError("body_required", "A Skill needs a SKILL.md body.", "body");
   }
   return value;
@@ -180,7 +187,7 @@ export function validateSkillCompatibility(value: unknown): string | undefined {
       "compatibility",
     );
   }
-  if (value.length > SKILL_COMPATIBILITY_MAX_LENGTH) {
+  if (!isWithinMaxLength(value, SKILL_COMPATIBILITY_MAX_LENGTH)) {
     throw new SkillValidationError(
       "compatibility_too_long",
       `A Skill's compatibility is at most ${SKILL_COMPATIBILITY_MAX_LENGTH} characters.`,

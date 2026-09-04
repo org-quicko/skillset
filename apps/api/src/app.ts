@@ -11,8 +11,8 @@ import { registerConnectionRoutes } from "./routes/connections.js";
 import { registerIdentityProviderRoutes } from "./routes/identity-providers.js";
 import { registerImportRoutes } from "./routes/imports.js";
 import { registerIntegrationRoutes } from "./routes/integrations.js";
+import { registerResourcesRoutes } from "./routes/resources.js";
 import { registerSetupRoutes } from "./routes/setup.js";
-import { registerSkillsRoutes } from "./routes/skills.js";
 import { registerTagsRoutes } from "./routes/tags.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { AnalyticsService } from "./services/analytics.js";
@@ -20,8 +20,8 @@ import { ConnectionsService } from "./services/connections.js";
 import { ImportsService } from "./services/imports.js";
 import { IntegrationsService } from "./services/integrations.js";
 import { IdentityProvidersService } from "./services/identity-providers.js";
+import { ResourcesService } from "./services/resources.js";
 import { SetupService } from "./services/setup.js";
-import { SkillsService } from "./services/skills.js";
 import { TagsService } from "./services/tags.js";
 import { UsersService } from "./services/users.js";
 import type { StorageAdapter } from "./storage/types.js";
@@ -71,7 +71,7 @@ export function createApp(deps: AppDependencies): Hono {
 
   const analytics = new AnalyticsService(deps.db, deps.logger);
   const tags = new TagsService(deps.db, deps.logger);
-  const skills = new SkillsService(deps.db, deps.storage, deps.logger, tags, analytics);
+  const resources = new ResourcesService(deps.db, deps.storage, deps.logger, tags, analytics);
   const users = new UsersService(deps.db, deps.logger);
   const setup = new SetupService(deps.db, deps.logger);
   const identityProviders = new IdentityProvidersService(deps.db, deps.logger);
@@ -102,7 +102,7 @@ export function createApp(deps: AppDependencies): Hono {
   registerConnectionRoutes(api, { ...authDeps, connections, publicUrl: deps.publicUrl });
   registerImportRoutes(api, { ...authDeps, imports });
   registerUsersRoutes(api, { ...authDeps, users });
-  registerSkillsRoutes(api, { ...authDeps, skills, tags });
+  registerResourcesRoutes(api, { ...authDeps, resources, tags });
   registerTagsRoutes(api, { ...authDeps, tags });
 
   app.route("/api", api);

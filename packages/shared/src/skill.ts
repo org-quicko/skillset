@@ -3,16 +3,16 @@ import { TagSchema } from "./tag.js";
 import { timestamp } from "./timestamp.js";
 import { SKILL_DESCRIPTION_MAX_LENGTH, SKILL_NAME_MAX_LENGTH, SKILL_NAME_PATTERN } from "./skill-rules.js";
 
-/** `GET /skills`'s `page_size`: client-supplied, defaults to 10, clamped rather than rejected outside this range. */
+/** `GET /resources`'s `page_size`: client-supplied, defaults to 10, clamped rather than rejected outside this range. */
 export const SKILL_DIRECTORY_DEFAULT_PAGE_SIZE = 10;
 export const SKILL_DIRECTORY_MIN_PAGE_SIZE = 1;
 export const SKILL_DIRECTORY_MAX_PAGE_SIZE = 100;
 
-/** `GET /skills`'s `sort_by` — governs ordering unconditionally, even with `q` set (ticket 23). */
+/** `GET /resources`'s `sort_by` — governs ordering unconditionally, even with `q` set (ticket 23). */
 export const SKILL_DIRECTORY_SORT_FIELDS = ["installs", "updated_at"] as const;
 export type SkillDirectorySortField = (typeof SKILL_DIRECTORY_SORT_FIELDS)[number];
 
-/** `GET /skills`'s `sort_order`. */
+/** `GET /resources`'s `sort_order`. */
 export const SKILL_DIRECTORY_SORT_ORDERS = ["asc", "desc"] as const;
 export type SkillDirectorySortOrder = (typeof SKILL_DIRECTORY_SORT_ORDERS)[number];
 
@@ -21,7 +21,7 @@ export type SkillDirectorySortOrder = (typeof SKILL_DIRECTORY_SORT_ORDERS)[numbe
  *
  * @remarks
  * The one place this membership check is made — both the API's query-param
- * validation (`GET /skills`, rejecting anything else) and the web's
+ * validation (`GET /resources`, rejecting anything else) and the web's
  * URL-state parsing (falling back to a default instead of rejecting) call
  * this rather than each re-deriving it from `SKILL_DIRECTORY_SORT_FIELDS`.
  *
@@ -86,15 +86,35 @@ export const SkillFrontmatterExtrasSchema = z.object({
   tags: z.array(TagSchema),
 });
 
+/**
+ * A Skill's `resources.payload` (ADR-0026) — the four optional Agent Skills
+ * spec fields, the same as `SkillFrontmatterExtrasSchema` minus `tags`, since
+ * Tags are registry metadata rather than part of any Kind's own payload
+ * (ADR-0008, ADR-0011). Each key is always present; a publish that doesn't
+ * set a field stores `null` for it rather than omitting the key, matching the
+ * full-replace semantics `description` and `body` already have (ADR-0002).
+ */
+export const SkillPayloadSchema = z.object({
+  kind: z.literal("skill"),
+  license: z.string().nullable(),
+  compatibility: z.string().nullable(),
+  metadata: z.record(z.string(), z.string()).nullable(),
+  allowed_tools: z.string().nullable(),
+});
+export type SkillPayload = z.infer<typeof SkillPayloadSchema>;
+
 export const SkillSummarySchema = z
   .object({
     id: z.string(),
+    // Always "skill": this is SkillSchema's own literal, not the generic
+    // `kind: z.string()` a future multi-Kind read would need (ADR-0026).
+    kind: z.literal("skill"),
     name: SkillNameSchema,
     description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
     published_by: PublisherSchema,
     published_at: timestamp,
     // Never negative, never absent: 0 until this Skill's first recorded
-    // Install. Reflects the last periodic refresh of skill_analytics, not
+    // Install. Reflects the last periodic refresh of resource_analytics, not
     // necessarily every Install recorded so far (ADR-0012).
     installs: z.number().int().nonnegative(),
   })
@@ -108,14 +128,21 @@ export const SkillSchema = SkillSummarySchema.extend({
 export type Skill = z.infer<typeof SkillSchema>;
 
 /**
- * One row of `GET /skills` (ticket 23) — deliberately not `SkillSummarySchema`:
- * the list is sourced from the `skill_directory` view (ADR-0012, docs/data-model.md),
- * which trades the full `Publisher` object for a `published_by_name` snapshot
- * and `published_at` for `updated_at`. `GET /skills/{id}` and `by-name/{name}`
- * are untouched — they still return `SkillSchema`.
+ * One row of `GET /resources` (ticket 23, ADR-0026) — deliberately not
+ * `SkillSummarySchema`: the list is sourced from the `resource_directory` view
+ * (ADR-0012, docs/data-model.md), which trades the full `Publisher` object for
+ * a `published_by_name` snapshot and `published_at` for `updated_at`.
+ * `GET /resources/{id}` and `{kind}/by-name/{name}` are untouched — they still
+ * return `SkillSchema`.
+ *
+ * `kind` is a plain string here, not `z.literal("skill")`: the catalog lists
+ * every Kind, and this is the one shape that's genuinely Kind-agnostic today,
+ * even though `skill` is the only value it can hold until a second Kind
+ * exists (ADR-0026).
  */
 export const SkillDirectoryEntrySchema = z.object({
   id: z.string(),
+  kind: z.string(),
   name: SkillNameSchema,
   description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
   published_by_name: z.string(),
@@ -150,12 +177,12 @@ export const SkillDirectoryStatsSchema = z.object({
 export type SkillDirectoryStats = z.infer<typeof SkillDirectoryStatsSchema>;
 
 /**
- * PUT /skills/\{name\} request body. The name comes from the path. The four
- * frontmatter extras are optional and unvalidated at this layer — the
- * shared validation rules (`validateSkillLicense` and friends) are what
+ * PUT /resources/\{kind\}/\{name\} request body. The name comes from the path.
+ * The four frontmatter extras are optional and unvalidated at this layer —
+ * the shared validation rules (`validateSkillLicense` and friends) are what
  * actually enforce the specification, the same way `description` and
  * `body` are not length-checked here either. `tags` is deliberately absent:
- * publishing never sets it (docs/adr/0008) — see `PUT /skills/{id}/tags`
+ * publishing never sets it (docs/adr/0008) — see `PUT /resources/{id}/tags`
  * (`SetSkillTagsSchema`) instead.
  */
 export const SkillPublishSchema = z.object({
@@ -178,7 +205,7 @@ export const UploadTargetSchema = z.object({
 export type UploadTarget = z.infer<typeof UploadTargetSchema>;
 
 /**
- * The `Accept: application/json` representation of `GET /skills/{id}/artifact`
+ * The `Accept: application/json` representation of `GET /resources/{id}/artifact`
  * — the Skill itself, alongside `url` to actually fetch the Artifact from.
  * For a caller that needs to know the request succeeded before navigating
  * there itself: the ordinary representation is a 302 redirect, which a

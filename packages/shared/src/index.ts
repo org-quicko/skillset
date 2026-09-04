@@ -7,6 +7,8 @@ export * from "./auth.js";
 export * from "./error.js";
 export * from "./api-client.js";
 export * from "./token.js";
+export * from "./resource-rules.js";
+export * from "./resource.js";
 export * from "./skill-rules.js";
 export * from "./skill.js";
 export * from "./tag-rules.js";

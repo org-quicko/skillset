@@ -91,7 +91,7 @@ export async function registryFetch<T>(
  * Downloads a binary response — in practice, a Skill's Artifact.
  *
  * @param client - Where to send the request and, when there is one, the Token to authenticate with.
- * @param path - Path under the API, e.g. `/skills/{id}/artifact`.
+ * @param path - Path under the API, e.g. `/resources/{id}/artifact`.
  * @returns The response body as bytes.
  * @throws RegistryUnreachableError when the request never got an answer.
  * @throws ApiError when the Registry answered with a non-2xx status.
@@ -103,7 +103,7 @@ export async function registryFetch<T>(
  *
  * @example
  * ```ts
- * const bytes = await downloadBinary(client, `/skills/${skill.id}/artifact`);
+ * const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact`);
  * ```
  */
 export async function downloadBinary(client: RegistryClient, path: string): Promise<Uint8Array> {

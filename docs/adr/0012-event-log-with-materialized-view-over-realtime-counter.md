@@ -4,6 +4,11 @@
 originally recorded — that spec explicitly ruled out an event log ("no counter, event, or table" beyond a
 single running total). This ADR reverses that call before it shipped.
 
+> **Amended by ADR-0028.** The log is `resource_install_events` and the view is
+> `resource_analytics`. An Install now means something different per Kind, so counts are not
+> comparable across Kinds and `updated_at` — not `installs` — is the catalog's default sort.
+> The event-log-plus-materialized-view design below is otherwise unchanged.
+
 A Skill's install count is derived from `skill_install_events` — one immutable row per Install (a web
 Download today, a CLI `skillreg add` later), distinguished by a `source` column — via a `skill_analytics`
 materialized view refreshed on a schedule (`node-cron`, interval set by `ANALYTICS_REFRESH_CRON`), rather

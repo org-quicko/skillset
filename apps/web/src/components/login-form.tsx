@@ -112,9 +112,9 @@ export function LoginForm() {
                   type="button"
                   aria-label={reveal ? "Hide password" : "Show password"}
                   onClick={() => setReveal((value) => !value)}
-                  className="absolute top-1/2 right-3 flex -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
+                  className="absolute top-1/2 right-1 flex -translate-y-1/2 cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
                 >
-                  {reveal ? <EyeOffIcon className="size-[18px]" /> : <EyeIcon className="size-[18px]" />}
+                  {reveal ? <EyeOffIcon strokeWidth={1.75} className="size-[18px]" /> : <EyeIcon strokeWidth={1.75} className="size-[18px]" />}
                 </button>
               </div>
             </div>

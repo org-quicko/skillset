@@ -106,7 +106,7 @@ async function resolveTokenUser(c: Context, deps: AuthDependencies): Promise<Use
  * @throws ForbiddenError if the User's role ranks below `minimum`.
  * @example
  * ```ts
- * app.delete("/skills/:id", requireAuth(deps), requireRole("admin"), handler);
+ * app.delete("/resources/:id", requireAuth(deps), requireRole("admin"), handler);
  * ```
  */
 export function requireRole(minimum: Role): MiddlewareHandler<{ Variables: AuthVariables }> {

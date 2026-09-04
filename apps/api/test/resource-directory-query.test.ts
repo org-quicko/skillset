@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Hono } from "hono";
 import { registerErrorHandler } from "../src/http/errors.js";
-import { parseSkillDirectoryQuery, type SkillDirectoryQuery } from "../src/http/skill-directory-query.js";
+import { parseResourceDirectoryQuery, type ResourceDirectoryQuery } from "../src/http/resource-directory-query.js";
 import { createLogger } from "../src/logger.js";
 import type { AuthVariables } from "../src/auth/middleware.js";
 
@@ -13,40 +13,43 @@ interface Refusal {
 }
 
 /**
- * Drives `parseSkillDirectoryQuery` through a real request, with the API's own
- * error handler mounted — so a refusal is asserted as the 400 a caller
+ * Drives `parseResourceDirectoryQuery` through a real request, with the API's
+ * own error handler mounted — so a refusal is asserted as the 400 a caller
  * actually receives rather than as a thrown class.
  *
  * No database, no container: the query string is the whole input.
  */
 const app = new Hono<{ Variables: AuthVariables }>();
 registerErrorHandler(app, createLogger("silent"));
-app.get("/skills", (c) => c.json(parseSkillDirectoryQuery(c)));
+app.get("/resources", (c) => c.json(parseResourceDirectoryQuery(c)));
 
 async function get(query: string): Promise<Response> {
-  return app.request(`/skills${query}`);
+  return app.request(`/resources${query}`);
 }
 
-async function parsed(query: string): Promise<Partial<SkillDirectoryQuery>> {
+async function parsed(query: string): Promise<Partial<ResourceDirectoryQuery>> {
   const res = await get(query);
   expect(res.status).toBe(200);
-  return res.json() as Promise<Partial<SkillDirectoryQuery>>;
+  return res.json() as Promise<Partial<ResourceDirectoryQuery>>;
 }
 
-describe("parseSkillDirectoryQuery — defaults", () => {
+describe("parseResourceDirectoryQuery — defaults", () => {
   it("answers every member from an empty query string", async () => {
     expect(await parsed("")).toEqual({
       page: 1,
       pageSize: 10,
       q: undefined,
+      kind: undefined,
       tagIds: [],
-      sortBy: "installs",
+      // ADR-0028: installs are not comparable across Kinds, so the default
+      // moved off them.
+      sortBy: "updated_at",
       sortOrder: "desc",
     });
   });
 });
 
-describe("parseSkillDirectoryQuery — page", () => {
+describe("parseResourceDirectoryQuery — page", () => {
   it("takes a whole number as given", async () => {
     expect(await parsed("?page=3")).toMatchObject({ page: 3 });
   });
@@ -64,7 +67,7 @@ describe("parseSkillDirectoryQuery — page", () => {
   });
 });
 
-describe("parseSkillDirectoryQuery — page_size", () => {
+describe("parseResourceDirectoryQuery — page_size", () => {
   it("takes a size within range as given", async () => {
     expect(await parsed("?page_size=25")).toMatchObject({ pageSize: 25 });
   });
@@ -84,7 +87,7 @@ describe("parseSkillDirectoryQuery — page_size", () => {
   });
 });
 
-describe("parseSkillDirectoryQuery — q", () => {
+describe("parseResourceDirectoryQuery — q", () => {
   it("trims a term", async () => {
     expect(await parsed("?q=%20%20code%20review%20%20")).toMatchObject({ q: "code review" });
   });
@@ -100,7 +103,27 @@ describe("parseSkillDirectoryQuery — q", () => {
   });
 });
 
-describe("parseSkillDirectoryQuery — tag_id", () => {
+describe("parseResourceDirectoryQuery — kind", () => {
+  it("takes a registered Kind as given", async () => {
+    expect(await parsed("?kind=skill")).toMatchObject({ kind: "skill" });
+  });
+
+  it("is absent, not an error, when omitted — no Kind filter at all", async () => {
+    expect((await parsed("")).kind).toBeUndefined();
+  });
+
+  it("refuses an unregistered Kind, naming the field and the known Kinds", async () => {
+    const res = await get("?kind=mcp-server");
+    const body = (await res.json()) as Refusal;
+
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe("validation_failed");
+    expect(body.error.field).toBe("kind");
+    expect(body.error.message).toBe("kind must be one of: skill.");
+  });
+});
+
+describe("parseResourceDirectoryQuery — tag_id", () => {
   it("keeps every repetition of the parameter", async () => {
     expect(await parsed(`?tag_id=${A_TAG_ID}&tag_id=${ANOTHER_TAG_ID}`)).toMatchObject({
       tagIds: [A_TAG_ID, ANOTHER_TAG_ID],
@@ -119,12 +142,16 @@ describe("parseSkillDirectoryQuery — tag_id", () => {
   });
 });
 
-describe("parseSkillDirectoryQuery — sorting", () => {
+describe("parseResourceDirectoryQuery — sorting", () => {
   it("takes a recognised sort_by and sort_order", async () => {
     expect(await parsed("?sort_by=updated_at&sort_order=asc")).toMatchObject({
       sortBy: "updated_at",
       sortOrder: "asc",
     });
+  });
+
+  it("still accepts sort_by=installs, just not as the default", async () => {
+    expect(await parsed("?sort_by=installs")).toMatchObject({ sortBy: "installs" });
   });
 
   // Refused rather than defaulted, and that split from `page` is deliberate:

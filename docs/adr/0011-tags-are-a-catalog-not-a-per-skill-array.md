@@ -3,6 +3,9 @@
 **Status:** supersedes the storage shape described in ADR-0008 (its actual reasoning — tags
 are registry-owned metadata, never written into `SKILL.md` — still stands unchanged).
 
+> **Amended by ADR-0026.** The catalog is shared across Kinds — the join is `resource_tags`,
+> and a Skill and an MCP Server may carry the same Tag. The catalog shape is unchanged.
+
 A Skill's tags are a many-to-many relationship to a registry-wide `tags` catalog table via a
 `skill_tags` join table, not a `text[]` column on the Skill's own row. Each Tag has a stable
 `id` and a `name`; a Skill references Tags by `id`, so renaming one (`PATCH /tags/{id}`) is

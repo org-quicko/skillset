@@ -21,6 +21,7 @@ function fakePublished() {
   return {
     skill: {
       id: "skill-1",
+      kind: "skill",
       name: "code-review",
       description: "Reviews code.",
       body: "How to do the thing.\n",
@@ -84,7 +85,7 @@ describe("runPublish", () => {
       const published = fakePublished();
       let uploadedBody: Uint8Array | undefined;
       const { fetch: fetchImpl, calls } = stubFetch((url, init) => {
-        if (url === "https://registry.example/api/skills/code-review") {
+        if (url === "https://registry.example/api/resources/skill/code-review") {
           const body = JSON.parse(String(init?.body));
           expect(body).toMatchObject({ description: "Reviews code.", body: "How to do the thing.\n" });
           return jsonResponse(200, published);

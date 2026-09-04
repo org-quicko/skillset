@@ -6,6 +6,7 @@ import { Header } from "@/components/header";
 import { LoginForm } from "@/components/login-form";
 import { SettingsPage } from "@/components/settings-page";
 import { SkillsPanel } from "@/components/skills-panel";
+import { Spinner } from "@/components/ui/spinner";
 import { useCurrentUser, useSetupState } from "@/hooks/use-auth";
 import { LOGIN_PATH } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
@@ -53,7 +54,12 @@ function App() {
     else if (isSignedOut && isSettingsPath(pathname)) replace(LOGIN_PATH);
   }, [isSignedIn, isSignedOut, pathname, replace]);
 
-  if (setup.isLoading || me.isLoading) return <CenteredPage>{null}</CenteredPage>;
+  if (setup.isLoading || me.isLoading)
+    return (
+      <CenteredPage>
+        <Spinner className="size-6" />
+      </CenteredPage>
+    );
 
   if (setup.isSuccess && !initialized) {
     return (

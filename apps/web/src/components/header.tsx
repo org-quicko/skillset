@@ -53,7 +53,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                 <span className="hidden text-xs text-muted-foreground sm:inline">
                   {user.first_name} {user.last_name}
                 </span>
-                <ChevronDownIcon className="size-4 text-muted-foreground" />
+                <ChevronDownIcon strokeWidth={1.5} className="size-4 text-muted-foreground" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuGroup>

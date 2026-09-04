@@ -12,16 +12,11 @@ import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
-import { LOGIN_PATH } from "@/lib/routes";
+import { LOGIN_PATH, SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 
-const SKILL_PATH_PREFIX = "/skills/";
 const DEFAULT_SORT_BY: SkillDirectorySortField = "installs";
 const DEFAULT_SORT_ORDER: SkillDirectorySortOrder = "desc";
-
-function skillPath(name: string): string {
-  return `${SKILL_PATH_PREFIX}${encodeURIComponent(name)}`;
-}
 
 /**
  * Reads the Skill list's filter/sort state from the URL's own query string

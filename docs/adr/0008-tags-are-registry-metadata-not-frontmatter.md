@@ -4,6 +4,10 @@
 now a catalog table plus a join table. The reasoning on this page (never written into
 `SKILL.md`, edited entirely server-side) is unaffected and still holds.
 
+> **Amended by ADR-0026.** Tags are Resource metadata, not Skill metadata: one catalog shared
+> across every Kind, joined through `resource_tags`. That they are never written into a
+> published payload is unchanged.
+
 A Skill's tags are stored as a column on its row in the Registry's own database, set and
 edited entirely server-side — never written into the `SKILL.md` file itself, unlike every
 other attribute the summary view displays. We chose this because the Agent Skills spec's

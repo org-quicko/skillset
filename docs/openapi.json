@@ -11,7 +11,7 @@
     { "name": "setup", "description": "First-run setup: whether any User exists yet, and creating the first one" },
     { "name": "auth", "description": "Logging in and out" },
     { "name": "users", "description": "Users, their own details, and their Tokens" },
-    { "name": "skills", "description": "Publishing, reading, searching, and retrieving Skills" },
+    { "name": "resources", "description": "Publishing, reading, searching, and retrieving Resources — Skills today (ADR-0026)" },
     { "name": "tags", "description": "The Tag catalog: listing it, and renaming a Tag" },
     {
       "name": "identity-providers",
@@ -478,11 +478,11 @@
         }
       }
     },
-    "/skills": {
+    "/resources": {
       "get": {
-        "tags": ["skills"],
-        "summary": "List, search, filter, and sort Skills",
-        "description": "Reads from the `skill_directory` view (ticket 23, docs/data-model.md), not `skills` directly. Defaults to sorted by install count, descending. With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. Unauthenticated (ADR-0013).",
+        "tags": ["resources"],
+        "summary": "List, search, filter, and sort Resources",
+        "description": "Reads from the `resource_directory` view (ticket 23, ADR-0026, docs/data-model.md), not `resources` directly. Defaults to sorted by last-updated, descending (ADR-0028 — installs are not comparable across Kinds). With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. Unauthenticated (ADR-0013).",
         "security": [],
         "parameters": [
           {
@@ -493,10 +493,17 @@
             "schema": { "type": "string" }
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "Narrows to one Kind. Omitted lists every Kind together. An unrecognised value is rejected with a field-named validation error, the same as `sort_by`. `skill` is the only registered Kind so far (ADR-0026), so this is exercisable but not yet load-bearing.",
+            "schema": { "type": "string", "enum": ["skill"] }
+          },
+          {
             "name": "tag_id",
             "in": "query",
             "required": false,
-            "description": "Repeatable. Narrows to Skills carrying at least one of the given Tag ids (any-match). Omitted returns Skills regardless of Tags.",
+            "description": "Repeatable. Narrows to Resources carrying at least one of the given Tag ids (any-match). Omitted returns Resources regardless of Tags.",
             "schema": { "type": "array", "items": { "type": "string", "format": "uuid" } }
           },
           {
@@ -504,7 +511,7 @@
             "in": "query",
             "required": false,
             "description": "Governs ordering unconditionally, even with `q` set. Invalid values are rejected with a field-named validation error.",
-            "schema": { "type": "string", "enum": ["installs", "updated_at"], "default": "installs" }
+            "schema": { "type": "string", "enum": ["installs", "updated_at"], "default": "updated_at" }
           },
           {
             "name": "sort_order",
@@ -524,7 +531,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of Skills",
+            "description": "A page of Resources",
             "content": {
               "application/json": {
                 "schema": {
@@ -547,12 +554,12 @@
         }
       }
     },
-    "/skills/{name}": {
-      "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
+    "/resources/{kind}/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Kind" }, { "$ref": "#/components/parameters/SkillName" }],
       "put": {
-        "tags": ["skills"],
-        "summary": "Publish a Skill",
-        "description": "Create or replace, idempotent by name: publishing an existing Skill replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002).\n\nThe row is written first and an upload target returned. The caller then writes the Artifact to that target directly. Until it does, the Skill lists and reads but its Artifact cannot be retrieved.\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.\n\n`license`, `compatibility`, `metadata`, and `allowed_tools` are optional, but are validated exactly as strictly as `description` and `body` when present — any one of them failing rejects the whole publish, naming the specific field and rule (ADR-0009). Publishing always writes all four (a validated value, or null when absent), so a republish that no longer sets a field clears it. `tags` cannot be set through this endpoint at all — see `PUT /skills/{id}/tags`.",
+        "tags": ["resources"],
+        "summary": "Publish a Resource",
+        "description": "Create or replace, idempotent by `(kind, name)`: publishing an existing Resource replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002, amended by ADR-0026).\n\n`kind` comes from the path and is checked against the registered Kinds before anything else — an unrecognised value is refused here, naming the field, rather than falling through to a 404 (ADR-0026). `skill` is the only Kind registered so far, so this request body shape is Skill's own; a second Kind gets its own payload shape and validation, not a variant of this one.\n\nThe row is written first and an upload target returned. The caller then writes the Artifact to that target directly. Until it does, the Resource lists and reads but its Artifact cannot be retrieved.\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.\n\n`license`, `compatibility`, `metadata`, and `allowed_tools` are optional, but are validated exactly as strictly as `description` and `body` when present — any one of them failing rejects the whole publish, naming the specific field and rule (ADR-0009). Publishing always writes all four (a validated value, or null when absent), so a republish that no longer sets a field clears it. `tags` cannot be set through this endpoint at all — see `PUT /resources/{id}/tags`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -594,7 +601,7 @@
         },
         "responses": {
           "200": {
-            "description": "The Skill row was created or replaced. Write the Artifact to `upload` next.",
+            "description": "The Resource row was created or replaced. Write the Artifact to `upload` next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -608,7 +615,10 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "400": {
+            "description": "Failed validation — either `kind` names no registered Kind, or the body failed one of the shared rules (both field-named, ADR-0009, ADR-0026)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": {
             "description": "Readers cannot publish",
@@ -617,27 +627,27 @@
         }
       }
     },
-    "/skills/by-name/{name}": {
-      "parameters": [{ "$ref": "#/components/parameters/SkillName" }],
+    "/resources/{kind}/by-name/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Kind" }, { "$ref": "#/components/parameters/SkillName" }],
       "get": {
-        "tags": ["skills"],
-        "summary": "Read a Skill by name",
-        "description": "An exact-name read, for resolving `name` to `id` — the web keeps `/skills/<name>` as its own browser URL and needs this to land a reader there with nothing already cached (a bookmark, a shared link, a refresh). Not full-text search: `GET /skills?q=` ranks by recency and caps at one page, so it cannot guarantee finding an existing Skill by exact name, and Postgres's stopword handling can make it return nothing at all for a name that happens to be one. Unauthenticated (ADR-0013).",
+        "tags": ["resources"],
+        "summary": "Read a Resource by (kind, name)",
+        "description": "An exact-name read, for resolving `name` to `id` — the web keeps `/skills/<name>` as its own browser URL and needs this to land a reader there with nothing already cached (a bookmark, a shared link, a refresh). Not full-text search: `GET /resources?q=` ranks by recency and caps at one page, so it cannot guarantee finding an existing Resource by exact name, and Postgres's stopword handling can make it return nothing at all for a name that happens to be one. `kind` not matching a registered Kind reads as \"not found\", the same as a name with no match — this is a read, so nothing here is worth a validation error. Unauthenticated (ADR-0013).",
         "security": [],
         "responses": {
           "200": {
             "description": "The Skill",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
           },
-          "404": { "$ref": "#/components/responses/SkillNotFound" }
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
         }
       }
     },
-    "/skills/stats": {
+    "/resources/stats": {
       "get": {
-        "tags": ["skills"],
-        "summary": "Read the Skill directory's hero stats",
-        "description": "Registry-wide counts: how many Skills exist, how many distinct Publishers have published one, and how many Installs have been recorded in total. Unfiltered — unaffected by any search term or Tag selection, unlike `GET /skills`'s `total`. Unauthenticated (ADR-0013).",
+        "tags": ["resources"],
+        "summary": "Read the catalog's hero stats",
+        "description": "Registry-wide counts: how many Resources exist, how many distinct Publishers have published one, and how many Installs have been recorded in total. Unfiltered — unaffected by any search term, Kind, or Tag selection, unlike `GET /resources`'s `total`. Unauthenticated (ADR-0013).",
         "security": [],
         "responses": {
           "200": {
@@ -647,42 +657,42 @@
         }
       }
     },
-    "/skills/{id}": {
+    "/resources/{id}": {
       "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
       "get": {
-        "tags": ["skills"],
-        "summary": "Read a Skill",
-        "description": "An exact-id read. Does not go through full-text search. The web keeps `/skills/<name>` as its own browser URL and resolves `name` to `id` itself before calling this — see `GET /skills/by-name/{name}`. Unauthenticated (ADR-0013).",
+        "tags": ["resources"],
+        "summary": "Read a Resource",
+        "description": "An exact-id read, whatever Kind it is. Does not go through full-text search. The web keeps `/skills/<name>` as its own browser URL and resolves `name` to `id` itself before calling this — see `GET /resources/{kind}/by-name/{name}`. Unauthenticated (ADR-0013).",
         "security": [],
         "responses": {
           "200": {
             "description": "The Skill",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
           },
-          "404": { "$ref": "#/components/responses/SkillNotFound" }
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
         }
       },
       "delete": {
-        "tags": ["skills"],
-        "summary": "Delete a Skill",
+        "tags": ["resources"],
+        "summary": "Delete a Resource",
         "description": "Requires at least the admin role. Removes the row and the Artifact permanently — there is no version history and no soft delete. Recovery is bucket versioning in object storage (ADR-0002). Succeeds even when the Artifact was never uploaded.",
         "responses": {
           "204": { "description": "Deleted. The name is immediately available to publish again." },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": {
-            "description": "Readers and writers cannot delete a Skill",
+            "description": "Readers and writers cannot delete a Resource",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
-          "404": { "$ref": "#/components/responses/SkillNotFound" }
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
         }
       }
     },
-    "/skills/{id}/artifact": {
+    "/resources/{id}/artifact": {
       "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
       "get": {
-        "tags": ["skills"],
-        "summary": "Retrieve a Skill's Artifact",
-        "description": "Records one Install, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Unauthenticated — anyone who can reach the Registry may retrieve an Artifact (ADR-0013). The response body is the zip, named after the Skill. A caller that sends `Accept: application/json` gets the Skill itself back instead alongside `url` to fetch the Artifact from, rather than a redirect; this is for a caller (the web app's own Download control) that needs to know the request succeeded before navigating there itself. Either representation records the same one Install. `installs` on that Skill reflects the last periodic refresh, not necessarily this request's own Install (ADR-0012).",
+        "tags": ["resources"],
+        "summary": "Retrieve a Resource's Artifact",
+        "description": "Records one Install, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Unauthenticated — anyone who can reach the Registry may retrieve an Artifact (ADR-0013). The response body is the zip; the storage key is derived from the Resource's `id`, not its name (ADR-0026). A caller that sends `Accept: application/json` gets the Resource itself back instead alongside `url` to fetch the Artifact from, rather than a redirect; this is for a caller (the web app's own Download control) that needs to know the request succeeded before navigating there itself. Either representation records the same one Install. `installs` on that Resource reflects the last periodic refresh, not necessarily this request's own Install (ADR-0012).",
         "security": [],
         "parameters": [
           {
@@ -727,18 +737,18 @@
             }
           },
           "404": {
-            "description": "No such Skill, or its Artifact was never uploaded",
+            "description": "No such Resource, or its Artifact was never uploaded",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
       }
     },
-    "/skills/{id}/tags": {
+    "/resources/{id}/tags": {
       "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
       "put": {
-        "tags": ["skills"],
-        "summary": "Replace a Skill's Tags",
-        "description": "Requires at least the writer role — the same bar as publishing. A full replace, not incremental: the given names become exactly this Skill's Tags, and any Tag it previously carried that isn't in the list is detached (never deleted from the catalog itself, ADR-0011). Each name is normalised (trimmed, lowercased) and resolved to an existing catalog Tag or a newly created one — this is the only way a brand new Tag comes into existence. A name repeated in the list, even under different casing, still resolves to one Tag.",
+        "tags": ["resources"],
+        "summary": "Replace a Resource's Tags",
+        "description": "Requires at least the writer role — the same bar as publishing. A full replace, not incremental: the given names become exactly this Resource's Tags, and any Tag it previously carried that isn't in the list is detached (never deleted from the catalog itself, ADR-0011). Each name is normalised (trimmed, lowercased) and resolved to an existing catalog Tag or a newly created one — this is the only way a brand new Tag comes into existence. A name repeated in the list, even under different casing, still resolves to one Tag.",
         "requestBody": {
           "required": true,
           "content": {
@@ -759,7 +769,7 @@
         },
         "responses": {
           "200": {
-            "description": "The Skill's resolved Tags after the replace",
+            "description": "The Resource's resolved Tags after the replace",
             "content": {
               "application/json": {
                 "schema": {
@@ -775,10 +785,10 @@
           "400": { "$ref": "#/components/responses/ValidationFailed" },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "403": {
-            "description": "Readers cannot edit a Skill's Tags",
+            "description": "Readers cannot edit a Resource's Tags",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
-          "404": { "$ref": "#/components/responses/SkillNotFound" }
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
         }
       }
     },
@@ -1261,6 +1271,13 @@
         "required": false,
         "schema": { "type": "integer", "minimum": 1, "default": 1 }
       },
+      "Kind": {
+        "name": "kind",
+        "in": "path",
+        "required": true,
+        "description": "The Resource's Kind. Checked against the registered Kinds in the service (ADR-0026) — an unrecognised value is refused there, not by this path schema, so that refusal can be a field-named validation error rather than a bare 404.",
+        "schema": { "type": "string", "example": "skill" }
+      },
       "SkillName": {
         "name": "name",
         "in": "path",
@@ -1277,7 +1294,7 @@
         "name": "id",
         "in": "path",
         "required": true,
-        "description": "The Skill's id.",
+        "description": "The Resource's id.",
         "schema": { "type": "string", "format": "uuid" }
       },
       "TagId": {
@@ -1329,8 +1346,8 @@
         "description": "Requires at least the admin role (admin or the superadmin)",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
-      "SkillNotFound": {
-        "description": "No Skill by that id",
+      "ResourceNotFound": {
+        "description": "No Resource by that id",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "TagNotFound": {
@@ -1398,10 +1415,15 @@
       },
       "SkillDirectoryEntry": {
         "type": "object",
-        "description": "One row of `GET /skills` (ticket 23), sourced from the `skill_directory` view — deliberately not SkillSummary: `published_by_name` in place of the full Publisher object, and `updated_at` in place of `published_at`. `GET /skills/{id}` and `by-name/{name}` are unaffected and still return SkillSummary/Skill.",
-        "required": ["id", "name", "description", "published_by_name", "updated_at", "installs", "tags"],
+        "description": "One row of `GET /resources` (ticket 23, ADR-0026), sourced from the `resource_directory` view — deliberately not SkillSummary: `published_by_name` in place of the full Publisher object, and `updated_at` in place of `published_at`. `GET /resources/{id}` and `{kind}/by-name/{name}` are unaffected and still return SkillSummary/Skill.",
+        "required": ["id", "kind", "name", "description", "published_by_name", "updated_at", "installs", "tags"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
+          "kind": {
+            "type": "string",
+            "example": "skill",
+            "description": "Plain text, not an enum: the catalog lists every Kind, and `skill` is the only value it can hold until a second one is registered (ADR-0026)."
+          },
           "name": {
             "type": "string",
             "maxLength": 64,
@@ -1430,19 +1452,19 @@
       },
       "SkillDirectoryStats": {
         "type": "object",
-        "description": "Registry-wide counts for the Skill directory's hero stats. Unfiltered — unlike GET /skills's `total`, unaffected by any search term or Tag selection.",
+        "description": "Registry-wide counts for the catalog's hero stats. Unfiltered — unlike GET /resources's `total`, unaffected by any search term, Kind, or Tag selection.",
         "required": ["skills", "publishers", "installs"],
         "properties": {
-          "skills": { "type": "integer", "minimum": 0, "description": "Total Skill count." },
+          "skills": { "type": "integer", "minimum": 0, "description": "Total Resource count, across every Kind." },
           "publishers": {
             "type": "integer",
             "minimum": 0,
-            "description": "Distinct Publishers who have published a Skill, counted by their email snapshot (docs/data-model.md) so a removed User's Skills still count."
+            "description": "Distinct Publishers who have published a Resource, counted by their email snapshot (docs/data-model.md) so a removed User's Resources still count."
           },
           "installs": {
             "type": "integer",
             "minimum": 0,
-            "description": "Total Install count across every Skill. Same lag caveat as SkillSummary.installs (ADR-0012)."
+            "description": "Total Install count across every Resource. Same lag caveat as SkillSummary.installs (ADR-0012); not comparable across Kinds once a second one exists (ADR-0028)."
           }
         }
       },
@@ -1450,6 +1472,7 @@
         "type": "object",
         "required": [
           "id",
+          "kind",
           "name",
           "description",
           "license",
@@ -1465,7 +1488,12 @@
           "id": {
             "type": "string",
             "format": "uuid",
-            "description": "Stable identity for reading, deleting, and downloading this Skill — generated once, on first publish, and never changes across republishes of the same name. `name` remains how a Skill is published."
+            "description": "Stable identity for reading, deleting, and downloading this Skill — generated once, on first publish, and never changes across republishes of the same `(kind, name)`. `name` remains how a Skill is published."
+          },
+          "kind": {
+            "type": "string",
+            "const": "skill",
+            "description": "Always \"skill\" on this shape — the Kind-specific fields below (`license`, `compatibility`, `metadata`, `allowed_tools`) only make sense for it (ADR-0026)."
           },
           "name": {
             "type": "string",
@@ -1494,7 +1522,7 @@
           "tags": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/Tag" },
-            "description": "Registry-owned, never parsed from or written into SKILL.md (ADR-0008), and never set by publishing — see `PUT /skills/{id}/tags`. Each Tag is drawn from the registry-wide catalog (ADR-0011); empty until something attaches one."
+            "description": "Registry-owned, never parsed from or written into SKILL.md (ADR-0008), and never set by publishing — see `PUT /resources/{id}/tags`. Each Tag is drawn from the registry-wide catalog (ADR-0011); empty until something attaches one."
           },
           "published_by": { "$ref": "#/components/schemas/Publisher" },
           "published_at": { "type": "string", "format": "date-time" },

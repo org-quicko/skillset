@@ -1,9 +1,29 @@
 import { GIT_PROVIDERS, type ConnectableProvider, type Connection } from "@skill-registry/shared";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { connectHref, useConnections, useDisconnect } from "@/hooks/use-connections";
 import { apiErrorMessage } from "@/lib/api";
 import { formatMoment } from "@/lib/utils";
+
+/** Placeholder connection panels while `useConnections` is in flight. */
+function ConnectionsSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 2 }).map((_, index) => (
+        <Panel key={index}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <Skeleton className="h-7 w-24 rounded-md" />
+          </div>
+        </Panel>
+      ))}
+    </>
+  );
+}
 
 /**
  * What disconnecting actually does, said in full.
@@ -144,7 +164,7 @@ export function ConnectionCard() {
         </p>
       </div>
 
-      {connections.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {connections.isPending && <ConnectionsSkeleton />}
       {connections.isError && <p className="text-sm text-destructive">{apiErrorMessage(connections.error)}</p>}
       {disconnect.isError && <p className="text-sm text-destructive">{apiErrorMessage(disconnect.error)}</p>}
 

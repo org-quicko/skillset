@@ -16,7 +16,7 @@ interface DraftTag {
 
 /**
  * Edits a Skill's Tags as one local draft list, submitted as a single full
- * replace (`PUT /skills/{id}/tags`) once "Save tags" is pressed — nothing
+ * replace (`PUT /resources/{id}/tags`) once "Save tags" is pressed — nothing
  * is written until then. A name can be picked from the catalog autocomplete
  * or typed fresh (find-or-create, ADR-0011). Admins additionally get a
  * rename control on each existing chip; a rename takes effect immediately
@@ -153,7 +153,7 @@ function TagsEditorBody({
             {draftTags.map((tag) => (
               <span
                 key={tag.name}
-                className="flex items-center gap-1 rounded-full bg-muted py-0.5 pr-1 pl-2.5 text-xs text-muted-foreground"
+                className="flex items-center gap-1.5 rounded-full bg-muted py-1 pr-1.5 pl-2.5 text-xs text-muted-foreground"
               >
                 {tag.id !== null && renamingId === tag.id ? (
                   <input
@@ -176,7 +176,7 @@ function TagsEditorBody({
                     type="button"
                     onClick={() => startRename(tag)}
                     aria-label={`Rename ${tag.name}`}
-                    className="text-muted-foreground hover:text-foreground"
+                    className="flex rounded-full p-1 text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
                   >
                     <PencilIcon className="size-3" />
                   </button>
@@ -185,7 +185,7 @@ function TagsEditorBody({
                   type="button"
                   onClick={() => removeTag(tag.name)}
                   aria-label={`Remove ${tag.name}`}
-                  className="text-muted-foreground hover:text-foreground"
+                  className="flex rounded-full p-1 text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
                 >
                   <XIcon className="size-3" />
                 </button>

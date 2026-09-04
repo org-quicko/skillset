@@ -1,14 +1,14 @@
 import { inArray, sql, sum } from "drizzle-orm";
 import type { Database } from "../db/client.js";
-import { skillAnalytics, skillInstallEvents } from "../db/schemas/index.js";
+import { resourceAnalytics, resourceInstallEvents } from "../db/schemas/index.js";
 import type { Logger } from "../logger.js";
 
-/** Where a recorded Install came from — see `skillInstallSourceEnum` (ADR-0012). */
+/** Where a recorded Install came from — see `resourceInstallSourceEnum` (ADR-0012). */
 export type InstallSource = "web" | "cli";
 
 /**
  * Install bookkeeping: appending Install events, and reading the counts back
- * off `skill_analytics` (ADR-0012).
+ * off `resource_analytics` (ADR-0012, ADR-0028).
  */
 export class AnalyticsService {
   constructor(
@@ -36,25 +36,26 @@ export class AnalyticsService {
    */
   async recordInstall(skillId: string, source: InstallSource): Promise<void> {
     try {
-      await this.db.insert(skillInstallEvents).values({ skill_id: skillId, source });
+      await this.db.insert(resourceInstallEvents).values({ resource_id: skillId, source });
     } catch (cause) {
       this.logger.error({ err: cause, skill_id: skillId, source }, "failed to record install");
     }
   }
 
   /**
-   * Recomputes `skill_analytics` from the current `skill_install_events` log.
+   * Recomputes `resource_analytics` from the current
+   * `resource_install_events` log.
    *
    * @remarks
-   * The only writer of `skill_analytics` (ADR-0012). Called on every tick of
-   * `ANALYTICS_REFRESH_CRON` (see `server.ts`), and directly by tests that
+   * The only writer of `resource_analytics` (ADR-0012). Called on every tick
+   * of `ANALYTICS_REFRESH_CRON` (see `server.ts`), and directly by tests that
    * need a deterministic point to assert a count from.
    *
    * Not `CONCURRENTLY`: this takes an exclusive lock on the view, expected to
    * complete in milliseconds at this scale.
    */
   async refreshInstallCounts(): Promise<void> {
-    await this.db.refreshMaterializedView(skillAnalytics);
+    await this.db.refreshMaterializedView(resourceAnalytics);
   }
 
   /**
@@ -79,11 +80,11 @@ export class AnalyticsService {
     if (skillIds.length === 0) return new Map();
 
     const rows = await this.db
-      .select({ skill_id: skillAnalytics.skill_id, install_count: skillAnalytics.install_count })
-      .from(skillAnalytics)
-      .where(inArray(skillAnalytics.skill_id, skillIds));
+      .select({ resource_id: resourceAnalytics.resource_id, install_count: resourceAnalytics.install_count })
+      .from(resourceAnalytics)
+      .where(inArray(resourceAnalytics.resource_id, skillIds));
 
-    return new Map(rows.map((row) => [row.skill_id, row.install_count]));
+    return new Map(rows.map((row) => [row.resource_id, row.install_count]));
   }
 
   /**
@@ -112,7 +113,7 @@ export class AnalyticsService {
    * `getInstallCount`, for the Skill directory's hero stats.
    *
    * @remarks
-   * A Skill with no recorded Install has no row in `skill_analytics` and
+   * A Skill with no recorded Install has no row in `resource_analytics` and
    * simply contributes nothing to the sum, the same as it defaults to `0`
    * everywhere else (ADR-0012).
    *
@@ -127,8 +128,8 @@ export class AnalyticsService {
     // in principle) and reads SQL NULL over zero rows — coalesced back to
     // `'0'` so an install-free Registry gets a count, not a parse of `null`.
     const [row] = await this.db
-      .select({ total: sql<string>`coalesce(${sum(skillAnalytics.install_count)}, '0')` })
-      .from(skillAnalytics);
+      .select({ total: sql<string>`coalesce(${sum(resourceAnalytics.install_count)}, '0')` })
+      .from(resourceAnalytics);
     return Number(row?.total ?? 0);
   }
 }

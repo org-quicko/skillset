@@ -1,10 +1,11 @@
 /**
- * One object per Skill, keyed by name. The key is derived rather than stored
- * (docs/data-model.md) — the name is the Skill's identity, so there is
- * nothing else for a key to be.
+ * One object per Resource, keyed by id (ADR-0026). Deliberately not the
+ * name: an MCP Server's name contains a slash, which would otherwise create
+ * a nested object path, and `id` is already stable across every republish.
+ * Existing objects under `skills/<name>.zip` are not migrated.
  */
-export function artifactKey(skillName: string): string {
-  return `skills/${skillName}.zip`;
+export function artifactKey(resourceId: string): string {
+  return `resources/${resourceId}.zip`;
 }
 
 /** An Artifact is a zip; the presigned upload is signed for exactly this type. */

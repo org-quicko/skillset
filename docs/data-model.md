@@ -96,20 +96,20 @@ Cascade on delete is deliberate — removing a User must end their CLI access, n
 
 Indexes: unique on `token_hash`; on `user_id` for listing a User's own Tokens.
 
-## `skills`
+## `resources`
 
-A Skill in the Registry. One row per Skill, one Artifact per row.
+A Resource in the Registry — a Skill, and eventually other Kinds (ADR-0026). One row per
+Resource, one Artifact per row for a Kind that has one (ADR-0027). Replaces `skills`; `skill` is
+the only Kind registered so far, so every row here is one today.
 
 | Column               | Type          | Constraints                                            |
 | -------------------- | ------------- | ------------------------------------------------------ |
 | `id`                 | `uuid`        | primary key, default `uuidv7()`                        |
-| `name`               | `text`        | not null, unique                                       |
-| `description`        | `text`        | not null, length ≤ 1024                                |
-| `body`               | `text`        | not null                                               |
-| `license`            | `text`        | null                                                    |
-| `compatibility`      | `text`        | null, length ≤ 500                                     |
-| `metadata`           | `jsonb`       | null — a mapping of string keys to string values       |
-| `allowed_tools`      | `text`        | null                                                    |
+| `kind`               | `text`        | not null                                               |
+| `name`               | `text`        | not null; unique on `(kind, name)`                     |
+| `description`        | `text`        | not null; max length is per-Kind, enforced in shared   |
+| `body`               | `text`        | null                                                    |
+| `payload`            | `jsonb`       | not null — the Kind's own fields                       |
 | `published_by`       | `uuid`        | null, references `users(id)` on delete set null         |
 | `published_by_email` | `text`        | not null                                               |
 | `published_by_name`  | `text`        | not null                                               |
@@ -118,33 +118,45 @@ A Skill in the Registry. One row per Skill, one Artifact per row.
 | `updated_at`          | `timestamptz` | not null, default `now()` — bumped on every republish  |
 | `search`             | `tsvector`    | generated always as stored, see below                  |
 
-`id` is the stable identity `GET`, `DELETE`, and the Artifact download route key a Skill by —
-generated once, on first insert, and never changes across republishes of the same name
-(the conflict-update path never sets it). `name` stays how a Skill is **published**: flat, no
-namespacing, no version history, and still the row's sole *publishing* identity — `PUT` is an
-upsert by name, since there is no `id` before the row exists, and it is still how the Artifact
-is keyed in storage (ADR-0002). A check constraint enforces the same rule the shared validation
-module does: 1–64 characters, lowercase alphanumerics and hyphens, no leading or trailing
-hyphen, no doubled hyphen.
+`id` is the stable identity `GET`, `DELETE`, and the Artifact download route key a Resource by —
+generated once, on first insert, and never changes across republishes of the same `(kind, name)`
+(the conflict-update path never sets it).
 
-`body` is the `SKILL.md` content, supplied by the CLI or the web interface rather than parsed
-from the Artifact — the API never reads the Artifact (ADR-0001). It is rendered through an
+`kind` is plain text, validated in the service against the `KINDS` map in
+`@skill-registry/shared` — the same treatment `integrations.provider` gets against
+`GIT_PROVIDERS` (ADR-0024) — rather than a Postgres enum, so registering a new Kind is an insert,
+not a migration.
+
+`name` stays how a Resource is **published**: flat, no namespacing, no version history, and
+still the row's *publishing* identity together with `kind` — `PUT` is an upsert by `(kind,
+name)`, since there is no `id` before the row exists (ADR-0002, amended by ADR-0026). Two
+Resources of different Kinds may share a name. There is **no check constraint** on `name`: no
+single pattern fits every Kind, so validation lives entirely in the shared per-Kind validators
+(ADR-0026) — for `skill`, still 1–64 characters, lowercase alphanumerics and hyphens, no leading
+or trailing hyphen, no doubled hyphen.
+
+`body` is markdown documentation — a Skill's `SKILL.md` content, supplied by the CLI or the web
+interface rather than parsed from the Artifact (the API never reads the Artifact, ADR-0001), or
+author-written for a future Kind with no such convention. It is **nullable**: not every Kind
+supplies one, though Skill's own shared validation still requires it. Rendered through an
 allowlist sanitiser, never trusted as markup.
 
-**`license`, `compatibility`, `metadata`, and `allowed_tools`** are the four optional fields
-the Agent Skills specification defines beyond `name` and `description`. Each is `null` until
-a publish sets it, validated by the same shared rules as `name` and `description` — a value
-that fails validation rejects the whole publish rather than being stored or dropped silently
-(ADR-0009). Publishing always writes all four (a validated value, or `null` when the payload
-doesn't set it), so republishing a Skill without a field it previously had clears it, the same
-full-replace semantics `description` and `body` already have.
+**`payload`** carries the Kind's own fields, validated by `ResourcePayloadSchema`'s discriminated
+union in `@skill-registry/shared` (ADR-0026). For `skill`, this is the four optional Agent Skills
+spec fields the table used to carry as flat columns — `license`, `compatibility`, `metadata`, and
+`allowed_tools` — each `null` until a publish sets it. A value that fails validation rejects the
+whole publish rather than being stored or dropped silently (ADR-0009). Publishing always writes
+all four keys into `payload` (a validated value, or `null` when the request doesn't set it), so
+republishing a Skill without a field it previously had clears it, the same full-replace semantics
+`description` and `body` already have. Postgres enforces nothing about `payload`'s shape — see
+ADR-0026's consequences for what that costs and why it's acceptable here.
 
-**Tags** are not a column on this table at all — see `tags` and `skill_tags` below. No publish
-path (a fresh publish or a replace of an existing Skill) ever touches them (ADR-0008).
+**Tags** are not a column on this table at all — see `tags` and `resource_tags` below. No publish
+path (a fresh publish or a replace of an existing Resource) ever touches them (ADR-0008).
 
 **`created_at`/`updated_at` are generic bookkeeping, distinct from `published_at`.**
-Every table carries this pair; on `skills` it currently tracks the same events
-`published_at` already does (there is no way to change a Skill's row other than
+Every table carries this pair; on `resources` it currently tracks the same events
+`published_at` already does (there is no way to change a Resource's row other than
 publishing it), so the two are redundant today — but `created_at` stays fixed across
 every republish while `published_at` doesn't, and a future non-publish mutation to this
 row would have somewhere generic to record itself without overloading a
@@ -154,37 +166,39 @@ publish-specific field.
 a current name while that User exists; `published_by_email` is a snapshot taken at publish time
 so that attribution survives the User being removed. A foreign key alone cannot do this — the
 reference is nulled when the row goes — and removing a User must not erase the record of who
-changed a shared Skill. Any writer may replace any Skill, so this is the only accountability
+changed a shared Resource. Any writer may replace any Resource, so this is the only accountability
 the model has.
 
 `published_by_name` (ticket 23) is a third snapshot, written the same moment `published_by_email`
-is: a display name the Skill list and full-text search (below) can use without a live join to
+is: a display name the Resource list and full-text search (below) can use without a live join to
 `users`, and one that doesn't change if that User later renames themselves — a republish is what
-refreshes it, the same full-replace semantics every other publish-time field has. Existing Skills
-were backfilled once, from the User each currently referenced (or, for a Skill whose publisher was
-already removed by then, its `published_by_email`) — see the migration adding this column.
+refreshes it, the same full-replace semantics every other publish-time field has.
 
-The Artifact's storage key is **derived** from the name rather than stored. There is no size
-or digest column: the API never sees the bytes, so it has nothing truthful to record.
+The Artifact's storage key is **derived** from the Resource's `id` rather than stored (ADR-0026;
+ticket 2 moved it off `name`, which would otherwise make a future Kind whose name contains a slash,
+like an MCP Server, create a nested object path). Existing objects under `skills/<name>.zip` were
+not migrated — nothing was deployed. There is no size or digest column: the API never sees the
+bytes, so it has nothing truthful to record.
 
 There is no status column and no soft delete. A row exists from the moment publishing starts,
 before its Artifact has been uploaded — the accepted consequence being that an abandoned
-publish leaves a Skill that lists and reads but fails to download until an Admin removes it.
+publish leaves a Resource that lists and reads but fails to download until an Admin removes it.
 
 The generated column and its index — folding in `published_by_name` (ticket 23) alongside `name`
-and `description`, so a search term matching only a Skill's publisher still returns it:
+and `description`, so a search term matching only a Resource's publisher still returns it:
 
 ```sql
-ALTER TABLE skills ADD COLUMN search tsvector
+ALTER TABLE resources ADD COLUMN search tsvector
   GENERATED ALWAYS AS (
     to_tsvector('english', name || ' ' || coalesce(description, '') || ' ' || published_by_name)
   ) STORED;
 
-CREATE INDEX skills_search_idx ON skills USING GIN (search);
+CREATE INDEX resources_search_idx ON resources USING GIN (search);
 ```
 
-Indexes: primary key on `id`; unique on `name`; GIN on `search`; on `published_at` descending,
-for the most-recent-first listing.
+Indexes: primary key on `id`; unique on `(kind, name)`; GIN on `search`; on `updated_at`
+descending, for the new default sort (ADR-0028) — there is no equivalent index left on
+`published_at`.
 
 ## `tags`
 
@@ -209,20 +223,20 @@ is accepted clutter, not a state the schema tries to prevent.
 
 Indexes: unique on `name`.
 
-## `skill_tags`
+## `resource_tags`
 
-The many-to-many join between `skills` and `tags` (ADR-0011).
+The many-to-many join between `resources` and `tags` (ADR-0011). Replaces `skill_tags`.
 
-| Column       | Type          | Constraints                                          |
-| ------------ | ------------- | ----------------------------------------------------- |
-| `skill_id`   | `uuid`        | not null, references `skills(id)` on delete cascade   |
-| `tag_id`     | `uuid`        | not null, references `tags(id)` on delete cascade     |
-| `created_at` | `timestamptz` | not null, default `now()`                             |
-| `updated_at` | `timestamptz` | not null, default `now()`                             |
+| Column        | Type          | Constraints                                              |
+| ------------- | ------------- | --------------------------------------------------------- |
+| `resource_id` | `uuid`        | not null, references `resources(id)` on delete cascade    |
+| `tag_id`      | `uuid`        | not null, references `tags(id)` on delete cascade         |
+| `created_at`  | `timestamptz` | not null, default `now()`                                 |
+| `updated_at`  | `timestamptz` | not null, default `now()`                                 |
 
-Primary key on `(skill_id, tag_id)` — the pair is the row's identity, so a Skill can't carry
-the same Tag twice. Both sides cascade: deleting a Skill must not orphan its join rows, and —
-although no route deletes a Tag yet — a future one shouldn't have to remember to clean this
+Primary key on `(resource_id, tag_id)` — the pair is the row's identity, so a Resource can't
+carry the same Tag twice. Both sides cascade: deleting a Resource must not orphan its join rows,
+and — although no route deletes a Tag yet — a future one shouldn't have to remember to clean this
 table up too.
 
 `created_at`/`updated_at` always agree here in practice: a row is only ever inserted or
@@ -230,59 +244,65 @@ deleted, never updated in place (`setSkillTags` deletes and re-inserts on every 
 rather than updating a row's `tag_id`), so `updated_at` never has a chance to diverge from
 `created_at`. Present anyway, for the same reason every other table carries the pair.
 
-`PUT /skills/{id}/tags` (a full replace) resolves every name in the request to a `tags` row —
-reusing an existing one or creating it — then deletes and re-inserts this Skill's rows in one
+`PUT /resources/{id}/tags` (a full replace) resolves every name in the request to a `tags` row —
+reusing an existing one or creating it — then deletes and re-inserts this Resource's rows in one
 transaction, so the join always reflects exactly the set just sent, never a partial merge of
 old and new.
 
-Indexes: primary key on `(skill_id, tag_id)`; on `tag_id`, for renaming or ever deleting a Tag
+Indexes: primary key on `(resource_id, tag_id)`; on `tag_id`, for renaming or ever deleting a Tag
 without a full scan of this table.
 
-## `skill_install_events`
+## `resource_install_events`
 
-The Install event log (ADR-0012, `.scratch/skill-analytics/spec.md`) — one immutable row per
-Install, an append-only history rather than a running total.
+The Install event log (ADR-0012, ADR-0028, `.scratch/skill-analytics/spec.md`) — one immutable
+row per Install, an append-only history rather than a running total. Replaces
+`skill_install_events`.
 
-| Column       | Type                  | Constraints                                          |
-| ------------ | --------------------- | ----------------------------------------------------- |
-| `id`         | `uuid`                | primary key, default `uuidv7()`                        |
-| `skill_id`   | `uuid`                | not null, references `skills(id)` on delete cascade    |
-| `source`     | `skill_install_source`| not null — `web` or `cli`                              |
-| `created_at` | `timestamptz`         | not null, default `now()`                              |
+| Column        | Type                  | Constraints                                             |
+| ------------- | --------------------- | ---------------------------------------------------------- |
+| `id`          | `uuid`                | primary key, default `uuidv7()`                             |
+| `resource_id` | `uuid`                | not null, references `resources(id)` on delete cascade      |
+| `source`      | `skill_install_source`| not null — `web` or `cli`                                   |
+| `created_at`  | `timestamptz`         | not null, default `now()`                                   |
 
-`skill_install_source` is an enum: `web` (a Skill's Artifact downloaded through the API) or `cli`
-(`skillreg add`, ticket 09 — not built yet, but the column already distinguishes it once it is).
-Downloading a Skill's Artifact appends one row here today, via an internal `recordInstall`
-function (not a public endpoint — nothing lets a client inflate this directly), called once the
-Artifact is confirmed to exist and right before the presigned download URL is issued. The write is
-best-effort: a failure is logged and swallowed, never allowed to fail the download itself.
+The Postgres enum is still named `skill_install_source` — nothing about "where an Install came
+from" is Skill-specific, but renaming the type was out of scope for the ticket that generalised
+this table (spec: `.scratch/generic-resources/spec.md`). It has two values: `web` (a Download of
+a Kind's Artifact through the API) or `cli` (`skillreg add`, ticket 09). Downloading a Skill's
+Artifact appends one row here today, via an internal `recordInstall` function (not a public
+endpoint — nothing lets a client inflate this directly for a Kind with an Artifact), called once
+the Artifact is confirmed to exist and right before the presigned download URL is issued. The
+write is best-effort: a failure is logged and swallowed, never allowed to fail the download
+itself.
 
 There is no `updated_at`. Every other table in this schema carries the pair by convention, but a
 row here is never touched again after insert — a column that could only ever equal `created_at`
 would be a bare column, not genuine consistency with the rest of the schema. Rows are kept
 forever: nothing prunes or rolls this table up.
 
-Indexes: primary key on `id`; on `skill_id`, for the aggregation `skill_analytics` runs below.
+Indexes: primary key on `id`; on `resource_id`, for the aggregation `resource_analytics` runs
+below.
 
-## `skill_analytics` (materialized view)
+## `resource_analytics` (materialized view)
 
-A running install count per Skill, aggregated from `skill_install_events` (ADR-0012).
+A running install count per Resource, aggregated from `resource_install_events` (ADR-0012,
+ADR-0028). Replaces `skill_analytics`.
 
 | Column          | Type      | Constraints |
 | --------------- | --------- | ----------- |
-| `skill_id`      | `uuid`    | one row per Skill with at least one Install |
-| `install_count` | `integer` | `count(*)` of that Skill's rows in `skill_install_events` |
+| `resource_id`   | `uuid`    | one row per Resource with at least one Install |
+| `install_count` | `integer` | `count(*)` of that Resource's rows in `resource_install_events` |
 
 ```sql
-CREATE MATERIALIZED VIEW skill_analytics AS
-  SELECT skill_id, count(*)::integer AS install_count
-  FROM skill_install_events
-  GROUP BY skill_id;
+CREATE MATERIALIZED VIEW resource_analytics AS
+  SELECT resource_id, count(*)::integer AS install_count
+  FROM resource_install_events
+  GROUP BY resource_id;
 ```
 
-A Skill with no recorded Install has no row here at all — the same "absent means 0" contract the
-plain table this view replaced had. Every read path (a Skill's detail read, its list-summary read)
-treats "no row" and "a row with `install_count = 0`" identically.
+A Resource with no recorded Install has no row here at all — the same "absent means 0" contract
+the plain table this view replaced had. Every read path (a Resource's detail read, its
+list-summary read) treats "no row" and "a row with `install_count = 0`" identically.
 
 **This view is never read live.** It is recomputed only by `refreshInstallCounts`
 (`apps/api/src/services/analytics.ts`) — a plain `REFRESH MATERIALIZED VIEW`, called on every tick
@@ -291,53 +311,60 @@ is wired up only in `server.ts`, never inside request handling. Every install co
 anywhere — a Skill's own page, the Skill list, `sort_by=installs` — can therefore lag reality by up
 to that interval, including a reader not seeing their own just-completed download reflected
 immediately. See ADR-0012 for why this replaced an atomic `install_count + 1` upsert on a live
-table.
+table. Counts are **not comparable across Kinds** once a second one exists (ADR-0028) — a Skill's
+count is a completed byte transfer, a future Kind's may be softer evidence.
 
-## `skill_directory` (view)
+## `resource_directory` (view)
 
-The Skill list's read model (ticket 23) — `GET /skills` reads from here, and nowhere else. One row
-per Skill, joining `skills` to `skill_analytics` and aggregating its Tags.
+The Resource list's read model (ticket 23) — `GET /resources` reads from here, and nowhere else.
+One row per Resource, joining `resources` to `resource_analytics` and aggregating its Tags.
+Replaces `skill_directory`.
 
 | Column               | Type          | Constraints |
 | -------------------- | ------------- | ----------- |
 | `id`                 | `uuid`        | |
+| `kind`                | `text`        | filtered by `GET /resources?kind=` (ticket 2, ADR-0026) |
 | `name`               | `text`        | |
 | `description`        | `text`        | |
 | `published_by_name`  | `text`        | |
 | `updated_at`          | `timestamptz` | |
-| `search`             | `tsvector`    | `skills.search`, unchanged |
-| `install_count`      | `integer`     | `0` for a Skill with no row in `skill_analytics` |
-| `tags`               | `jsonb`       | `{id, name}[]`, `[]` for a Skill with no Tags |
+| `search`             | `tsvector`    | `resources.search`, unchanged |
+| `install_count`      | `integer`     | `0` for a Resource with no row in `resource_analytics` |
+| `tags`               | `jsonb`       | `{id, name}[]`, `[]` for a Resource with no Tags |
 
 ```sql
-CREATE VIEW skill_directory AS
+CREATE VIEW resource_directory AS
   SELECT
-    s.id, s.name, s.description, s.published_by_name, s.updated_at, s.search,
-    COALESCE(sa.install_count, 0) AS install_count,
+    r.id, r.kind, r.name, r.description, r.published_by_name, r.updated_at, r.search,
+    COALESCE(ra.install_count, 0) AS install_count,
     COALESCE(
       (SELECT jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name) ORDER BY t.name)
-       FROM skill_tags st JOIN tags t ON t.id = st.tag_id
-       WHERE st.skill_id = s.id),
+       FROM resource_tags rt JOIN tags t ON t.id = rt.tag_id
+       WHERE rt.resource_id = r.id),
       '[]'::jsonb
     ) AS tags
-  FROM skills s
-  LEFT JOIN skill_analytics sa ON sa.skill_id = s.id;
+  FROM resources r
+  LEFT JOIN resource_analytics ra ON ra.resource_id = r.id;
 ```
 
-A plain view, not materialized — unlike `skill_analytics`, everything here is always current
-except the install count it inherits, which lags exactly as far as `skill_analytics` does
-(ADR-0012). Tag *filtering* (`GET /skills?tag_id=…`, any-match across one or more Tags) is a
-membership check against `skill_tags` directly in the query that reads from this view, not a
+A plain view, not materialized — unlike `resource_analytics`, everything here is always current
+except the install count it inherits, which lags exactly as far as `resource_analytics` does
+(ADR-0012). Tag *filtering* (`GET /resources?tag_id=…`, any-match across one or more Tags) is a
+membership check against `resource_tags` directly in the query that reads from this view, not a
 condition against the `tags` column above — that column is for display, so a filter never has to
-express "does this jsonb array contain one of these ids" in SQL.
+express "does this jsonb array contain one of these ids" in SQL. Kind filtering
+(`GET /resources?kind=…`) is a plain equality check against `kind` itself; omitted, every Kind is
+listed together — with `skill` the only one registered, the filter is exercisable but not yet
+load-bearing.
 
-`GET /skills` sorts by `install_count` or `updated_at` (`sort_by`, default `installs`; `sort_order`,
-default `desc`), governing order unconditionally — even with a search term (`q`) active, there is
-no separate relevance ranking. `page_size` is client-supplied, defaulting to 10 and clamped to
-[1, 100] rather than rejected; an invalid `sort_by` or `sort_order` is rejected instead, the same
-field-named validation error the rest of the API gives bad input. Ties on the requested sort column
-(e.g. every Skill with 0 installs) break on `id` ascending, so paging through them with infinite
-scroll never repeats or skips a row.
+`GET /resources` sorts by `install_count` or `updated_at` (`sort_by`, default `updated_at` since
+ADR-0028 — installs are not comparable across Kinds; `sort_order`, default `desc`), governing order
+unconditionally — even with a search term (`q`) active, there is no separate relevance ranking.
+`page_size` is client-supplied, defaulting to 10 and clamped to [1, 100] rather than rejected; an
+invalid `kind`, `sort_by`, or `sort_order` is rejected instead, the same field-named validation
+error the rest of the API gives bad input. Ties on the requested sort column (e.g. every Skill with
+0 installs) break on `id` ascending, so paging through them with infinite scroll never repeats or
+skips a row.
 
 Indexes: none today. `REFRESH MATERIALIZED VIEW CONCURRENTLY` (which would need one) was considered
 and deferred — see ADR-0012.
@@ -391,11 +418,14 @@ service, so nobody loses their way in to a mistyped click.
 
 ## `integrations`
 
-The Registry's registration with one Git Provider, holding the credential pair a Connection is
-granted against (ADR-0024). At most one row per provider — `provider` is the row's identity.
+The Registry's registration with a Git Provider, holding the credential pair a Connection is
+granted against (ADR-0024). More than one row may exist for the same provider — two different
+GitHub Apps, say, for two different orgs or environments — so `id` rather than `provider` is a
+row's identity (ADR-0025, superseding ADR-0024's "one row per provider").
 
 ```
-provider       text primary key                 -- 'github' | 'gitlab'
+id             uuid primary key default uuidv7()
+provider       text not null                    -- 'github' | 'gitlab'; not unique
 display_name   text not null
 client_id      text not null
 client_secret  text not null
@@ -413,9 +443,10 @@ it.
 
 `provider` is **plain text, not an enum**, so registering a new Git Provider is an insert rather
 than a migration (ADR-0024). The values it may take are the keys of `GIT_PROVIDERS` in
-`@skill-registry/shared`, checked in the service. What Postgres enforces instead is the other
-direction: `connections.provider` references this column, which makes *"you cannot connect to a
-provider this Registry has not registered"* a database invariant rather than an application rule.
+`@skill-registry/shared`, checked in the service. Since ADR-0025, `provider` carries no uniqueness
+constraint and no incoming foreign key: `connections.integration_id` references this table's `id`
+instead, recording which specific app a grant was issued through, while `connections.provider`
+stays denormalized for the provider-keyed read paths that never needed to change.
 
 **A row's existence is the only switch Importing has.** There is deliberately no
 `import_enabled` flag: an operator who wants this Registry to hold no repository credentials for
@@ -433,7 +464,10 @@ leaked backup, not a compromised host, because this secret sits beside it in pla
 
 There is no delete route, matching `/identity-providers`. Removing an Integration that writers
 still hold Connections against would strand those credentials, and the `ON DELETE RESTRICT` on
-`connections.provider` refuses it at the database.
+`connections.integration_id` refuses it at the database. Repointing an Integration's `client_id` in
+place (`PATCH /integrations/:id`) clears only the Connections made through *that* Integration, not
+every Connection for its provider — a sibling app's Connections are unaffected by this one's
+credentials changing (ADR-0025).
 
 ## `connections`
 
@@ -443,7 +477,8 @@ signing in (ADR-0024). Its existence *is* the consent; nothing else records it.
 ```
 id                        uuid primary key default uuidv7()
 user_id                   uuid not null references users(id) on delete cascade
-provider                  text not null references integrations(provider) on delete restrict
+provider                  text not null                     -- denormalized from integrations, not a FK
+integration_id            uuid not null references integrations(id) on delete restrict
 external_account_id       text not null
 external_account_login    text not null
 access_token              text not null                      -- ciphertext
@@ -462,10 +497,14 @@ third-party API credential in the authentication table is the conflation ADR-002
 and it is also why Better Auth does not drive the grant — the flow is two routes of the Registry's
 own with a signed, single-use state.
 
-`provider` references `integrations` rather than carrying a free string. That is what makes
-*"you cannot connect to a provider this Registry has not registered"* a database invariant.
-`ON DELETE RESTRICT` is load-bearing: removing an Integration that writers still hold Connections
-against fails loudly rather than silently dropping their credentials.
+`integration_id` references `integrations` rather than `provider` carrying a free string
+(ADR-0025) — a writer's grant was issued through one specific app, and more than one app can now
+exist per provider. That is what makes *"you cannot connect through an app this Registry has not
+registered"* a database invariant. `ON DELETE RESTRICT` is load-bearing: removing an Integration
+that writers still hold Connections against fails loudly rather than silently dropping their
+credentials. `provider` stays alongside it, denormalized, so every provider-keyed read path
+(`accessTokenFor`, disconnect, imports) is unaffected by which specific app a Connection went
+through.
 
 `unique (user_id, provider)` means reconnecting **replaces**. One Connection per writer per
 provider, so "which account does this Import use?" never needs asking — the alternative is a picker

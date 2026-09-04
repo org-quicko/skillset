@@ -1,5 +1,8 @@
 # `add` Writes One Canonical Copy And Symlinks The Agent To It
 
+> **Amended by ADR-0029.** All of this is Skill-only. `add` for an MCP Server merges a
+> project's `.mcp.json`, names no Agent, and never touches `.agents/skills`.
+
 `skillreg add` writes every Skill's files to the canonical `.agents/skills/<name>` directory,
 and for an Agent that reads somewhere else — `claude-code` at `.claude/skills`, `pi` at
 `.pi/skills` — it creates a symlink there pointing back at the canonical copy. The Agent list

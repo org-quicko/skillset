@@ -12,6 +12,7 @@ const encoder = new TextEncoder();
 function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "skill-1",
+    kind: "skill",
     name: "code-review",
     description: "Reviews code.",
     body: "Body.\n",
@@ -34,8 +35,8 @@ function validArtifactZip(): Uint8Array {
 /** Answers the two requests `add` makes: the Skill's metadata, then its Artifact. */
 function stubRegistry(artifact: Uint8Array = validArtifactZip()) {
   return stubFetch((url) => {
-    if (url === "https://registry.example/api/skills/by-name/code-review") return jsonResponse(200, fakeSkill());
-    if (url === "https://registry.example/api/skills/skill-1/artifact") return new Response(artifact, { status: 200 });
+    if (url === "https://registry.example/api/resources/skill/by-name/code-review") return jsonResponse(200, fakeSkill());
+    if (url === "https://registry.example/api/resources/skill-1/artifact") return new Response(artifact, { status: 200 });
     throw new Error(`Unexpected request to ${url}`);
   });
 }
@@ -124,11 +125,11 @@ describe("runAdd", () => {
         { name: "code-review", scope: "project", agent: "codex" },
       );
 
-      expect(report).toEqual({
-        skillDirectory: join(cwd, ".agents", "skills", "code-review"),
-        agent: "codex",
-        link: { kind: "canonical" },
-      });
+      // Not a full toEqual: `codex` is one of many Agents reading .agents/skills
+      // directly, so `alsoServes` names the rest — covered on its own in install.test.ts.
+      expect(report.skillDirectory).toBe(join(cwd, ".agents", "skills", "code-review"));
+      expect(report.agent).toBe("codex");
+      expect(report.link).toEqual({ kind: "canonical" });
       expect(await readFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "utf8")).toContain("code-review");
     });
   });

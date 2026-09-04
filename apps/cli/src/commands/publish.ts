@@ -82,7 +82,7 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
 
   let published;
   try {
-    published = await registryFetch(client, `/skills/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
+    published = await registryFetch(client, `/resources/skill/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
       method: "PUT",
       body: JSON.stringify(bundle.request),
     });

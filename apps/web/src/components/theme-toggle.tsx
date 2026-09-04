@@ -23,8 +23,8 @@ export function ThemeToggle() {
           aria-label="Toggle theme"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
-          <SunIcon className="scale-100 dark:scale-0" />
-          <MoonIcon className="absolute scale-0 dark:scale-100" />
+          <SunIcon className="scale-100 opacity-100 transition-[scale,opacity] duration-200 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-0 dark:opacity-0" />
+          <MoonIcon className="absolute scale-0 opacity-0 transition-[scale,opacity] duration-200 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-100 dark:opacity-100" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Toggle theme</TooltipContent>

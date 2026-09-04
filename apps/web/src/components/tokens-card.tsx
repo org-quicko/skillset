@@ -1,13 +1,32 @@
 import type { TokenCreated } from "@skill-registry/shared";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { IconSwap } from "@/components/icon-swap";
 import { LabeledField } from "@/components/labeled-field";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useMintToken, useRevokeToken, useTokens } from "@/hooks/use-tokens";
 import { apiErrorMessage } from "@/lib/api";
 import { formatMoment } from "@/lib/utils";
+
+/** Placeholder rows for the token list while `useTokens` is in flight. */
+function TokenRowsSkeleton() {
+  return (
+    <div className="flex flex-col">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div key={index} className="flex items-center justify-between gap-3 border-b px-5 py-3.5 last:border-b-0">
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-3 w-52" />
+          </div>
+          <Skeleton className="h-7 w-16 rounded-md" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -30,9 +49,13 @@ function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: ()
           type="button"
           aria-label="Copy secret"
           onClick={copy}
-          className="flex cursor-pointer text-muted-foreground hover:text-foreground"
+          className="-m-2 flex cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
         >
-          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+          <IconSwap
+            showAlt={copied}
+            base={<CopyIcon className="size-4" />}
+            alt={<CheckIcon className="size-4" />}
+          />
         </button>
       </div>
       <code className="rounded bg-muted p-2 font-mono text-xs break-all">{token.secret}</code>
@@ -84,7 +107,7 @@ export function TokensCard() {
       </Panel>
 
       <Panel title="Your Tokens" contentClassName="p-0">
-        {tokens.isPending && <p className="p-5 text-sm text-muted-foreground">Loading…</p>}
+        {tokens.isPending && <TokenRowsSkeleton />}
         {tokens.isError && <p className="p-5 text-sm text-destructive">{apiErrorMessage(tokens.error)}</p>}
         {tokens.isSuccess && tokens.data.length === 0 && (
           <p className="p-5 text-sm text-muted-foreground">No Tokens yet.</p>

@@ -96,8 +96,8 @@ export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteR
   const flagScope = options.scope ? parseScope(options.scope) : null;
   const flagAgent = options.agent ? parseAgentId(options.agent) : null;
 
-  const skill = await registryFetch(client, `/skills/by-name/${encodeURIComponent(options.name)}`, SkillSchema);
-  const bytes = await downloadBinary(client, `/skills/${skill.id}/artifact`);
+  const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(options.name)}`, SkillSchema);
+  const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact`);
 
   let files;
   try {

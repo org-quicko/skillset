@@ -3,6 +3,7 @@ import { platform } from "node:os";
 import { dirname, join, normalize, relative } from "node:path";
 import {
   agentSkillsDir,
+  agentsSharingDirectory,
   canonicalSkillsDir,
   getAgent,
   SKILL_NAME_MAX_LENGTH,
@@ -24,6 +25,11 @@ export interface WriteReport {
   agent: AgentId;
   /** Whether that Agent reads the canonical directory directly, or via a symlink/copy. */
   link: LinkResult;
+  /**
+   * Every other Agent that reads Skills from the same directory `agent` does, at this
+   * install's Scope — `[]` if none. This install already serves them too.
+   */
+  alsoServes: AgentId[];
 }
 
 export interface InstallContext {
@@ -124,8 +130,8 @@ async function copyInto(linkPath: string, canonicalTarget: string): Promise<void
  * @param agentId - The Agent to install for.
  * @param options - `copy: true` writes a real copy into the Agent's directory instead of a
  * symlink.
- * @returns Where the Skill's files live, the Agent chosen, and how that Agent's directory
- * was linked to them.
+ * @returns Where the Skill's files live, the Agent chosen, how that Agent's directory was
+ * linked to them, and which other Agents that same directory already serves.
  * @throws Error when `skillName` sanitises to nothing; when `agentId` names no Agent; when
  * `scope` is "user" for an Agent with no user-level directory (`eve`, `promptscript`); or
  * when the filesystem refuses a write.
@@ -138,7 +144,7 @@ async function copyInto(linkPath: string, canonicalTarget: string): Promise<void
  * ```ts
  * await installSkill({ cwd, env: process.env, homeDir: homedir() }, "code-review", files, "project", "claude-code", { copy: false });
  * // -> { skillDirectory: "<cwd>/.agents/skills/code-review", agent: "claude-code",
- * //      link: { kind: "symlink", path: "<cwd>/.claude/skills/code-review" } }
+ * //      link: { kind: "symlink", path: "<cwd>/.claude/skills/code-review" }, alsoServes: [] }
  * ```
  */
 export async function installSkill(
@@ -156,6 +162,7 @@ export async function installSkill(
   if (agentDir === null) {
     throw new Error(`${getAgent(agentId).displayName} has no user-level skills directory — install it at project scope instead.`);
   }
+  const alsoServes = agentsSharingDirectory(agentId, scope, resolveCtx);
 
   // shared's paths are POSIX-style strings, possibly mixed with the host's own separator
   // once joined onto cwd — `normalize` understands both on every platform Node runs on.
@@ -164,20 +171,25 @@ export async function installSkill(
   await writeSkillFiles(canonicalTarget, files);
 
   if (normalize(agentDir) === canonicalDir) {
-    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "canonical" } };
+    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "canonical" }, alsoServes };
   }
 
   const linkPath = join(normalize(agentDir), directoryName);
   if (options.copy) {
     await copyInto(linkPath, canonicalTarget);
-    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "copy", path: linkPath, reason: "requested" } };
+    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "copy", path: linkPath, reason: "requested" }, alsoServes };
   }
 
   try {
     await symlinkInto(linkPath, canonicalTarget);
-    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "symlink", path: linkPath } };
+    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "symlink", path: linkPath }, alsoServes };
   } catch {
     await copyInto(linkPath, canonicalTarget);
-    return { skillDirectory: canonicalTarget, agent: agentId, link: { kind: "copy", path: linkPath, reason: "symlink-failed" } };
+    return {
+      skillDirectory: canonicalTarget,
+      agent: agentId,
+      link: { kind: "copy", path: linkPath, reason: "symlink-failed" },
+      alsoServes,
+    };
   }
 }

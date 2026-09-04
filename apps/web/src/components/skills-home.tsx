@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchIcon, UploadIcon, XIcon } from "lucide-react";
+import { CountUp } from "@/components/count-up";
+import { Reveal } from "@/components/reveal";
 import { SkillList } from "@/components/skill-list";
 import { TagFilter } from "@/components/tag-filter";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useSkillStats, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useTags } from "@/hooks/use-tags";
 
@@ -29,14 +32,24 @@ const DOT_GRID_STYLE: React.CSSProperties = {
   maskImage: "linear-gradient(to right, transparent 20%, #000 100%)",
 };
 
-/** One of the hero's stat cards — a count and its label, singular below 2. */
+/** One of the hero's stat cards — a count that eases up from its previous value, and its label, singular below 2. */
 function HeroStat({ value, singular, plural }: { value: number; singular: string; plural: string }) {
   return (
     <div className="flex shrink-0 flex-col gap-1 rounded-lg border bg-card px-5 py-3.5">
-      <span className="text-[22px] font-medium">{value.toLocaleString()}</span>
+      <CountUp value={value} className="text-[22px] font-medium tabular-nums" />
       <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">
         {value === 1 ? singular : plural}
       </span>
+    </div>
+  );
+}
+
+/** Placeholder for a hero stat card while `useSkillStats` is in flight. */
+function HeroStatSkeleton() {
+  return (
+    <div className="flex shrink-0 flex-col gap-2 rounded-lg border bg-card px-5 py-4">
+      <Skeleton className="h-6 w-14" />
+      <Skeleton className="h-3 w-16" />
     </div>
   );
 }
@@ -55,7 +68,8 @@ export function SkillsHome({
   onPublish: () => void;
 }) {
   const tags = useTags();
-  const stats = useSkillStats().data;
+  const statsQuery = useSkillStats();
+  const stats = statsQuery.data;
   const searchRef = useRef<HTMLInputElement>(null);
 
   // What the field shows, which is not yet what the list is filtered by. The
@@ -104,28 +118,46 @@ export function SkillsHome({
         <div className="relative mx-auto flex w-full max-w-[1200px] flex-col gap-7 px-7 pt-11 pb-8">
           <div className="flex flex-col items-start justify-between gap-8 sm:flex-row">
             <div className="flex flex-col gap-4">
-              <h1 className="font-wordmark text-4xl leading-none tracking-[0.04em] sm:text-[60px]">SKILLSET</h1>
-              <p className="max-w-[460px] text-base leading-relaxed text-muted-foreground">
-                Browse and install skills for research, coding, design, automation, and more.
-              </p>
+              <Reveal delayMs={0} className="font-wordmark text-4xl leading-none tracking-[0.04em] sm:text-[60px]">
+                <h1>SKILLSET</h1>
+              </Reveal>
+              <Reveal
+                delayMs={60}
+                className="max-w-[460px] text-base leading-relaxed text-pretty text-muted-foreground"
+              >
+                <p>Browse and install skills for research, coding, design, automation, and more.</p>
+              </Reveal>
               {canPublish && (
-                <Button className="w-fit rounded-full" onClick={onPublish}>
-                  <UploadIcon />
-                  Publish a skill
-                </Button>
+                <Reveal delayMs={120} className="w-fit">
+                  <Button className="rounded-full" onClick={onPublish}>
+                    <UploadIcon />
+                    Publish a skill
+                  </Button>
+                </Reveal>
               )}
             </div>
-            {stats && (
-              <div className="flex shrink-0 flex-wrap gap-3">
-                <HeroStat value={stats.skills} singular="Skill" plural="Skills" />
-                <HeroStat value={stats.publishers} singular="Publisher" plural="Publishers" />
-                <HeroStat value={stats.installs} singular="Install" plural="Installs" />
-              </div>
-            )}
+            <Reveal delayMs={120} className="flex shrink-0 flex-wrap gap-3">
+              {stats ? (
+                <>
+                  <HeroStat value={stats.skills} singular="Skill" plural="Skills" />
+                  <HeroStat value={stats.publishers} singular="Publisher" plural="Publishers" />
+                  <HeroStat value={stats.installs} singular="Install" plural="Installs" />
+                </>
+              ) : statsQuery.isPending ? (
+                <>
+                  <HeroStatSkeleton />
+                  <HeroStatSkeleton />
+                  <HeroStatSkeleton />
+                </>
+              ) : null}
+            </Reveal>
           </div>
 
-          <div className="flex h-[46px] items-center gap-2.5 rounded-lg border bg-background px-4 focus-within:border-ring dark:bg-muted">
-            <SearchIcon className="size-[19px] shrink-0 text-muted-foreground" />
+          <Reveal
+            delayMs={180}
+            className="flex h-[46px] items-center gap-2.5 rounded-lg border bg-background px-4 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-muted"
+          >
+            <SearchIcon strokeWidth={1.5} className="size-[19px] shrink-0 text-muted-foreground" />
             <input
               ref={searchRef}
               type="text"
@@ -145,7 +177,7 @@ export function SkillsHome({
                   setTerm("");
                   onFiltersChange({ ...filters, q: "" });
                 }}
-                className="flex shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                className="-my-2 -ml-2 flex shrink-0 cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
               >
                 <XIcon className="size-4" />
               </button>
@@ -154,13 +186,16 @@ export function SkillsHome({
               <kbd className="rounded border bg-muted px-1.5 text-[11px] text-muted-foreground">⌘</kbd>
               <kbd className="rounded border bg-muted px-1.5 text-[11px] text-muted-foreground">K</kbd>
             </span>
-          </div>
+          </Reveal>
         </div>
       </section>
 
       <div className="h-px bg-border" />
 
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-3.5 px-7 pt-5 pb-10">
+      <Reveal
+        delayMs={220}
+        className="mx-auto flex w-full max-w-[1200px] flex-col gap-3.5 px-7 pt-5 pb-10"
+      >
         <div className="flex items-center gap-3">
           <TagFilter
             tags={tags.data?.items ?? []}
@@ -181,7 +216,7 @@ export function SkillsHome({
         <div className="overflow-hidden rounded-xl border">
           <SkillList filters={filters} onFiltersChange={onFiltersChange} onSelect={onSelect} />
         </div>
-      </div>
+      </Reveal>
     </div>
   );
 }

@@ -4,11 +4,55 @@ import { IdentityProviderDialog } from "@/components/identity-provider-dialog";
 import { Panel } from "@/components/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useIdentityProviders, useUpdateIdentityProvider } from "@/hooks/use-identity-providers";
 import { apiErrorMessage } from "@/lib/api";
 
 const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase";
+
+/** Placeholder provider table while `useIdentityProviders` is in flight. */
+function ProvidersTableSkeleton() {
+  return (
+    <Panel contentClassName="p-0">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={HEAD_CLASS}>Provider</TableHead>
+            <TableHead className={HEAD_CLASS}>Kind</TableHead>
+            <TableHead className={HEAD_CLASS}>Permitted organisations</TableHead>
+            <TableHead className={HEAD_CLASS}>Status</TableHead>
+            <TableHead className={HEAD_CLASS} />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: 3 }).map((_, index) => (
+            <TableRow key={index} className="hover:bg-transparent">
+              <TableCell>
+                <Skeleton className="h-3.5 w-24" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-3.5 w-16" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-28 rounded-full" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-24 rounded-full" />
+              </TableCell>
+              <TableCell>
+                <div className="flex justify-end gap-2">
+                  <Skeleton className="h-7 w-14 rounded-md" />
+                  <Skeleton className="h-7 w-16 rounded-md" />
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Panel>
+  );
+}
 
 /**
  * An Admin's view of external login: which Identity Providers are configured,
@@ -50,6 +94,8 @@ export function IdentityProvidersCard() {
 
       {providers.isError && <p className="text-sm text-destructive">{apiErrorMessage(providers.error)}</p>}
       {update.isError && <p className="text-sm text-destructive">{apiErrorMessage(update.error)}</p>}
+
+      {providers.isPending && <ProvidersTableSkeleton />}
 
       {providers.isSuccess && providers.data.items.length === 0 && (
         <Panel>
