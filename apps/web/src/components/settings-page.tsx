@@ -48,7 +48,7 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
       ? [{ label: "Integrations", section: "integrations" as const, path: INTEGRATIONS_PATH }]
       : []),
     ...(canImport
-      ? [{ label: "Connections", section: "connections" as const, path: CONNECTIONS_PATH }]
+      ? [{ label: "Connected Accounts", section: "connections" as const, path: CONNECTIONS_PATH }]
       : []),
     { label: "Tokens", section: "tokens", path: TOKENS_PATH },
   ];

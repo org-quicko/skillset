@@ -4,6 +4,7 @@ import {
   type User,
   type UserListItem,
 } from "@skill-registry/shared";
+import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CreateUserDialog } from "@/components/create-user-dialog";
 import { Panel } from "@/components/panel";
@@ -126,6 +127,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
           <p className="max-w-xl text-xs text-muted-foreground">Create, promote, demote, and remove Users.</p>
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <PlusIcon />
           Add User
         </Button>
       </div>

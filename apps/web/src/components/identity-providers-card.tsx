@@ -1,4 +1,5 @@
 import { IDENTITY_PROVIDER_GUIDANCE, isUngated, type IdentityProvider } from "@skill-registry/shared";
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";
 import { Panel } from "@/components/panel";
@@ -88,6 +89,7 @@ export function IdentityProvidersCard() {
           </p>
         </div>
         <Button size="sm" onClick={() => openDialog(null)}>
+          <PlusIcon />
           Add Provider
         </Button>
       </div>

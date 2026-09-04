@@ -20,6 +20,7 @@ interface ApiIntegration {
   id: string;
   provider: string;
   display_name: string;
+  description: string | null;
   client_id: string;
   app_slug: string | null;
   created_at: string;
@@ -128,6 +129,10 @@ describe("Integrations (ADR-0024)", () => {
     });
   }
 
+  function del(cookie: string, id: string) {
+    return context.app.request(`/api/integrations/${id}`, { method: "DELETE", headers: { cookie } });
+  }
+
   describe("configuration", () => {
     it("lets an Admin register a Git Provider, and never returns its client secret", async () => {
       await clearIntegrations();
@@ -140,6 +145,26 @@ describe("Integrations (ADR-0024)", () => {
       expect(body.client_id).toBe("Iv1.client-id");
       expect(body.app_slug).toBe("acme-skill-registry");
       expect(body).not.toHaveProperty("client_secret");
+    });
+
+    it("stores a description and treats an omitted one as null", async () => {
+      await clearIntegrations();
+      const withDescription = (await (
+        await post(admin.cookie, integrationBody({ description: "Platform team's private repos." }))
+      ).json()) as ApiIntegration;
+      expect(withDescription.description).toBe("Platform team's private repos.");
+
+      await clearIntegrations();
+      const withoutDescription = (await (await post(admin.cookie, integrationBody())).json()) as ApiIntegration;
+      expect(withoutDescription.description).toBeNull();
+    });
+
+    it("refuses a description longer than 180 characters", async () => {
+      await clearIntegrations();
+      const res = await post(admin.cookie, integrationBody({ description: "x".repeat(181) }));
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as ApiError).error.field).toBe("description");
     });
 
     it("stores the client secret even though it is never read back", async () => {
@@ -274,6 +299,26 @@ describe("Integrations (ADR-0024)", () => {
       expect(row?.client_secret).toBe("rotated-secret");
     });
 
+    it("changes the description, and clears it when sent null", async () => {
+      await clearIntegrations();
+      const id = await created(admin.cookie, { description: "Original description." });
+
+      const changed = await patch(admin.cookie, id, { description: "Updated description." });
+      expect(changed.status).toBe(200);
+      expect(((await changed.json()) as ApiIntegration).description).toBe("Updated description.");
+
+      const cleared = await patch(admin.cookie, id, { description: null });
+      expect(((await cleared.json()) as ApiIntegration).description).toBeNull();
+    });
+
+    it("leaves the description alone when the field is omitted", async () => {
+      await clearIntegrations();
+      const id = await created(admin.cookie, { description: "Keep me." });
+
+      expect((await patch(admin.cookie, id, { display_name: "GitHub" })).status).toBe(200);
+      expect((await context.db.select().from(integrations))[0]?.description).toBe("Keep me.");
+    });
+
     it("leaves an app slug alone when the field is omitted", async () => {
       await clearIntegrations();
       const id = await created(admin.cookie, { app_slug: "acme-registry" });
@@ -318,19 +363,20 @@ describe("Integrations (ADR-0024)", () => {
    * "connected as …" while every Import fails — the worst of both, because the
    * interface says the remedy has already been taken.
    */
-  describe("repointing an Integration at a different app", () => {
-    async function seedConnection(integrationId: string) {
-      const [user] = await context.db.select().from(users).where(eq(users.email, "ada@example.com"));
-      await context.db.insert(connections).values({
-        user_id: user?.id ?? "",
-        provider: "github",
-        integration_id: integrationId,
-        external_account_id: "1",
-        external_account_login: "ada-work",
-        access_token: "ciphertext",
-      });
-    }
+  /** Seeds a Connection held against `integrationId`, for tests exercising what happens to it. */
+  async function seedConnection(integrationId: string) {
+    const [user] = await context.db.select().from(users).where(eq(users.email, "ada@example.com"));
+    await context.db.insert(connections).values({
+      user_id: user?.id ?? "",
+      provider: "github",
+      integration_id: integrationId,
+      external_account_id: "1",
+      external_account_login: "ada-work",
+      access_token: "ciphertext",
+    });
+  }
 
+  describe("repointing an Integration at a different app", () => {
     it("clears the connections held against it, because their tokens are dead", async () => {
       await clearIntegrations();
       const id = await created(admin.cookie, { client_id: "Iv1.first-app" });
@@ -373,6 +419,7 @@ describe("Integrations (ADR-0024)", () => {
         );
         expect((await post(session.cookie, integrationBody({ provider: "gitlab" }))).status).toBe(403);
         expect((await patch(session.cookie, id, { display_name: "nope" })).status).toBe(403);
+        expect((await del(session.cookie, id)).status).toBe(403);
       }
     });
 
@@ -387,6 +434,39 @@ describe("Integrations (ADR-0024)", () => {
           })
         ).status,
       ).toBe(401);
+    });
+  });
+
+  describe("deleting", () => {
+    it("lets an Admin remove an Integration that holds no Connection", async () => {
+      await clearIntegrations();
+      const id = await created(admin.cookie);
+
+      expect((await del(admin.cookie, id)).status).toBe(204);
+      expect(await context.db.select().from(integrations)).toEqual([]);
+    });
+
+    it("refuses when a Connection still references it, and leaves both rows in place", async () => {
+      await clearIntegrations();
+      const id = await created(admin.cookie);
+      await seedConnection(id);
+
+      const res = await del(admin.cookie, id);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ApiError).error.code).toBe("integration_in_use");
+
+      // Refused loudly, not silently — the Integration and the writer's grant
+      // against it are both still there afterwards.
+      expect(await context.db.select().from(integrations)).toHaveLength(1);
+      expect(await context.db.select().from(connections)).toHaveLength(1);
+    });
+
+    it("refuses a delete for an id with no Integration", async () => {
+      await clearIntegrations();
+      const res = await del(admin.cookie, "00000000-0000-0000-0000-000000000000");
+
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as ApiError).error.code).toBe("not_found");
     });
   });
 

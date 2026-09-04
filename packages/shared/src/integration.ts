@@ -32,6 +32,17 @@ const AppSlug = z
   .regex(/^[A-Za-z0-9-]+$/, { message: "An app slug may hold only letters, digits, and hyphens." });
 
 /**
+ * A free-text note on what an Integration is for, shown alongside its other
+ * details.
+ *
+ * @remarks
+ * Capped at 180 characters — long enough for a sentence, short enough that it
+ * cannot turn into documentation the display name and app slug should carry
+ * instead.
+ */
+const Description = z.string().trim().max(180);
+
+/**
  * An Admin's view of a configured Integration.
  *
  * @remarks
@@ -47,6 +58,7 @@ export const IntegrationSchema = z.object({
   id: z.string(),
   provider: z.string(),
   display_name: z.string(),
+  description: z.string().nullable(),
   client_id: z.string(),
   app_slug: z.string().nullable(),
   created_at: timestamp,
@@ -71,6 +83,8 @@ export type IntegrationList = z.infer<typeof IntegrationListSchema>;
 export const IntegrationCreateSchema = z.object({
   provider: Provider,
   display_name: z.string().trim().min(1).max(100),
+  /** Omitted is the same as `null`: there is nothing to say beyond the name. */
+  description: Description.nullable().optional(),
   client_id: z.string().trim().min(1),
   client_secret: z.string().min(1),
   /** Omitted is the same as `null`: this provider has no installation step. */
@@ -92,6 +106,8 @@ export type IntegrationCreate = z.infer<typeof IntegrationCreateSchema>;
  */
 export const IntegrationUpdateSchema = z.object({
   display_name: z.string().trim().min(1).max(100).optional(),
+  /** Absent leaves the stored description as it is; `null` clears it. */
+  description: Description.nullable().optional(),
   client_id: z.string().trim().min(1).optional(),
   client_secret: z.string().min(1).optional(),
   app_slug: AppSlug.nullable().optional(),

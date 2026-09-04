@@ -68,3 +68,24 @@ export function useUpdateIntegration() {
     },
   });
 }
+
+/**
+ * Removes an Integration's registration with a Git Provider.
+ *
+ * @remarks
+ * Refused (409) while a writer still holds a Connection through it — the API
+ * enforces this, not the interface, so the dialog calling this only needs to
+ * show whatever message comes back. Also invalidates the Connections query:
+ * removing an Integration is what makes a provider no longer connectable
+ * through it.
+ */
+export function useDeleteIntegration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/integrations/${id}`, null, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: integrationsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: connectionsQueryKey });
+    },
+  });
+}

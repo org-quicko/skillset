@@ -32,6 +32,9 @@ export const integrations = pgTable("integrations", {
   // `connections.integration_id` references `id` instead.
   provider: text("provider").notNull(),
   display_name: text("display_name").notNull(),
+  // A free-text note on what this Integration is for. Nullable — there is
+  // nothing to say beyond the display name for most rows.
+  description: text("description"),
   client_id: text("client_id").notNull(),
   // Stored as given, following listmonk and `identity_providers` (ADR-0015).
   // Written and never read back out over the wire — no response shape

@@ -1,150 +1,133 @@
 import { GIT_PROVIDERS, type ConnectableProvider, type Connection } from "@skill-registry/shared";
+import { EllipsisIcon, ExternalLinkIcon, Link2OffIcon } from "lucide-react";
+import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { connectHref, useConnections, useDisconnect } from "@/hooks/use-connections";
 import { apiErrorMessage } from "@/lib/api";
 import { formatMoment } from "@/lib/utils";
 
-/** Placeholder connection panels while `useConnections` is in flight. */
+/** Placeholder tiles, shaped like `ConnectedAccountTile`, while `useConnections` is in flight. */
 function ConnectionsSkeleton() {
   return (
-    <>
-      {Array.from({ length: 2 }).map((_, index) => (
-        <Panel key={index}>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Skeleton className="h-3.5 w-40" />
-              <Skeleton className="h-3 w-56" />
-            </div>
-            <Skeleton className="h-7 w-24 rounded-md" />
-          </div>
-        </Panel>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <Card key={index}>
+          <CardHeader>
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="mt-1.5 h-3 w-40" />
+          </CardHeader>
+        </Card>
       ))}
-    </>
+    </div>
   );
 }
 
 /**
- * What disconnecting actually does, said in full.
+ * One Integration a writer could connect through, and whether they already
+ * have — the same title / provider-row / status layout `IntegrationTile`
+ * uses, so the two card grids read as the same pattern.
  *
  * @remarks
- * This sentence is load-bearing, not padding. Disconnecting is
- * **Registry-local**: it stops this Registry using the grant and does not
- * withdraw it at the provider, which only the writer can do in their own
- * provider settings. If this card ever says "revoked" without that
- * qualification, the product and ADR-0024 disagree, and the ADR is right.
+ * Connecting is a full trip to the provider, so it stays a visible primary
+ * button rather than a menu item; a live Connection's actions (changing
+ * repositories, disconnecting) sit behind the "..." menu instead, since
+ * neither is the thing this tile exists to invite.
  */
-const DISCONNECT_COPY =
-  "Disconnecting stops this Registry using the grant. It does not withdraw it at the provider — " +
-  "to do that, remove this app from your account there.";
-
-/** What an entry calls itself: the app slug — what actually tells two apps for the same provider apart (ADR-0025) — falling back to its display name when there is none set yet. */
-function entryLabel(entry: ConnectableProvider): string {
-  return entry.app_slug ?? entry.display_name;
-}
-
-function ConnectedRow({
-  connection,
+function ConnectedAccountTile({
   entry,
+  connection,
   onDisconnect,
   isPending,
 }: {
-  connection: Connection;
   entry: ConnectableProvider;
+  connection: Connection | undefined;
   onDisconnect: () => void;
   isPending: boolean;
 }) {
-  const label = entryLabel(entry);
+  const providerName = GIT_PROVIDERS[entry.provider]?.display_name ?? entry.provider;
+  const ProviderIcon = GIT_PROVIDER_ICONS[entry.provider];
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col">
-          <span className="text-sm font-medium">
-            {label} · {connection.external_account_login}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {entry.display_name} · {GIT_PROVIDERS[entry.provider]?.display_name ?? entry.provider} · Connected{" "}
-            {formatMoment(connection.created_at)}
-          </span>
+    <Card>
+      <CardHeader className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <CardTitle className="truncate">{entry.display_name}</CardTitle>
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {ProviderIcon && <ProviderIcon className="size-4 shrink-0" aria-hidden />}
+            <span className="truncate">{providerName}</span>
+          </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          {/* A trip to the provider, not through our callback: choosing
-              repositories grants no credential, so nothing here waits on a
-              return. It is the fix for "the app cannot see that project", and
-              so is offered while connected. */}
-          {entry.manage_access_url && (
-            <Button asChild variant="outline" size="sm">
-              <a href={entry.manage_access_url} target="_blank" rel="noreferrer">
-                Change repositories
-              </a>
-            </Button>
-          )}
-          <Button variant="outline" size="sm" disabled={isPending} onClick={onDisconnect}>
-            Disconnect
+        {connection ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon-sm">
+                <EllipsisIcon />
+                <span className="sr-only">Actions for {entry.display_name}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {/* A trip to the provider, not through our callback: choosing
+                  repositories grants no credential, so nothing here waits on
+                  a return. */}
+              {entry.manage_access_url && (
+                <DropdownMenuItem asChild>
+                  <a href={entry.manage_access_url} target="_blank" rel="noreferrer">
+                    <ExternalLinkIcon />
+                    Change repositories
+                  </a>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem variant="destructive" disabled={isPending} onClick={onDisconnect}>
+                <Link2OffIcon />
+                Disconnect
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button asChild size="sm">
+            <a href={connectHref(entry.provider, entry.id)}>Connect</a>
           </Button>
-        </div>
-      </div>
-      {/* Shown only when there is no link to offer, so the writer is told why
-          the action is missing rather than left to wonder. */}
-      {!entry.manage_access_url && (
-        <p className="text-xs text-muted-foreground">
-          Choosing repositories needs an app slug on the {label} integration, which is not set. An
-          administrator configures it under Integrations.
+        )}
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          {connection
+            ? `Connected as ${connection.external_account_login} · ${formatMoment(connection.created_at)}`
+            : "Not connected."}
         </p>
-      )}
-      <p className="text-xs text-muted-foreground">{DISCONNECT_COPY}</p>
-    </div>
-  );
-}
-
-function ConnectRow({ entry }: { entry: ConnectableProvider }) {
-  const label = entryLabel(entry);
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col">
-          <span className="text-sm font-medium">{label}</span>
-          <span className="text-xs text-muted-foreground">
-            {entry.display_name} · {GIT_PROVIDERS[entry.provider]?.display_name ?? entry.provider} · Not connected.
-          </span>
-        </div>
-        <Button asChild size="sm" className="shrink-0">
-          <a href={connectHref(entry.provider, entry.id)}>Connect</a>
-        </Button>
-      </div>
-      {/* Told before connecting, not after: handing over repository access
-          should be a decision, and the repository choice is the part people
-          do not expect to have. It now says "then" because the two are
-          separate trips — promising one pass would be a lie the provider
-          cannot keep. */}
-      <p className="text-xs text-muted-foreground">
-        You authorize this Registry first, then choose which repositories it may read. It can only read
-        them — never write. Connecting is separate from how you sign in, and the account need not be the
-        same one.
-      </p>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 /**
- * A writer's own Connections: what is connected, as which account, and how to
- * connect or withdraw one (ADR-0024).
+ * A writer's own Connected Accounts: what is connected, as which account, and
+ * how to connect or withdraw one (ADR-0024).
  *
  * @remarks
- * One entry per Integration (app), not per Git Provider (ADR-0025), labeled
- * by its app slug — the thing that actually tells two apps for the same
- * provider apart, unlike a display name an Admin need not have kept unique.
+ * One entry per Integration (app), not per Git Provider (ADR-0025) — a
+ * provider with two configured apps offers two tiles.
  *
  * Not offered to a reader at all — the settings page hides the whole section
  * below `writer`, and the API refuses them anyway. Inviting a reader to grant
  * a credential they could never use would be worse than useless.
  *
- * The card is also absent when nothing is connectable, which is the state of a
- * Registry whose Admin has configured no Integration. There is nothing to
+ * The card is also absent when nothing is connectable, which is the state of
+ * a Registry whose Admin has configured no Integration. There is nothing to
  * connect to, so a Connect button could only fail when pressed.
+ *
+ * Disconnecting is Registry-local: it stops this Registry using the grant and
+ * does not withdraw it at the provider — that is done from the provider's own
+ * account settings.
  */
 export function ConnectionCard() {
   const connections = useConnections();
@@ -158,9 +141,11 @@ export function ConnectionCard() {
   return (
     <div className="flex flex-col gap-3.5">
       <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-medium">Connections</h2>
-        <p className="text-xs text-muted-foreground">
-          A connection lets this Registry read a Skill out of a private repository, as you.
+        <h2 className="text-sm font-medium">Connected Accounts</h2>
+        <p className="max-w-2xl text-xs text-muted-foreground">
+          Accounts you&apos;ve connected so this Registry can read Skills out of a private repository, as
+          you. Disconnecting only stops this Registry using the grant — revoke it at the provider
+          separately.
         </p>
       </div>
 
@@ -177,23 +162,19 @@ export function ConnectionCard() {
         </Panel>
       )}
 
-      {connectable.map((entry) => {
-        const connection = byIntegrationId.get(entry.id);
-        return (
-          <Panel key={entry.id}>
-            {connection ? (
-              <ConnectedRow
-                connection={connection}
-                entry={entry}
-                isPending={disconnect.isPending && disconnect.variables === entry.provider}
-                onDisconnect={() => disconnect.mutate(entry.provider)}
-              />
-            ) : (
-              <ConnectRow entry={entry} />
-            )}
-          </Panel>
-        );
-      })}
+      {connectable.length > 0 && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {connectable.map((entry) => (
+            <ConnectedAccountTile
+              key={entry.id}
+              entry={entry}
+              connection={byIntegrationId.get(entry.id)}
+              isPending={disconnect.isPending && disconnect.variables === entry.provider}
+              onDisconnect={() => disconnect.mutate(entry.provider)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

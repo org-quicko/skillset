@@ -1,5 +1,13 @@
 import type { IdentityProviderKind } from "@skill-registry/shared";
 
+function GitlabIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M23.6 9.593l-.033-.086L20.3.981a.85.85 0 00-.336-.405.875.875 0 00-1 .054.875.875 0 00-.29.44l-2.206 6.748H7.538L5.33 1.07a.857.857 0 00-.29-.441A.875.875 0 004.04.982a.858.858 0 00-.336.405L.433 9.502l-.032.086a6.066 6.066 0 002.012 7.01l.011.01.03.02 4.976 3.727 2.462 1.863 1.5 1.132a1.009 1.009 0 001.22 0l1.499-1.132 2.462-1.863 5.006-3.749.012-.01a6.066 6.066 0 002.009-7.003z" />
+    </svg>
+  );
+}
+
 function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 48 48" {...props}>
@@ -50,4 +58,18 @@ export const PROVIDER_ICONS: Record<
   google: GoogleIcon,
   github: GithubIcon,
   microsoft: MicrosoftIcon,
+};
+
+/**
+ * Brand icon to show next to a Git Provider's name, keyed by `GIT_PROVIDERS`
+ * rather than {@link IdentityProviderKind} — a Git Provider an Integration
+ * reads from is a different set from a login provider, even where a name
+ * (`"github"`) happens to appear in both.
+ */
+export const GIT_PROVIDER_ICONS: Record<
+  string,
+  (props: React.SVGProps<SVGSVGElement>) => React.JSX.Element
+> = {
+  github: GithubIcon,
+  gitlab: GitlabIcon,
 };

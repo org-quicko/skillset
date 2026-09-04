@@ -8,6 +8,10 @@
  */
 const UNIQUE_VIOLATION = "23505";
 const INVALID_TEXT_REPRESENTATION = "22P02";
+// Postgres raises this specific code — not the more general 23503
+// (`foreign_key_violation`) — when a statement is blocked by a `RESTRICT`
+// foreign key, as opposed to the default `NO ACTION`.
+const RESTRICT_VIOLATION = "23001";
 
 function hasCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === code;
@@ -54,4 +58,26 @@ export function isUniqueViolation(error: unknown): boolean {
  */
 export function isInvalidIdSyntax(error: unknown): boolean {
   return hasCode(error, INVALID_TEXT_REPRESENTATION);
+}
+
+/**
+ * Whether an error is Postgres's `restrict_violation` — a statement blocked
+ * by a foreign key declared `ON DELETE RESTRICT` (or `ON UPDATE RESTRICT`).
+ *
+ * @remarks
+ * Which constraint was violated is not distinguished — a caller uses this on
+ * a statement whose only relevant `RESTRICT` FK it already knows.
+ *
+ * @param error - The caught error.
+ * @returns `true` if Postgres raised 23001.
+ * @example
+ * ```ts
+ * catch (cause) {
+ *   if (isRestrictViolation(cause)) throw new IntegrationInUseError();
+ *   throw cause;
+ * }
+ * ```
+ */
+export function isRestrictViolation(error: unknown): boolean {
+  return hasCode(error, RESTRICT_VIOLATION);
 }

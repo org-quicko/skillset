@@ -10,7 +10,7 @@ import { RouterProvider } from './lib/router'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider>
+    <ThemeProvider defaultTheme="dark">
       <QueryClientProvider client={queryClient}>
         <RouterProvider>
           <TooltipProvider>

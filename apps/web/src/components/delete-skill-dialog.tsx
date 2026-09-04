@@ -1,15 +1,6 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useDeleteSkill } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
 
@@ -49,17 +40,19 @@ export function DeleteSkillDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete {name}?</DialogTitle>
-          <DialogDescription>
+    <FormDialog open={open} onOpenChange={handleOpenChange}>
+      <FormDialogHeader
+        title={`Delete ${name}?`}
+        description={
+          <>
             This removes the Skill and its Artifact for good. There is no undo. Type <strong>{name}</strong> to
             confirm.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="delete-confirmation">Skill name</Label>
+          </>
+        }
+      />
+
+      <FormDialogBody>
+        <FormField htmlFor="delete-confirmation" label="Skill name">
           <Input
             id="delete-confirmation"
             value={confirmation}
@@ -67,22 +60,22 @@ export function DeleteSkillDialog({
             autoComplete="off"
             disabled={deleteSkill.isPending}
           />
-        </div>
+        </FormField>
         {deleteSkill.isError && <p className="text-sm text-destructive">{apiErrorMessage(deleteSkill.error)}</p>}
-        <DialogFooter>
-          <Button type="button" variant="ghost" disabled={deleteSkill.isPending} onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={confirmation !== name || deleteSkill.isPending}
-            onClick={() => deleteSkill.mutate({ id, name }, { onSuccess: onDeleted })}
-          >
-            {deleteSkill.isPending ? "Deleting…" : "Delete Skill"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </FormDialogBody>
+
+      <FormDialogFooter
+        onCancel={() => handleOpenChange(false)}
+        cancelDisabled={deleteSkill.isPending}
+        submit={{
+          label: "Delete Skill",
+          pendingLabel: "Deleting…",
+          pending: deleteSkill.isPending,
+          disabled: confirmation !== name,
+          variant: "destructive",
+          onClick: () => deleteSkill.mutate({ id, name }, { onSuccess: onDeleted }),
+        }}
+      />
+    </FormDialog>
   );
 }
