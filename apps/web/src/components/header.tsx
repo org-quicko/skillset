@@ -1,6 +1,6 @@
 import type { User } from "@skill-registry/shared";
-import { ChevronDownIcon, LogOutIcon, SettingsIcon } from "lucide-react";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { LogOutIcon, SettingsIcon } from "lucide-react";
+import { ThemeSegmentedControl, ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,11 +21,12 @@ function initials(user: User): string {
 }
 
 /**
- * The site's top navigation: the wordmark, the theme toggle, and either a
- * Sign in link or the signed-in User's menu.
+ * The site's top navigation: the wordmark, and either a Sign in link (with a
+ * standalone theme toggle) or the signed-in User's menu, which folds the
+ * theme control into itself.
  *
  * @param user - The signed-in User, or `null`/`undefined` for a signed-out visitor.
- * @param onOpenSettings - Called when the User picks Settings from their menu.
+ * @param onOpenSettings - Called when the User picks Edit profile details or Settings from their menu.
  */
 export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSettings?: () => void }) {
   const logout = useLogout();
@@ -37,43 +38,55 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
         <button
           type="button"
           onClick={() => navigate("/")}
-          className="cursor-pointer font-wordmark text-[13px] tracking-[0.04em] lowercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="cursor-pointer font-wordmark text-2xl tracking-[0.04em] uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
-          skillset
+          SKILLSET
         </button>
 
         <div className="flex items-center gap-3">
-          <ThemeToggle />
+          {!user && <ThemeToggle />}
           {user ? (
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex cursor-pointer items-center gap-2 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+              <DropdownMenuTrigger className="flex cursor-pointer items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
                 <Avatar className="size-[26px]">
                   <AvatarFallback className="text-[11px]">{initials(user)}</AvatarFallback>
                 </Avatar>
-                <span className="hidden text-xs text-muted-foreground sm:inline">
-                  {user.first_name} {user.last_name}
-                </span>
-                <ChevronDownIcon strokeWidth={1.5} className="size-4 text-muted-foreground" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel className="flex flex-col gap-0.5 font-normal">
-                    <span className="text-sm font-medium text-foreground">
-                      {user.first_name} {user.last_name}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{user.email}</span>
+                  <DropdownMenuLabel className="flex flex-col items-center gap-3 px-3 pt-3 pb-4 text-center font-normal">
+                    <Avatar className="size-12">
+                      <AvatarFallback className="text-base">{initials(user)}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium text-foreground">
+                        {user.first_name} {user.last_name}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{user.email}</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full rounded-full"
+                      onClick={onOpenSettings}
+                    >
+                      Edit profile details
+                    </Button>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onOpenSettings}>
+                <DropdownMenuItem onClick={onOpenSettings} className="py-1.5">
                   <SettingsIcon />
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => logout.mutate()} disabled={logout.isPending}>
-                  <LogOutIcon />
-                  {logout.isPending ? "Signing out…" : "Sign out"}
-                </DropdownMenuItem>
+                <div className="flex items-center justify-between px-1.5 py-1">
+                  <ThemeSegmentedControl />
+                  <DropdownMenuItem onClick={() => logout.mutate()} disabled={logout.isPending}>
+                    <LogOutIcon />
+                    {logout.isPending ? "Signing out…" : "Sign out"}
+                  </DropdownMenuItem>
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (

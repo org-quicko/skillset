@@ -52,9 +52,9 @@ export function LoginForm() {
           <button
             type="button"
             onClick={() => navigate("/")}
-            className="cursor-pointer font-wordmark text-[13px] tracking-[0.04em] lowercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="cursor-pointer font-wordmark text-2xl tracking-[0.04em] uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            skillset
+            SKILLSET
           </button>
         </div>
       </header>

@@ -68,7 +68,11 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
+        // `uppercase` doesn't reach text inside a <button> on its own — a
+        // button's own text-transform: none (browser default) wins over the
+        // inherited value — so it's repeated on `button` explicitly for any
+        // sortable header built from one.
+        "h-10 px-6 text-left align-middle font-medium whitespace-nowrap text-foreground uppercase [&:has([role=checkbox])]:pr-0 [&_button]:uppercase",
         className
       )}
       {...props}
@@ -81,7 +85,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        "px-6 py-3 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}

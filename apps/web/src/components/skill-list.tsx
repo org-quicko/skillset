@@ -1,5 +1,5 @@
 import type { SkillDirectorySortField, SkillDirectorySortOrder } from "@skill-registry/shared";
-import { ArrowDownIcon, ArrowUpIcon, ArrowUpDownIcon, SearchXIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, SearchXIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 /** How many of a Skill's Tags show as their own chip before the rest collapse into a "+N" one. */
 const VISIBLE_TAG_COUNT = 2;
 
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase";
+const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
 /** The placeholder table shown while the first page of the directory loads. */
 function SkillListSkeleton() {
@@ -72,41 +72,33 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-/** A column header that toggles sort_by/sort_order on click, showing the current direction when this column is the active sort. */
+/** A column header that toggles sort_by/sort_order on click, showing the current direction when this column is the active sort. The arrow always sits to the right of the label, whichever side the column's text aligns to. */
 function SortHeader({
   field,
   label,
-  align,
   filters,
   onFiltersChange,
 }: {
   field: SkillDirectorySortField;
   label: string;
-  align: "start" | "end";
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
 }) {
   const active = filters.sortBy === field;
+  const desc = active && filters.sortOrder === "desc";
   const nextOrder: SkillDirectorySortOrder = active && filters.sortOrder === "desc" ? "asc" : "desc";
 
   return (
     <button
       type="button"
       onClick={() => onFiltersChange({ ...filters, sortBy: field, sortOrder: nextOrder })}
-      className={cn(
-        "inline-flex cursor-pointer items-center gap-1 rounded-sm text-inherit outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        align === "end" && "flex-row-reverse",
-      )}
+      className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-inherit outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {label}
-      {active ? (
-        filters.sortOrder === "desc" ? (
-          <ArrowDownIcon strokeWidth={1.5} className="size-3.5" />
-        ) : (
-          <ArrowUpIcon strokeWidth={1.5} className="size-3.5" />
-        )
+      {desc ? (
+        <ArrowDownIcon strokeWidth={1.5} className="size-3.5" />
       ) : (
-        <ArrowUpDownIcon strokeWidth={1.5} className="size-3.5 opacity-40" />
+        <ArrowUpIcon strokeWidth={1.5} className={cn("size-3.5", !active && "opacity-40")} />
       )}
     </button>
   );
@@ -173,28 +165,16 @@ export function SkillList({
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">#</TableHead>
-          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">Skill</TableHead>
-          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">
+          <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground">#</TableHead>
+          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Skill</TableHead>
+          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground">
             Publisher
           </TableHead>
-          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">
-            <SortHeader
-              field="updated_at"
-              label="Updated"
-              align="start"
-              filters={filters}
-              onFiltersChange={onFiltersChange}
-            />
+          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+            <SortHeader field="updated_at" label="Updated" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
-          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase">
-            <SortHeader
-              field="installs"
-              label="Installs"
-              align="end"
-              filters={filters}
-              onFiltersChange={onFiltersChange}
-            />
+          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground">
+            <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
         </TableRow>
       </TableHeader>
@@ -223,7 +203,7 @@ export function SkillList({
                       event.stopPropagation();
                       onSelect(skill.name);
                     }}
-                    className="rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                    className="rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     {skill.name}
                   </a>

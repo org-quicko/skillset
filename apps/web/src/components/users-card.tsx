@@ -17,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useUpdateUserRole, useUsers } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
 
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase";
+const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
 /** Placeholder user table while `useUsers` is in flight. */
 function UsersTableSkeleton() {

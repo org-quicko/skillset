@@ -6,6 +6,13 @@
       "runtimeExecutable": "docker",
       "runtimeArgs": ["compose", "up", "-d", "--build"],
       "port": 3000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "apps/web",
+      "port": 5173
     }
   ]
 }

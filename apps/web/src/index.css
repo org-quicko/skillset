@@ -8,6 +8,10 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Instrument Sans', sans-serif;
+    /* Medium (500) is the lightest weight this app ever renders — the
+       `font-normal` utility is repointed here instead of leaving 400
+       reachable, so nothing new can slip back to Regular. */
+    --font-weight-normal: 500;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     --font-wordmark: 'Michroma', 'Instrument Sans', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
@@ -145,6 +149,7 @@
     }
   body {
     @apply bg-background text-foreground antialiased;
+    font-weight: 500;
     }
   html {
     @apply font-sans;

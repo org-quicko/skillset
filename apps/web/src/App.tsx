@@ -38,7 +38,7 @@ function App() {
   const setup = useSetupState();
   const initialized = setup.data?.initialized ?? false;
   const me = useCurrentUser(setup.isSuccess && initialized);
-  const { pathname, replace, navigate } = useRouter();
+  const { pathname, replace } = useRouter();
 
   const isSignedOut = setup.isSuccess && initialized && me.isSuccess && !me.data;
   const isSignedIn = setup.isSuccess && initialized && me.isSuccess && !!me.data;
@@ -88,7 +88,7 @@ function App() {
     return (
       <SiteShell user={me.data}>
         <div className="mx-auto w-full max-w-4xl px-7 pt-6 pb-10">
-          <SettingsPage user={me.data} onBack={() => navigate("/")} />
+          <SettingsPage user={me.data} />
         </div>
       </SiteShell>
     );

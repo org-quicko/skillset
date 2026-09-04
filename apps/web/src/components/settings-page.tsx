@@ -34,14 +34,14 @@ function sectionFor(pathname: string, canManageUsers: boolean, canImport: boolea
   return "profile";
 }
 
-export function SettingsPage({ user, onBack }: { user: User; onBack: () => void }) {
+export function SettingsPage({ user }: { user: User }) {
   const { pathname, navigate } = useRouter();
   const canManageUsers = roleMeets(user.role, "admin");
   const canImport = roleMeets(user.role, "writer");
   const section = sectionFor(pathname, canManageUsers, canImport);
 
   const tabs: { label: string; section: Section; path: string }[] = [
-    { label: "Profile", section: "profile", path: PROFILE_PATH },
+    { label: "Personal Info", section: "profile", path: PROFILE_PATH },
     ...(canManageUsers ? [{ label: "Team", section: "users" as const, path: USERS_PATH }] : []),
     ...(canManageUsers ? [{ label: "OIDC", section: "login" as const, path: LOGIN_PATH }] : []),
     ...(canManageUsers
@@ -55,14 +55,6 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
 
   return (
     <div className="flex flex-col gap-5">
-      <nav className="flex items-center gap-2 text-xs text-muted-foreground">
-        <button type="button" onClick={onBack} className="cursor-pointer hover:text-foreground">
-          skills
-        </button>
-        <span>/</span>
-        <span>settings</span>
-      </nav>
-
       <h1 className="text-3xl font-medium tracking-tight">Settings</h1>
 
       <nav className="flex gap-6 border-b">
@@ -73,7 +65,7 @@ export function SettingsPage({ user, onBack }: { user: User; onBack: () => void 
             onClick={() => navigate(tab.path)}
             aria-current={section === tab.section}
             className={cn(
-              "-mb-px cursor-pointer rounded-sm border-b-2 pb-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              "-mb-px cursor-pointer border-b-2 pb-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
               section === tab.section
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",

@@ -1,4 +1,6 @@
+import { PASSWORD_MIN_LENGTH } from "@skill-registry/shared";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
 import { LabeledField } from "@/components/labeled-field";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
@@ -64,5 +66,84 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
         </Button>
       </form>
     </Panel>
+  );
+}
+
+/**
+ * The "Change password" dialog Settings opens from the Personal Info tab —
+ * the same current/new password pair as {@link PasswordCard}, in the shared
+ * `FormDialog` shell instead of an always-visible Panel.
+ */
+export function ChangePasswordDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const replacePassword = useReplaceOwnPassword();
+
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      setCurrentPassword("");
+      setNewPassword("");
+      replacePassword.reset();
+    }
+    onOpenChange(next);
+  }
+
+  function handleSubmit() {
+    replacePassword.mutate(
+      { current_password: currentPassword, new_password: newPassword },
+      { onSuccess: () => handleOpenChange(false) },
+    );
+  }
+
+  return (
+    <FormDialog open={open} onOpenChange={handleOpenChange}>
+      <FormDialogHeader title="Change password" description="Enter your current password and choose a new one." />
+      <FormDialogBody>
+        <FormField htmlFor="dialog_current_password" label="Current password">
+          <Input
+            id="dialog_current_password"
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            required
+          />
+        </FormField>
+        <FormField
+          htmlFor="dialog_new_password"
+          label="New password"
+          helperText={`At least ${PASSWORD_MIN_LENGTH} characters.`}
+        >
+          <Input
+            id="dialog_new_password"
+            type="password"
+            autoComplete="new-password"
+            minLength={PASSWORD_MIN_LENGTH}
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            required
+          />
+        </FormField>
+        {replacePassword.isError && (
+          <p className="text-sm text-destructive">{apiErrorMessage(replacePassword.error)}</p>
+        )}
+      </FormDialogBody>
+      <FormDialogFooter
+        onCancel={() => handleOpenChange(false)}
+        submit={{
+          label: "Change password",
+          pendingLabel: "Changing…",
+          pending: replacePassword.isPending,
+          disabled: currentPassword.length === 0 || newPassword.length < PASSWORD_MIN_LENGTH,
+          onClick: handleSubmit,
+        }}
+      />
+    </FormDialog>
   );
 }

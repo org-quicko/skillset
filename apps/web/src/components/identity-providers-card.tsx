@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useIdentityProviders, useUpdateIdentityProvider } from "@/hooks/use-identity-providers";
 import { apiErrorMessage } from "@/lib/api";
 
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground uppercase";
+const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
 /** Placeholder provider table while `useIdentityProviders` is in flight. */
 function ProvidersTableSkeleton() {

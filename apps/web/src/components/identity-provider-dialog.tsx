@@ -8,12 +8,13 @@ import {
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
+import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateIdentityProvider, useUpdateIdentityProvider } from "@/hooks/use-identity-providers";
 import { apiErrorMessage } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 /**
  * Splits what an Admin typed into the organisations that will be stored.
@@ -138,18 +139,29 @@ export function IdentityProviderDialog({
           {isEdit ? (
             <Input id="idp_kind" value={guidance.label} readOnly disabled />
           ) : (
-            <Select value={kind} onValueChange={(value) => setKind(value as IdentityProviderKind)} disabled={pending}>
-              <SelectTrigger id="idp_kind" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {IDENTITY_PROVIDER_KINDS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {IDENTITY_PROVIDER_GUIDANCE[option].label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div id="idp_kind" role="radiogroup" className="grid grid-cols-3 gap-2">
+              {IDENTITY_PROVIDER_KINDS.map((option) => {
+                const Icon = PROVIDER_ICONS[option];
+                const selected = option === kind;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={pending}
+                    onClick={() => setKind(option)}
+                    className={cn(
+                      "flex flex-col items-center gap-2 rounded-lg border px-3 py-4 text-sm font-medium transition-colors",
+                      selected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted/50",
+                    )}
+                  >
+                    <Icon className="size-6 shrink-0" />
+                    <span className="text-center leading-snug">{IDENTITY_PROVIDER_GUIDANCE[option].label}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
 
