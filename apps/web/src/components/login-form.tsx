@@ -91,7 +91,6 @@ export function LoginForm() {
                 autoComplete="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@quicko.com"
                 required
                 className="h-11"
               />

@@ -1,17 +1,16 @@
 import {
   IDENTITY_PROVIDER_GUIDANCE,
   IDENTITY_PROVIDER_KINDS,
-  isUngated,
   type IdentityProvider,
   type IdentityProviderKind,
 } from "@skill-registry/shared";
-import { PlusIcon } from "lucide-react";
+import { InfoIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCreateIdentityProvider, useUpdateIdentityProvider } from "@/hooks/use-identity-providers";
 import { apiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -62,7 +61,6 @@ export function IdentityProviderDialog({
   const isEdit = provider !== null;
 
   const [kind, setKind] = useState<IdentityProviderKind>(provider?.kind ?? "google");
-  const [displayName, setDisplayName] = useState(provider?.display_name ?? "");
   const [clientId, setClientId] = useState(provider?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [permittedOrganisations, setPermittedOrganisations] = useState(
@@ -96,7 +94,7 @@ export function IdentityProviderDialog({
         {
           id: provider.id,
           body: {
-            display_name: displayName,
+            display_name: guidance.label,
             client_id: clientId,
             permitted_organisations: parsedOrganisations,
             // Blank means "leave the stored secret alone" — the field starts
@@ -112,30 +110,30 @@ export function IdentityProviderDialog({
     create.mutate(
       {
         kind,
-        display_name: displayName,
+        display_name: guidance.label,
         client_id: clientId,
         client_secret: clientSecret,
         permitted_organisations: parsedOrganisations,
+        // A new Provider comes up enabled — disabling one is a choice made
+        // afterward, from its row, not a decision to front-load onto this form.
+        enabled: true,
       },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
 
-  const canSubmit =
-    displayName.trim() !== "" && clientId.trim() !== "" && (isEdit || clientSecret !== "");
+  const canSubmit = clientId.trim() !== "" && (isEdit || clientSecret !== "");
 
   return (
-    // Wider than the house 516px: this form has seven fields, most of them
-    // carrying a line or two of guidance underneath.
-    <FormDialog open={open} onOpenChange={handleOpenChange} className="w-[576px] max-w-[576px] sm:max-w-[576px]">
+    <FormDialog open={open} onOpenChange={handleOpenChange}>
       <FormDialogHeader
         title={isEdit ? `Edit ${provider.display_name}` : "Add an Identity Provider"}
-        description="Register this Registry as an application with the provider, then paste its credentials here. A Provider stays disabled until you enable it."
+        description="Set up an OAuth app with the provider, then paste its client ID and secret below."
       />
 
       <FormDialogBody>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="idp_kind">Kind</Label>
+          <Label htmlFor="idp_kind">Provider</Label>
           {isEdit ? (
             <Input id="idp_kind" value={guidance.label} readOnly disabled />
           ) : (
@@ -165,42 +163,43 @@ export function IdentityProviderDialog({
           )}
         </div>
 
-        <FormField
-          htmlFor="idp_display_name"
-          label="Button label"
-          helperText="Shown on the login page as “Continue with …”."
-        >
-          <Input
-            id="idp_display_name"
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-            disabled={pending}
-            placeholder={guidance.label}
-          />
-        </FormField>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField htmlFor="idp_client_id" label="Client ID">
+            <Input
+              id="idp_client_id"
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
+              disabled={pending}
+              autoComplete="off"
+            />
+          </FormField>
 
-        <FormField htmlFor="idp_client_id" label="Client id">
-          <Input
-            id="idp_client_id"
-            value={clientId}
-            onChange={(event) => setClientId(event.target.value)}
-            disabled={pending}
-          />
-        </FormField>
-
-        <FormField htmlFor="idp_client_secret" label="Client secret">
-          <Input
-            id="idp_client_secret"
-            type="password"
-            value={clientSecret}
-            onChange={(event) => setClientSecret(event.target.value)}
-            disabled={pending}
-            placeholder={isEdit ? "Leave blank to keep the current secret" : ""}
-          />
-        </FormField>
+          <FormField htmlFor="idp_client_secret" label="Client secret">
+            <Input
+              id="idp_client_secret"
+              type="password"
+              value={clientSecret}
+              onChange={(event) => setClientSecret(event.target.value)}
+              disabled={pending}
+              placeholder={isEdit ? "Leave blank to keep the current secret" : ""}
+              // Not the viewer's own login password — "new-password" is what
+              // reliably stops a browser from offering to autofill it with
+              // their saved site credentials (e.g. a saved Google account).
+              autoComplete="new-password"
+            />
+          </FormField>
+        </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="idp_permitted_organisations">{guidance.organisation}</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="idp_permitted_organisations">{guidance.organisation}</Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <InfoIcon className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent>{guidance.organisationTooltip}</TooltipContent>
+            </Tooltip>
+          </div>
           <Input
             id="idp_permitted_organisations"
             value={permittedOrganisations}
@@ -209,30 +208,7 @@ export function IdentityProviderDialog({
             placeholder="Separate several with commas"
           />
 
-          {parsedOrganisations.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-0.5">
-              {parsedOrganisations.map((organisation) => (
-                <Badge key={organisation.toLowerCase()} variant="secondary">
-                  {organisation}
-                </Badge>
-              ))}
-            </div>
-          )}
-
-          <p className="text-xs text-muted-foreground">
-            {guidance.organisationHint} Anyone they match who signs in here gets an account as a reader.
-          </p>
-
-          {/* The one setting on this form that can open the Registry to
-              everyone, and it does it by being left blank — which is
-              exactly how it would go unnoticed. */}
-          {isUngated(parsedOrganisations) && (
-            <p className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              Leaving this empty turns the check off entirely. Anyone who can sign in with{" "}
-              {guidance.label} — not just your organisation — will be able to create an account here as a
-              reader.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">{guidance.organisationSupport}</p>
         </div>
 
         {error && <p className="text-sm text-destructive">{apiErrorMessage(error)}</p>}

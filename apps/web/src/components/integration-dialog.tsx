@@ -109,7 +109,7 @@ export function IntegrationDialog({
             id="integration_display_name"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
-            placeholder="Platform repos"
+            placeholder="Eg. Platform repos"
             disabled={pending}
           />
         </FormField>
@@ -128,7 +128,7 @@ export function IntegrationDialog({
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             maxLength={DESCRIPTION_MAX_LENGTH}
-            placeholder="Skills from the platform team's private repos, synced on every push to main."
+            placeholder="Eg. Skills from the platform team's private repos, synced on every push to main."
             disabled={pending}
             className="min-h-[84px] resize-none"
           />
@@ -139,7 +139,7 @@ export function IntegrationDialog({
             id="integration_app_slug"
             value={appSlug}
             onChange={(event) => setAppSlug(event.target.value)}
-            placeholder="acme-skill-registry"
+            placeholder="Eg. acme-skill-registry"
             disabled={pending}
           />
         </FormField>
@@ -150,7 +150,6 @@ export function IntegrationDialog({
               id="integration_client_id"
               value={clientId}
               onChange={(event) => setClientId(event.target.value)}
-              placeholder="Iv23liQK8xR2mWpF"
               disabled={pending}
               autoComplete="off"
             />

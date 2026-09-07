@@ -19,18 +19,27 @@ import { apiErrorMessage } from "@/lib/api";
 
 const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
+// Fixed column widths (with `table-fixed`) so a long name, email, or list of
+// Connections truncates within the row instead of stretching the table past
+// the Panel and clipping the Remove column off the edge.
+const NAME_COL = `${HEAD_CLASS} w-[30%]`;
+const EMAIL_COL = `${HEAD_CLASS} w-[30%]`;
+const ROLE_COL = `${HEAD_CLASS} w-[140px]`;
+const CONNECTIONS_COL = `${HEAD_CLASS} w-[130px]`;
+const ACTIONS_COL = `${HEAD_CLASS} w-[110px]`;
+
 /** Placeholder user table while `useUsers` is in flight. */
 function UsersTableSkeleton() {
   return (
     <Panel contentClassName="p-0">
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className={HEAD_CLASS}>Name</TableHead>
-            <TableHead className={HEAD_CLASS}>Email</TableHead>
-            <TableHead className={HEAD_CLASS}>Role</TableHead>
-            <TableHead className={HEAD_CLASS}>Connections</TableHead>
-            <TableHead className={HEAD_CLASS} />
+            <TableHead className={NAME_COL}>Name</TableHead>
+            <TableHead className={EMAIL_COL}>Email</TableHead>
+            <TableHead className={ROLE_COL}>Role</TableHead>
+            <TableHead className={CONNECTIONS_COL}>Connections</TableHead>
+            <TableHead className={ACTIONS_COL} />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -139,14 +148,14 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
 
       {users.isSuccess && (
         <Panel contentClassName="p-0">
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className={HEAD_CLASS}>Name</TableHead>
-                <TableHead className={HEAD_CLASS}>Email</TableHead>
-                <TableHead className={HEAD_CLASS}>Role</TableHead>
-                <TableHead className={HEAD_CLASS}>Connections</TableHead>
-                <TableHead className={HEAD_CLASS} />
+                <TableHead className={NAME_COL}>Name</TableHead>
+                <TableHead className={EMAIL_COL}>Email</TableHead>
+                <TableHead className={ROLE_COL}>Role</TableHead>
+                <TableHead className={CONNECTIONS_COL}>Connections</TableHead>
+                <TableHead className={ACTIONS_COL} />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -156,11 +165,11 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                 return (
                   <TableRow key={user.id} className="hover:bg-transparent">
                     <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="size-[26px]">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Avatar className="size-[26px] shrink-0">
                           <AvatarFallback className="text-[11px]">{initials(user)}</AvatarFallback>
                         </Avatar>
-                        <span>
+                        <span className="min-w-0 flex-1 truncate">
                           {user.first_name} {user.last_name}
                           {user.id === currentUserId && (
                             <span className="font-normal text-muted-foreground"> (you)</span>
@@ -168,7 +177,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                    <TableCell className="truncate text-muted-foreground">{user.email}</TableCell>
                     <TableCell>
                       {isProtected ? (
                         <span className="text-sm text-muted-foreground capitalize">{user.role}</span>

@@ -236,11 +236,11 @@ export function SkillList({
                 </div>
               </TableCell>
               <TableCell>
-                <div className="flex items-center gap-2">
-                  <Avatar className="size-[26px]">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Avatar className="size-[26px] shrink-0">
                     <AvatarFallback className="text-[11px]">{initials(skill.published_by_name)}</AvatarFallback>
                   </Avatar>
-                  <span className="text-sm text-muted-foreground">{skill.published_by_name}</span>
+                  <span className="truncate text-sm text-muted-foreground">{skill.published_by_name}</span>
                 </div>
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">{formatRelativeTime(skill.updated_at)}</TableCell>

@@ -26,7 +26,7 @@ function initials(user: User): string {
  * theme control into itself.
  *
  * @param user - The signed-in User, or `null`/`undefined` for a signed-out visitor.
- * @param onOpenSettings - Called when the User picks Edit profile details or Settings from their menu.
+ * @param onOpenSettings - Called when the User picks Edit personal info or Settings from their menu.
  */
 export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSettings?: () => void }) {
   const logout = useLogout();
@@ -71,7 +71,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                       className="w-full rounded-full"
                       onClick={onOpenSettings}
                     >
-                      Edit profile details
+                      Edit personal info
                     </Button>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>

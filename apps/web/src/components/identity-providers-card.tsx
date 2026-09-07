@@ -1,8 +1,9 @@
-import { IDENTITY_PROVIDER_GUIDANCE, isUngated, type IdentityProvider } from "@skill-registry/shared";
+import { isUngated, type IdentityProvider } from "@skill-registry/shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";
 import { Panel } from "@/components/panel";
+import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,34 +13,37 @@ import { apiErrorMessage } from "@/lib/api";
 
 const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
+// Fixed column widths (with `table-fixed`) so a long provider name or list of
+// permitted organisations truncates/wraps within the row instead of
+// stretching the table past the Panel and clipping the actions off the edge.
+const PROVIDER_COL = `${HEAD_CLASS} w-[38%]`;
+const ORGS_COL = `${HEAD_CLASS} w-[36%]`;
+const ACTIONS_COL = `${HEAD_CLASS} w-[190px]`;
+
 /** Placeholder provider table while `useIdentityProviders` is in flight. */
 function ProvidersTableSkeleton() {
   return (
     <Panel contentClassName="p-0">
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className={HEAD_CLASS}>Provider</TableHead>
-            <TableHead className={HEAD_CLASS}>Kind</TableHead>
-            <TableHead className={HEAD_CLASS}>Permitted organisations</TableHead>
-            <TableHead className={HEAD_CLASS}>Status</TableHead>
-            <TableHead className={HEAD_CLASS} />
+            <TableHead className={PROVIDER_COL}>Provider</TableHead>
+            <TableHead className={ORGS_COL}>Organisations</TableHead>
+            <TableHead className={ACTIONS_COL} />
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: 3 }).map((_, index) => (
             <TableRow key={index} className="hover:bg-transparent">
               <TableCell>
-                <Skeleton className="h-3.5 w-24" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-3.5 w-16" />
+                <div className="flex items-center gap-2">
+                  <Skeleton className="size-4 shrink-0 rounded-full" />
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
               </TableCell>
               <TableCell>
                 <Skeleton className="h-5 w-28 rounded-full" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-5 w-24 rounded-full" />
               </TableCell>
               <TableCell>
                 <div className="flex justify-end gap-2">
@@ -109,36 +113,33 @@ export function IdentityProvidersCard() {
 
       {providers.isSuccess && providers.data.items.length > 0 && (
         <Panel contentClassName="p-0">
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className={HEAD_CLASS}>Provider</TableHead>
-                <TableHead className={HEAD_CLASS}>Kind</TableHead>
-                <TableHead className={HEAD_CLASS}>Permitted organisations</TableHead>
-                <TableHead className={HEAD_CLASS}>Status</TableHead>
-                <TableHead className={HEAD_CLASS} />
+                <TableHead className={PROVIDER_COL}>Provider</TableHead>
+                <TableHead className={ORGS_COL}>Organisations</TableHead>
+                <TableHead className={ACTIONS_COL} />
               </TableRow>
             </TableHeader>
             <TableBody>
               {providers.data.items.map((provider) => {
                 const isRowPending = update.isPending && update.variables?.id === provider.id;
+                const Icon = PROVIDER_ICONS[provider.kind];
                 return (
                   <TableRow key={provider.id} className="hover:bg-transparent">
-                    <TableCell className="font-medium">{provider.display_name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {IDENTITY_PROVIDER_GUIDANCE[provider.kind].label}
+                    <TableCell>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Icon className="size-4 shrink-0" />
+                        <span className="truncate font-medium">{provider.display_name}</span>
+                        <Badge variant={provider.enabled ? "default" : "secondary"} className="shrink-0">
+                          {provider.enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </div>
                     </TableCell>
                     <TableCell>
                       {isUngated(provider.permitted_organisations) ? (
-                        // An enabled Provider with no gate is the one row state
-                        // worth an alarm: it admits everyone, and it looks
-                        // identical to a half-finished one unless it says so.
-                        <span
-                          className={
-                            provider.enabled ? "font-medium text-destructive" : "text-muted-foreground"
-                          }
-                        >
-                          {provider.enabled ? "Anyone — no check" : "None set"}
+                        <span className="text-muted-foreground">
+                          {provider.enabled ? "Any" : "None set"}
                         </span>
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
@@ -149,11 +150,6 @@ export function IdentityProvidersCard() {
                           ))}
                         </div>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={provider.enabled ? "default" : "secondary"}>
-                        {provider.enabled ? "On the login page" : "Disabled"}
-                      </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">

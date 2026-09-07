@@ -17,7 +17,7 @@ function TokenRowsSkeleton() {
   return (
     <div className="flex flex-col">
       {Array.from({ length: 3 }).map((_, index) => (
-        <div key={index} className="flex items-center justify-between gap-3 border-b px-5 py-3.5 last:border-b-0">
+        <div key={index} className="flex items-center justify-between gap-3 border-b px-6 py-3.5 last:border-b-0">
           <div className="flex flex-col gap-1.5">
             <Skeleton className="h-3.5 w-28" />
             <Skeleton className="h-3 w-52" />
@@ -44,13 +44,14 @@ function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: ()
 
   return (
     <div className="flex flex-col gap-3 border-t px-5 py-4">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium">{token.name}</span>
+      <span className="text-sm font-medium">{token.name}</span>
+      <div className="flex items-center justify-between gap-3 rounded bg-muted p-2 pl-3">
+        <code className="font-mono text-xs break-all">{token.secret}</code>
         <button
           type="button"
           aria-label="Copy secret"
           onClick={copy}
-          className="-m-2 flex cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
+          className="-m-2 flex shrink-0 cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
         >
           <IconSwap
             showAlt={copied}
@@ -59,7 +60,6 @@ function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: ()
           />
         </button>
       </div>
-      <code className="rounded bg-muted p-2 font-mono text-xs break-all">{token.secret}</code>
       <p className="text-xs text-muted-foreground">
         Copy this now — it is shown once and cannot be retrieved again.
       </p>
@@ -93,14 +93,14 @@ export function TokensCard() {
             <div className="flex items-center gap-2">
               <Input
                 id="token_name"
-                placeholder="my-laptop"
+                placeholder="Eg. my-laptop"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 required
-                className="h-9 w-56"
+                className="h-9 flex-1"
               />
               <Button type="submit" disabled={mint.isPending || !name.trim()}>
-                {mint.isPending ? "Minting…" : "Mint Token"}
+                {mint.isPending ? "Generating…" : "Generate token"}
               </Button>
             </div>
           </InfoRow>
@@ -118,15 +118,15 @@ export function TokensCard() {
         {tokens.data?.map((token) => (
           <div
             key={token.id}
-            className="flex items-center justify-between gap-3 border-b px-5 py-3.5 last:border-b-0"
+            className="flex items-center justify-between gap-3 border-b px-6 py-3.5 last:border-b-0"
           >
-            <div className="flex flex-col">
-              <span className="text-sm font-medium">{token.name}</span>
-              <span className="text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-medium">{token.name}</span>
+              <span className="truncate text-xs text-muted-foreground">
                 Created {formatMoment(token.created_at)} · last used {formatMoment(token.last_used_at)}
               </span>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setRevoking(token)}>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => setRevoking(token)}>
               Revoke
             </Button>
           </div>

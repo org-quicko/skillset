@@ -1,6 +1,8 @@
 import { ASSIGNABLE_ROLES, type AssignableRole } from "@skill-registry/shared";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
+import { IconSwap } from "@/components/icon-swap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,6 +20,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableRole>("reader");
   const [created, setCreated] = useState<{ email: string; initial_password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const createUser = useCreateUser((result) =>
     setCreated({ email: result.user.email, initial_password: result.initial_password }),
@@ -30,9 +33,21 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
       setEmail("");
       setRole("reader");
       setCreated(null);
+      setCopied(false);
       createUser.reset();
     }
     onOpenChange(next);
+  }
+
+  async function copyPassword() {
+    if (!created) return;
+    try {
+      await navigator.clipboard.writeText(created.initial_password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard blocked — the password is on screen to copy by hand.
+    }
   }
 
   const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && email.trim() !== "";
@@ -40,20 +55,39 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
   return (
     <FormDialog open={open} onOpenChange={handleOpenChange}>
       <FormDialogHeader
-        title={created ? "User created" : "Add a User"}
+        title={created ? `Password for ${created.email}` : "Add a User"}
         description={
           created
-            ? "Copy this password now — it is shown once and cannot be retrieved again."
+            ? "This password is shown once and cannot be retrieved again."
             : "The Registry generates an initial password. The new User must replace it before doing anything else."
         }
       />
 
       {created ? (
         <FormDialogBody>
-          <div className="flex flex-col gap-2 rounded-md border p-3">
-            <p className="text-sm font-medium">{created.email}</p>
-            <code className="break-all rounded bg-muted p-2 text-xs">{created.initial_password}</code>
-          </div>
+          <FormField htmlFor="new_user_password" label="Password">
+            <div className="flex items-center gap-2">
+              <code
+                id="new_user_password"
+                className="flex-1 rounded bg-muted p-2 font-mono text-xs break-all"
+              >
+                {created.initial_password}
+              </code>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Copy password"
+                onClick={copyPassword}
+              >
+                <IconSwap
+                  showAlt={copied}
+                  base={<CopyIcon className="size-4" />}
+                  alt={<CheckIcon className="size-4" />}
+                />
+              </Button>
+            </div>
+          </FormField>
         </FormDialogBody>
       ) : (
         <FormDialogBody>

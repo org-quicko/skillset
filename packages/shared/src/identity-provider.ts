@@ -195,33 +195,42 @@ export const ORGANISATION_CLAIM: Record<IdentityProviderKind, "hd" | "tid" | nul
 /**
  * What an Admin configuring a Provider needs to know per kind, kept beside the
  * claim table above so the two cannot drift: what the organisation gate is
- * called in that provider's own vocabulary, and how it is matched.
+ * called in that provider's own vocabulary, how it is matched, and what
+ * leaving it empty does.
  */
 export const IDENTITY_PROVIDER_GUIDANCE: Record<
   IdentityProviderKind,
-  { label: string; organisation: string; organisationHint: string }
+  { label: string; organisation: string; organisationTooltip: string; organisationSupport: string }
 > = {
   google: {
     label: "Google Workspace",
     organisation: "Permitted Workspace domains",
-    organisationHint:
-      "Matched against the hd claim, not the email address's suffix. A login is admitted if it matches any " +
-      "one of them. For example: example.com, example.org",
+    organisationTooltip:
+      "Matched against the account's Workspace domain, not the email address's suffix. For example: " +
+      "example.com, example.org",
+    organisationSupport:
+      "Anyone whose domain matches gets a reader account. Leave empty to allow anyone to sign in with " +
+      "Google Workspace.",
   },
   microsoft: {
     label: "Microsoft Entra",
     organisation: "Permitted tenant ids",
-    organisationHint:
-      "Matched against the tid claim — the tenant's GUID, from the Entra admin centre. A login is admitted " +
-      "if it matches any one of them. With more than one listed, the sign-in endpoint becomes the multi-tenant " +
-      "one, so each tenant must consent to the app separately.",
+    organisationTooltip:
+      "Matched against the tenant's ID, found in the Entra admin center. Listing more than one switches " +
+      "sign-in to the multi-tenant endpoint, so each tenant must consent to the app separately.",
+    organisationSupport:
+      "Anyone whose tenant matches gets a reader account. Leave empty to allow anyone to sign in with " +
+      "Microsoft Entra.",
   },
   github: {
     label: "GitHub",
     organisation: "Permitted organisations",
-    organisationHint:
-      "Each organisation's login as it appears in its URL, for example: acme, acme-labs. A login is admitted " +
-      "if the account belongs to any one of them. Membership is checked on every login, so the OAuth app must " +
-      "be approved by an owner of each organisation that restricts third-party access.",
+    organisationTooltip:
+      "Each organisation's login as it appears in its URL, for example acme, acme-labs. Membership is " +
+      "checked on every login, so the OAuth app must be approved by an owner of each organisation that " +
+      "restricts third-party access.",
+    organisationSupport:
+      "Anyone who belongs to one of these gets a reader account. Leave empty to allow anyone to sign in " +
+      "with GitHub.",
   },
 };
