@@ -32,10 +32,10 @@ const DOT_GRID_STYLE: React.CSSProperties = {
   maskImage: "linear-gradient(to right, transparent 20%, #000 100%)",
 };
 
-/** One of the hero's stat cards — a count that eases up from its previous value, and its label, singular below 2. */
+/** One section of the hero's stats container — a count that eases up from its previous value, and its label, singular below 2. */
 function HeroStat({ value, singular, plural }: { value: number; singular: string; plural: string }) {
   return (
-    <div className="flex shrink-0 flex-col gap-1 rounded-lg border bg-card px-5 py-3.5">
+    <div className="flex flex-col gap-1 px-5 py-3.5">
       <CountUp value={value} className="text-[22px] font-medium tabular-nums" />
       <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">
         {value === 1 ? singular : plural}
@@ -44,10 +44,10 @@ function HeroStat({ value, singular, plural }: { value: number; singular: string
   );
 }
 
-/** Placeholder for a hero stat card while `useSkillStats` is in flight. */
+/** Placeholder for a stats section while `useSkillStats` is in flight. */
 function HeroStatSkeleton() {
   return (
-    <div className="flex shrink-0 flex-col gap-2 rounded-lg border bg-card px-5 py-4">
+    <div className="flex flex-col gap-2 px-5 py-4">
       <Skeleton className="h-6 w-14" />
       <Skeleton className="h-3 w-16" />
     </div>
@@ -118,8 +118,8 @@ export function SkillsHome({
         <div className="relative mx-auto flex w-full max-w-[1200px] flex-col gap-7 px-7 pt-11 pb-8">
           <div className="flex flex-col items-start justify-between gap-8 sm:flex-row">
             <div className="flex flex-col gap-4">
-              <Reveal delayMs={0} className="font-wordmark text-4xl leading-none tracking-[0.04em] sm:text-[60px]">
-                <h1>SKILLSET</h1>
+              <Reveal delayMs={0} className="text-[32px] leading-none font-medium">
+                <h1>Skills</h1>
               </Reveal>
               <Reveal
                 delayMs={60}
@@ -136,19 +136,19 @@ export function SkillsHome({
                 </Reveal>
               )}
             </div>
-            <Reveal delayMs={120} className="flex shrink-0 flex-wrap gap-3">
+            <Reveal delayMs={120} className="shrink-0">
               {stats ? (
-                <>
+                <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
                   <HeroStat value={stats.skills} singular="Skill" plural="Skills" />
                   <HeroStat value={stats.publishers} singular="Publisher" plural="Publishers" />
                   <HeroStat value={stats.installs} singular="Install" plural="Installs" />
-                </>
+                </div>
               ) : statsQuery.isPending ? (
-                <>
+                <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
                   <HeroStatSkeleton />
                   <HeroStatSkeleton />
                   <HeroStatSkeleton />
-                </>
+                </div>
               ) : null}
             </Reveal>
           </div>

@@ -7,9 +7,9 @@ import {
 import { asc, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { firstRow } from "../db/rows.js";
-import { isInvalidIdSyntax } from "../db/pg-errors.js";
+import { isInvalidIdSyntax, isRestrictViolation } from "../db/pg-errors.js";
 import { connections, integrations, type IntegrationRow } from "../db/schemas/index.js";
-import { IntegrationNotFoundError, ValidationError } from "../http/errors.js";
+import { IntegrationInUseError, IntegrationNotFoundError, ValidationError } from "../http/errors.js";
 import type { Logger } from "../logger.js";
 
 /**
@@ -148,7 +148,7 @@ export class IntegrationsService {
    * — a second GitHub App, say — and a writer chooses which one to connect
    * through.
    *
-   * @param input - The provider, display name, credential pair, and app slug.
+   * @param input - The provider, display name, description, credential pair, and app slug.
    * @returns The created row, including its `client_secret`.
    * @throws ValidationError if the provider's installation URL is built from an
    * app slug and none was supplied.
@@ -171,6 +171,7 @@ export class IntegrationsService {
       .values({
         provider: input.provider,
         display_name: input.display_name,
+        description: input.description ?? null,
         client_id: input.client_id,
         client_secret: input.client_secret,
         app_slug: input.app_slug ?? null,
@@ -250,6 +251,7 @@ export class IntegrationsService {
         .update(integrations)
         .set({
           ...(input.display_name !== undefined ? { display_name: input.display_name } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.client_id !== undefined ? { client_id: input.client_id } : {}),
           ...(input.client_secret !== undefined ? { client_secret: input.client_secret } : {}),
           ...(input.app_slug !== undefined ? { app_slug: input.app_slug } : {}),
@@ -277,5 +279,40 @@ export class IntegrationsService {
 
       return updated;
     });
+  }
+
+  /**
+   * Removes an Integration's registration with a Git Provider.
+   *
+   * @remarks
+   * Refused while any writer still holds a Connection through it —
+   * `connections.integration_id` references this row `ON DELETE RESTRICT`
+   * (ADR-0024), so Postgres refuses the statement and that refusal is
+   * translated rather than pre-checked, matching how the rest of this file
+   * lets Postgres enforce a constraint instead of keeping a second copy of it.
+   * An Admin who wants that outcome disconnects those writers first, or uses
+   * `update` to repoint the Integration at a different app, which clears
+   * Connections deliberately and tells writers why.
+   *
+   * @param id - The Integration's id.
+   * @throws IntegrationNotFoundError if no Integration exists by that id.
+   * @throws IntegrationInUseError if a Connection still references it.
+   * @example
+   * ```ts
+   * await integrations.delete(id);
+   * ```
+   */
+  async delete(id: string): Promise<void> {
+    let deleted: { id: string }[];
+    try {
+      deleted = await this.db.delete(integrations).where(eq(integrations.id, id)).returning({ id: integrations.id });
+    } catch (error) {
+      if (isInvalidIdSyntax(error)) throw new IntegrationNotFoundError();
+      if (isRestrictViolation(error)) throw new IntegrationInUseError();
+      throw error;
+    }
+    if (deleted.length === 0) throw new IntegrationNotFoundError();
+
+    this.logger.info({ integration_id: id }, "integration deleted");
   }
 }

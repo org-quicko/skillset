@@ -1,9 +1,18 @@
 import { GIT_PROVIDERS, type Integration } from "@skill-registry/shared";
+import { EllipsisIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
+import { DeleteIntegrationDialog } from "@/components/delete-integration-dialog";
 import { IntegrationDialog } from "@/components/integration-dialog";
 import { Panel } from "@/components/panel";
+import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIntegrations } from "@/hooks/use-integrations";
 import { apiErrorMessage } from "@/lib/api";
@@ -25,36 +34,62 @@ function IntegrationTilesSkeleton() {
 }
 
 /**
- * One configured Integration, identified by its app slug — what actually
- * tells two apps for the same Git Provider apart (ADR-0025) — with the
- * Admin-chosen display name and provider as secondary detail.
+ * One configured Integration: its display name, the Git Provider it reads
+ * from, and its description, with a trailing "..." menu for the actions
+ * available on it.
  *
  * @remarks
- * Clicking anywhere on the tile opens it in the same dialog `AddIntegration`
- * uses, prefilled — there is no separate inline form any more.
+ * Editing opens the same dialog `AddIntegration` uses, prefilled — there is
+ * no separate inline form. The app slug that actually tells two apps for the
+ * same Git Provider apart (ADR-0025) still lives in that dialog; it is
+ * Admin-facing detail rather than something every tile needs to surface.
  */
-function IntegrationTile({ integration, onClick }: { integration: Integration; onClick: () => void }) {
+function IntegrationTile({
+  integration,
+  onEdit,
+  onDelete,
+}: {
+  integration: Integration;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const providerName = GIT_PROVIDERS[integration.provider]?.display_name ?? integration.provider;
+  const ProviderIcon = GIT_PROVIDER_ICONS[integration.provider];
 
   return (
-    <Card
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onClick();
-        }
-      }}
-      className="cursor-pointer transition-shadow hover:ring-2 hover:ring-foreground/20"
-    >
-      <CardHeader>
-        <CardTitle className="truncate">{integration.app_slug ?? integration.display_name}</CardTitle>
-        <CardDescription className="truncate">
-          {integration.app_slug ? `${integration.display_name} · ${providerName}` : `${providerName} · no app slug set`}
-        </CardDescription>
+    <Card>
+      <CardHeader className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <CardTitle className="truncate">{integration.display_name}</CardTitle>
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {ProviderIcon && <ProviderIcon className="size-4 shrink-0" aria-hidden />}
+            <span className="truncate">{providerName}</span>
+          </div>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon-sm">
+              <EllipsisIcon />
+              <span className="sr-only">Actions for {integration.display_name}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onEdit}>
+              <PencilIcon />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={onDelete}>
+              <Trash2Icon />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </CardHeader>
+      {integration.description && (
+        <CardContent>
+          <p className="text-sm text-muted-foreground">{integration.description}</p>
+        </CardContent>
+      )}
     </Card>
   );
 }
@@ -78,6 +113,7 @@ function IntegrationTile({ integration, onClick }: { integration: Integration; o
 export function IntegrationsCard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Integration | null>(null);
+  const [deleting, setDeleting] = useState<Integration | null>(null);
 
   const integrations = useIntegrations();
   const configured = integrations.data?.items ?? [];
@@ -93,12 +129,11 @@ export function IntegrationsCard() {
         <div className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">Integrations</h2>
           <p className="max-w-2xl text-xs text-muted-foreground">
-            Apps this Registry uses to read Skills out of private repositories. This is not a way to sign
-            in — that is configured under Login, separately, and either can be turned off without
-            affecting the other.
+            Apps this Registry uses to read Skills out of private repositories.
           </p>
         </div>
         <Button size="sm" onClick={() => openDialog(null)}>
+          <PlusIcon />
           Add integration
         </Button>
       </div>
@@ -123,7 +158,8 @@ export function IntegrationsCard() {
             <IntegrationTile
               key={integration.id}
               integration={integration}
-              onClick={() => openDialog(integration)}
+              onEdit={() => openDialog(integration)}
+              onDelete={() => setDeleting(integration)}
             />
           ))}
         </div>
@@ -133,6 +169,17 @@ export function IntegrationsCard() {
           remounts the form rather than leaving the previous one's values in
           its state. */}
       <IntegrationDialog key={editing?.id ?? "new"} open={dialogOpen} onOpenChange={setDialogOpen} integration={editing} />
+
+      {deleting && (
+        <DeleteIntegrationDialog
+          integrationId={deleting.id}
+          name={deleting.display_name}
+          open={deleting !== null}
+          onOpenChange={(open) => {
+            if (!open) setDeleting(null);
+          }}
+        />
+      )}
     </div>
   );
 }

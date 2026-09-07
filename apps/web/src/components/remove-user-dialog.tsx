@@ -1,12 +1,4 @@
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader } from "@/components/form-dialog";
 import { useDeleteUser } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
 
@@ -30,29 +22,29 @@ export function RemoveUserDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Remove {name}?</DialogTitle>
-          <DialogDescription>
-            This ends their access immediately. Skills they published remain, still attributed to them.
-          </DialogDescription>
-        </DialogHeader>
-        {deleteUser.isError && <p className="text-sm text-destructive">{apiErrorMessage(deleteUser.error)}</p>}
-        <DialogFooter>
-          <Button type="button" variant="ghost" disabled={deleteUser.isPending} onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={deleteUser.isPending}
-            onClick={() => deleteUser.mutate(userId, { onSuccess: () => handleOpenChange(false) })}
-          >
-            {deleteUser.isPending ? "Removing…" : "Remove User"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <FormDialog open={open} onOpenChange={handleOpenChange}>
+      <FormDialogHeader
+        title={`Remove ${name}?`}
+        description="This ends their access immediately. Skills they published remain, still attributed to them."
+      />
+
+      {deleteUser.isError && (
+        <FormDialogBody>
+          <p className="text-sm text-destructive">{apiErrorMessage(deleteUser.error)}</p>
+        </FormDialogBody>
+      )}
+
+      <FormDialogFooter
+        onCancel={() => handleOpenChange(false)}
+        cancelDisabled={deleteUser.isPending}
+        submit={{
+          label: "Remove User",
+          pendingLabel: "Removing…",
+          pending: deleteUser.isPending,
+          variant: "destructive",
+          onClick: () => deleteUser.mutate(userId, { onSuccess: () => handleOpenChange(false) }),
+        }}
+      />
+    </FormDialog>
   );
 }

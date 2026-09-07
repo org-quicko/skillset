@@ -497,7 +497,16 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
         generateId: false,
       },
     },
-    trustedOrigins: [deps.publicUrl],
+    // Vite's dev server proxies /api to this instance but keeps the browser's
+    // Origin header as its own (localhost:5173), which Better Auth would
+    // otherwise reject as cross-origin on every mutating auth call. Gated on
+    // publicUrl being a loopback address (NODE_ENV is always "production" in
+    // the Docker image this runs from even in local dev, so it can't tell
+    // dev and prod apart) rather than added unconditionally, so a real
+    // deployment's trusted origins stay exactly `[publicUrl]`.
+    trustedOrigins: ["localhost", "127.0.0.1"].includes(new URL(deps.publicUrl).hostname)
+      ? [deps.publicUrl, "http://localhost:5173"]
+      : [deps.publicUrl],
   });
 }
 

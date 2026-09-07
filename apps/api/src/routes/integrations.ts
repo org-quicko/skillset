@@ -23,11 +23,9 @@ export type IntegrationRouteDependencies = AuthDependencies & {
  * Integration draws nothing, so no shape of it is ever public and no response
  * here is built from a row anyone but an Admin may see.
  *
- * No delete route, matching `/identity-providers`. Deleting an Integration
- * would strand every Connection granted against it — `connections.provider`
- * references this table under `ON DELETE RESTRICT`, so the database would
- * refuse anyway — and there is no version of that failure worth exposing as a
- * route before there is a reason to remove one.
+ * Deleting one is refused (409) while a Connection still references it —
+ * `connections.integration_id` does, under `ON DELETE RESTRICT` (ADR-0024) —
+ * so removing an Integration can never silently strand a writer's grant.
  *
  * @param app - The Hono app to register the routes on.
  * @param deps - The auth dependencies and the Integrations service.
@@ -50,5 +48,10 @@ export function registerIntegrationRoutes(
     const input = await parseBody(c, IntegrationUpdateSchema);
     const integration = await deps.integrations.update(c.req.param("id"), input);
     return c.json(IntegrationSchema.parse(integration));
+  });
+
+  app.delete("/integrations/:id", requireAuth(deps), requireRole("admin"), async (c) => {
+    await deps.integrations.delete(c.req.param("id"));
+    return c.body(null, 204);
   });
 }

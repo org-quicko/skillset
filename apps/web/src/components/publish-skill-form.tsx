@@ -256,7 +256,7 @@ export function PublishSkillForm({
         <form onSubmit={handleImportSubmit} className="flex gap-2">
           <Input
             type="url"
-            placeholder="https://github.com/owner/repo or https://gitlab.com/group/project"
+            placeholder="Eg. https://github.com/owner/repo or https://gitlab.com/group/project"
             value={sourceUrl}
             onChange={(event) => setSourceUrl(event.target.value)}
             disabled={isBusy}

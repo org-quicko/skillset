@@ -176,6 +176,28 @@ export class IntegrationNotFoundError extends AppError {
 }
 
 /**
+ * An Integration could not be deleted because a Connection still references
+ * it.
+ *
+ * @remarks
+ * `connections.integration_id` references this table `ON DELETE RESTRICT`
+ * (ADR-0024): removing an Integration writers still hold Connections against
+ * must fail loudly, not silently drop their credentials. `update` can clear
+ * Connections deliberately, with a reason writers are told about — a plain
+ * delete does not get to do that silently, so it refuses instead.
+ */
+export class IntegrationInUseError extends AppError {
+  constructor() {
+    super(
+      409,
+      "integration_in_use",
+      "One or more writers still hold a Connection through this Integration. Disconnect them first, or edit the " +
+        "Integration to repoint it at a different app instead of deleting it.",
+    );
+  }
+}
+
+/**
  * No Integration is configured for the Git Provider a request names, so there
  * is no credential to connect with or import through.
  *
