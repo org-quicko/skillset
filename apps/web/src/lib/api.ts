@@ -55,3 +55,35 @@ export async function apiFetch<T>(
   if (!res.ok) throw await apiErrorFrom(res);
   return parseApiResponse(res, schema);
 }
+
+/** The browser-facing URL of an API path — for an `<img src>`, an `<iframe>`, or a top-level navigation. */
+export function apiUrl(path: string): string {
+  return `/api${path}`;
+}
+
+/**
+ * Fetches a response the API serves as text rather than JSON — a file out of
+ * a Resource's Artifact.
+ *
+ * @remarks
+ * Deliberately not `apiFetch`: that one sends `content-type: application/json`
+ * and hands the body to a Zod schema, neither of which fits bytes. What it
+ * shares is the parts that must not drift — same-origin `/api`, cookie
+ * credentials, the session reset on a 401, and `apiErrorFrom` for a refusal.
+ *
+ * @param path - The path under the API, e.g. `/resources/{id}/files/SKILL.md`.
+ * @returns The response body, decoded as UTF-8.
+ * @throws ApiError when the API answered with a non-2xx status.
+ * @example
+ * ```ts
+ * const source = await apiFetchText(`/resources/${id}/files/SKILL.md`);
+ * ```
+ */
+export async function apiFetchText(path: string): Promise<string> {
+  const res = await fetch(apiUrl(path), { credentials: "include" });
+
+  if (res.status === 401) discardSessionState(queryClient);
+  if (!res.ok) throw await apiErrorFrom(res);
+
+  return res.text();
+}

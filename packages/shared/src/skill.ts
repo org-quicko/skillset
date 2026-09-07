@@ -190,6 +190,48 @@ export const SkillInstallTrendSchema = z.object({
 export type SkillInstallTrend = z.infer<typeof SkillInstallTrendSchema>;
 
 /**
+ * One file of an Artifact, as the wire names it: a path relative to the
+ * Skill's root and the size of its bytes. No content — an Artifact's bytes
+ * go straight to and from object storage, never through this schema.
+ *
+ * It serves two directions. Publishing sends it as the *declared* manifest,
+ * which is what lets the API validate paths and enforce the size limits
+ * without reading anything (ADR-0032); `GET /resources/{id}/files` returns
+ * it as the *actual* manifest, read back from storage.
+ */
+export const ArtifactFileSchema = z.object({
+  path: z.string(),
+  size: z.number().int().nonnegative(),
+});
+export type ArtifactFile = z.infer<typeof ArtifactFileSchema>;
+
+/** `GET /resources/{id}/files`: every file the Resource's Artifact holds, sorted by path. */
+export const ArtifactManifestSchema = z.object({
+  files: z.array(ArtifactFileSchema),
+});
+export type ArtifactManifest = z.infer<typeof ArtifactManifestSchema>;
+
+/** Where the caller writes one file of an Artifact. The bytes never pass through the API (ADR-0001). */
+export const ArtifactFileUploadSchema = z.object({
+  path: z.string(),
+  url: z.string(),
+  method: z.literal("PUT"),
+  headers: z.record(z.string(), z.string()),
+});
+export type ArtifactFileUpload = z.infer<typeof ArtifactFileUploadSchema>;
+
+/**
+ * Where a publisher writes its Artifact: one presigned destination per file
+ * of the manifest it declared, in that same order (ADR-0032). Every URL
+ * shares the one expiry, since they are all signed by the same call.
+ */
+export const ArtifactUploadSchema = z.object({
+  files: z.array(ArtifactFileUploadSchema),
+  expires_in_seconds: z.number().int(),
+});
+export type ArtifactUpload = z.infer<typeof ArtifactUploadSchema>;
+
+/**
  * PUT /resources/\{kind\}/\{name\} request body. The name comes from the path.
  * The four frontmatter extras are optional and unvalidated at this layer —
  * the shared validation rules (`validateSkillLicense` and friends) are what
@@ -197,6 +239,12 @@ export type SkillInstallTrend = z.infer<typeof SkillInstallTrendSchema>;
  * `body` are not length-checked here either. `tags` is deliberately absent:
  * publishing never sets it (docs/adr/0008) — see `PUT /resources/{id}/tags`
  * (`SetSkillTagsSchema`) instead.
+ *
+ * `files` is the Artifact's manifest — the paths and sizes the publisher is
+ * about to upload. It is part of the *metadata* claim rather than a separate
+ * call because the presigned destinations the response hands back are
+ * derived from it: the API cannot sign a PUT for a key it has not been told
+ * about (ADR-0032).
  */
 export const SkillPublishSchema = z.object({
   description: z.string(),
@@ -205,35 +253,13 @@ export const SkillPublishSchema = z.object({
   compatibility: z.string().optional(),
   metadata: z.record(z.string(), z.string()).optional(),
   allowed_tools: z.string().optional(),
+  files: z.array(ArtifactFileSchema),
 });
 export type SkillPublish = z.infer<typeof SkillPublishSchema>;
 
-/** Where the caller writes the Artifact. The bytes never pass through the API (ADR-0001). */
-export const UploadTargetSchema = z.object({
-  url: z.string(),
-  method: z.literal("PUT"),
-  headers: z.record(z.string(), z.string()),
-  expires_in_seconds: z.number().int(),
-});
-export type UploadTarget = z.infer<typeof UploadTargetSchema>;
-
-/**
- * The `Accept: application/json` representation of `GET /resources/{id}/artifact`
- * — the Skill itself, alongside `url` to actually fetch the Artifact from.
- * For a caller that needs to know the request succeeded before navigating
- * there itself: the ordinary representation is a 302 redirect, which a
- * plain link follows on its own but gives no such signal. Requesting either
- * representation counts as one Install; this doesn't record a second one.
- * `installs` on the returned Skill reflects the last periodic refresh, not
- * necessarily this request's own Install (ADR-0012).
- */
-export const SkillWithArtifactUrlSchema = SkillSchema.extend({
-  url: z.string(),
-});
-export type SkillWithArtifactUrl = z.infer<typeof SkillWithArtifactUrlSchema>;
-
+/** `PUT /resources/{kind}/{name}`'s response: the Skill as stored, and where to write its Artifact. */
 export const SkillPublishedSchema = z.object({
   skill: SkillSchema,
-  upload: UploadTargetSchema,
+  upload: ArtifactUploadSchema,
 });
 export type SkillPublished = z.infer<typeof SkillPublishedSchema>;

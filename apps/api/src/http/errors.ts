@@ -79,6 +79,13 @@ export class ArtifactMissingError extends AppError {
   }
 }
 
+/** The Resource's Artifact exists but holds no file at the requested path. */
+export class ArtifactFileNotFoundError extends AppError {
+  constructor(path: string) {
+    super(404, "not_found", `This Resource's Artifact holds no file at "${path}".`);
+  }
+}
+
 /** No Token by that id exists that belongs to the caller. */
 export class TokenNotFoundError extends AppError {
   constructor() {

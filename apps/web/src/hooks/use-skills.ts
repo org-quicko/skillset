@@ -1,19 +1,22 @@
 import {
+  artifactMediaType,
+  ArtifactManifestSchema,
   buildSkillBundle,
   SkillDirectoryPageSchema,
   SkillDirectoryStatsSchema,
   SkillInstallTrendSchema,
   SkillPublishedSchema,
   SkillSchema,
-  SkillWithArtifactUrlSchema,
   type Skill,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
   type SkillFile,
 } from "@skill-registry/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiFetchText, apiUrl } from "@/lib/api";
 import {
+  resourceArtifactFileQueryKey,
+  resourceArtifactFilesQueryKey,
   resourceDirectoryQueryKey,
   resourceInstallTrendQueryKey,
   resourceQueryKey,
@@ -140,20 +143,33 @@ export function useSkillInstallTrend(id: string | undefined) {
   });
 }
 
-/** A failed upload's only recovery is retrying the publish — it replaces rather than duplicates. */
+/**
+ * A failed upload's only recovery is retrying the publish — it replaces rather
+ * than duplicates.
+ *
+ * @remarks
+ * An Artifact is uploaded a file at a time (ADR-0032), so a partial failure
+ * leaves the Skill's row published and its Artifact incomplete. That is the
+ * same state as a publish interrupted before its single upload finished, and
+ * it has the same fix: publish again. `path` names the file that failed, so
+ * the message can say which one rather than only that one did.
+ */
 export class SkillUploadError extends Error {
-  constructor() {
-    super("The upload failed. Retrying the publish will replace it, not duplicate it.");
+  readonly path: string;
+
+  constructor(path: string) {
+    super(`Uploading "${path}" failed. Retrying the publish will replace it, not duplicate it.`);
     this.name = "SkillUploadError";
+    this.path = path;
   }
 }
 
 /**
- * Validates and builds the Artifact locally (`buildSkillBundle`, the same
- * pipeline the CLI and the API's own checks use), publishes the metadata,
- * then uploads the Artifact straight to storage (ADR-0001). The Skill list
- * is only invalidated once the upload has finished — never while it is in
- * flight.
+ * Validates the files locally (`buildSkillBundle`, the same pipeline the CLI
+ * and the API's own checks use), publishes the metadata and the Artifact's
+ * manifest, then uploads each file straight to storage (ADR-0001, ADR-0032).
+ * The Skill list is only invalidated once every upload has finished — never
+ * while one is in flight.
  */
 export function usePublishSkill() {
   const queryClient = useQueryClient();
@@ -166,15 +182,24 @@ export function usePublishSkill() {
         body: JSON.stringify(bundle.request),
       });
 
-      const upload = await fetch(published.upload.url, {
-        method: published.upload.method,
-        headers: published.upload.headers,
-        // `zipSync` types its result as backed by `ArrayBufferLike`, which
-        // `BlobPart` doesn't accept directly — re-wrapping narrows it to a
-        // concrete `ArrayBuffer`-backed view.
-        body: new Blob([new Uint8Array(bundle.artifact)]),
-      });
-      if (!upload.ok) throw new SkillUploadError();
+      // One presigned destination per declared file, in the order the manifest
+      // declared them (ADR-0032), so the two lists line up index for index.
+      await Promise.all(
+        published.upload.files.map(async (target, index) => {
+          const file = bundle.files[index];
+          if (!file || file.path !== target.path) throw new SkillUploadError(target.path);
+
+          const upload = await fetch(target.url, {
+            method: target.method,
+            headers: target.headers,
+            // A `Uint8Array` read off a file is typed as backed by
+            // `ArrayBufferLike`, which `BlobPart` doesn't accept directly —
+            // re-wrapping narrows it to a concrete `ArrayBuffer`-backed view.
+            body: new Blob([new Uint8Array(file.bytes)]),
+          });
+          if (!upload.ok) throw new SkillUploadError(target.path);
+        }),
+      );
 
       return published.skill;
     },
@@ -212,32 +237,104 @@ export function useDeleteSkill() {
 }
 
 /**
- * Downloads a Skill's Artifact and records the install.
+ * Every file a Skill's Artifact holds — what the detail page's file browser
+ * lists.
  *
  * @remarks
- * Requests the `Accept: application/json` representation of
- * `GET /resources/{id}/artifact` rather than following its ordinary
- * redirect — that representation is the Skill itself, reflecting the
- * install this same request just recorded, alongside `url` to actually
- * fetch the Artifact from. Once that resolves (confirming the install was
- * recorded), the Skill's fresh state is written straight into the cache —
- * the same `setQueryData` `usePublishSkill` already uses — and only then
- * does the browser navigate to `url`, a plain top-level navigation rather
- * than a second `fetch`, so the actual transfer is never subject to
- * storage's CORS policy (see the route's own comment).
+ * Read from storage rather than from anything the publisher declared, so a
+ * Skill whose upload never finished reports what is actually there
+ * (ADR-0032). A 404 is the ordinary answer for a Skill with no Artifact yet,
+ * not an exception worth retrying — hence `retry: false`.
+ *
+ * `id` may be undefined while the Skill itself is still loading; the query
+ * simply stays disabled until it is not.
+ *
+ * @param id - The Skill's id, or `undefined` while it is unknown.
+ * @returns The TanStack Query result; `data.files` is one entry per file.
  * @example
- * downloadArtifact.mutate({ id: skill.id })
+ * const files = useArtifactFiles(skill.data?.id);
+ */
+export function useArtifactFiles(id: string | undefined) {
+  return useQuery({
+    queryKey: resourceArtifactFilesQueryKey(id ?? ""),
+    queryFn: () => apiFetch(`/resources/${encodeURIComponent(id ?? "")}/files`, ArtifactManifestSchema),
+    enabled: id !== undefined,
+    retry: false,
+  });
+}
+
+/**
+ * The path of one file within an Artifact, encoded for a URL.
+ *
+ * Each segment is encoded on its own so the slashes between them survive —
+ * the route matches the whole remainder as one parameter (`:path{.+}`), and a
+ * wholly-encoded path would arrive as a single segment with `%2F` in it.
+ */
+function encodeArtifactPath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/** The browser-facing URL of one file of an Artifact — for an `<img src>` or an `<iframe>`. */
+export function artifactFileUrl(id: string, path: string): string {
+  return apiUrl(`/resources/${encodeURIComponent(id)}/files/${encodeArtifactPath(path)}`);
+}
+
+/**
+ * The text of one file of an Artifact, for the preview's editor.
+ *
+ * @remarks
+ * Only fetched for a file `artifactMediaType` calls text — an image or a PDF
+ * is shown from its URL instead (`artifactFileUrl`), and there is nothing to
+ * read for a binary. Cached per path, so clicking back and forth between two
+ * files reads each one once.
+ *
+ * @param id - The Skill's id, or `undefined` while it is unknown.
+ * @param path - The file's path within the Artifact, or `undefined` when none
+ * is selected.
+ * @returns The TanStack Query result; `data` is the file's text.
+ * @example
+ * const source = useArtifactFile(skill.id, "references/java.md");
+ */
+export function useArtifactFile(id: string | undefined, path: string | undefined) {
+  const isText = path !== undefined && artifactMediaType(path).kind === "text";
+
+  return useQuery({
+    queryKey: resourceArtifactFileQueryKey(id ?? "", path ?? ""),
+    queryFn: () => apiFetchText(`/resources/${encodeURIComponent(id ?? "")}/files/${encodeArtifactPath(path ?? "")}`),
+    enabled: id !== undefined && isText,
+    retry: false,
+    // A file only changes when the Skill is republished, which invalidates
+    // this key anyway — so nothing is gained by refetching one on remount.
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Downloads a Skill's Artifact as a zip and records the Install.
+ *
+ * @remarks
+ * A plain top-level navigation to `GET /resources/{id}/artifact`, which
+ * assembles the zip from the Artifact's stored files and serves it as an
+ * attachment (ADR-0032). There is no `fetch` and no presigned URL to
+ * negotiate any more — the response never leaves this origin.
+ *
+ * Which means the request itself is no longer something this app can await,
+ * so the Install it records is picked up by invalidating the Skill rather
+ * than being read back from the response. That count carries
+ * `refreshInstallCounts` lag regardless (ADR-0012), so there was never a
+ * moment where it was guaranteed fresh.
+ *
+ * @param id - The Skill's id.
+ * @param name - The Skill's name, which the detail query is keyed by.
+ * @example
+ * downloadArtifact(skill.id, skill.name)
  */
 export function useDownloadSkillArtifact() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id }: { id: string }) =>
-      apiFetch(`/resources/${encodeURIComponent(id)}/artifact`, SkillWithArtifactUrlSchema, {
-        headers: { accept: "application/json" },
-      }),
-    onSuccess: ({ url, ...skill }) => {
-      queryClient.setQueryData(resourceQueryKey(skill.name), skill);
-      window.location.href = url;
-    },
-  });
+
+  return (id: string, name: string) => {
+    window.location.href = apiUrl(`/resources/${encodeURIComponent(id)}/artifact`);
+    queryClient.invalidateQueries({ queryKey: resourceQueryKey(name) });
+    queryClient.invalidateQueries({ queryKey: resourceInstallTrendQueryKey(id) });
+  };
 }

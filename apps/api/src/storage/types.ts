@@ -4,19 +4,35 @@ export interface PresignOptions {
   contentDisposition?: string;
 }
 
+/** One object a prefix listing found. `size` is the stored byte length. */
+export interface StorageObject {
+  key: string;
+  size: number;
+}
+
 /**
  * Standard object-storage contract. Only S3 is implemented (s3.ts); the
- * fake in fake.ts backs the API test harness (seam 1). See ADR-0001:
- * publishing uploads directly to storage, so
- * presignUpload/presignDownload are the two operations request flows
- * actually exercise today, but the full contract is declared per the spec.
+ * fake in fake.ts backs the API test harness (seam 1).
+ *
+ * `list` returns each object's size as well as its key because that is what
+ * an Artifact's manifest is made of (ADR-0032): storage is the source of
+ * truth for which files a Resource actually has, and both S3's listing and
+ * the fake's map already know how big each one is, so asking for the sizes
+ * separately would be a round-trip per file for data the listing carried
+ * anyway.
+ *
+ * See ADR-0001: publishing uploads directly to storage, so `presignUpload`
+ * is what the publish flow reaches for, while reads go through `get`/`list`
+ * now that the API assembles the zip itself (ADR-0032). `presignDownload` is
+ * implemented because the contract is the target a second implementation
+ * aims at, not because a request flow uses it today.
  */
 export interface StorageAdapter {
   put(key: string, body: Uint8Array, contentType?: string): Promise<void>;
   get(key: string): Promise<Uint8Array | null>;
   exists(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
-  list(prefix: string): Promise<string[]>;
+  list(prefix: string): Promise<StorageObject[]>;
   presignUpload(key: string, options?: PresignOptions): Promise<string>;
   presignDownload(key: string, options?: PresignOptions): Promise<string>;
 }

@@ -65,7 +65,7 @@ async function publish(context: TestContext, session: Session, name: string): Pr
   const res = await context.app.request(`/api/resources/skill/${name}`, {
     method: "PUT",
     headers: { cookie: session.cookie, "content-type": "application/json" },
-    body: JSON.stringify({ description: "A Skill.", body: "Body.\n" }),
+    body: JSON.stringify({ description: "A Skill.", body: "Body.\n", files: [{ path: "SKILL.md", size: 6 }] }),
   });
   const { skill } = (await res.json()) as { skill: { id: string } };
   return skill.id;

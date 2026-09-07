@@ -1,11 +1,12 @@
-import type { Publisher, Skill } from "@skill-registry/shared";
+import type { Publisher } from "@skill-registry/shared";
 import { DownloadIcon, EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
 import { InstallTrendChart } from "@/components/install-trend-chart";
 import { Panel } from "@/components/panel";
 import { Reveal } from "@/components/reveal";
+import { SkillFilesPanel } from "@/components/skill-files-panel";
 import { SkillInstallCard } from "@/components/skill-install-card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDownloadSkillArtifact, useSkill, useSkillInstallTrend } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { renderSkillBody } from "@/lib/render-skill-body";
 import { formatDate } from "@/lib/utils";
 
 /** The placeholder page shown while a Skill loads — mirrors the real two-column layout. */
@@ -36,8 +36,7 @@ function SkillDetailSkeleton() {
       <div className="mt-2 grid gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="flex min-w-0 flex-col gap-4">
           <Skeleton className="h-28 w-full rounded-xl" />
-          <Skeleton className="h-40 w-full rounded-xl" />
-          <Skeleton className="h-72 w-full rounded-xl" />
+          <Skeleton className="h-[34rem] w-full rounded-xl" />
         </div>
         <div className="flex flex-col gap-4">
           <Skeleton className="h-24 w-full rounded-xl" />
@@ -71,45 +70,11 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-/** The optional Agent Skills frontmatter fields the Registry keeps, shown only when set. */
-function FrontmatterFields({ skill }: { skill: Skill }) {
-  const metadata = skill.metadata ? Object.entries(skill.metadata) : [];
-  const rows: [string, string][] = [];
-  if (skill.license) rows.push(["License", skill.license]);
-  if (skill.compatibility) rows.push(["Compatibility", skill.compatibility]);
-  if (skill.allowed_tools) rows.push(["Allowed tools", skill.allowed_tools]);
-
-  if (rows.length === 0 && metadata.length === 0) return null;
-
-  return (
-    <div className="flex flex-col gap-2 border-t pt-3 text-sm">
-      {rows.map(([label, value]) => (
-        <div key={label} className="flex flex-col gap-0.5">
-          <span className="font-medium">{label}</span>
-          <span className="text-muted-foreground">{value}</span>
-        </div>
-      ))}
-      {metadata.length > 0 && (
-        <div className="flex flex-col gap-0.5">
-          <span className="font-medium">Metadata</span>
-          {metadata.map(([key, value]) => (
-            <div key={key} className="flex gap-1.5 text-muted-foreground">
-              <span className="font-medium text-foreground">{key}:</span>
-              <span>{value}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /**
  * A Skill's page: breadcrumb, then title with download and manage actions
- * aligned beside it, then a two-column layout — the install command,
- * description, and rendered `SKILL.md` on the left; installs and publisher
- * details on the right. Fetches the Skill once; the widgets below take it
- * as a prop.
+ * aligned beside it, then a two-column layout — the install command and the
+ * Artifact's browsable contents on the left; installs and publisher details
+ * on the right. Fetches the Skill once; the widgets below take it as a prop.
  */
 export function SkillDetail({
   name,
@@ -131,8 +96,6 @@ export function SkillDetail({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editTagsOpen, setEditTagsOpen] = useState(false);
   const download = useDownloadSkillArtifact();
-
-  const bodyHtml = useMemo(() => (skill.data ? renderSkillBody(skill.data.body) : ""), [skill.data]);
 
   if (skill.isPending) return <SkillDetailSkeleton />;
   if (skill.isError) return <p className="text-sm text-destructive">{apiErrorMessage(skill.error)}</p>;
@@ -160,13 +123,12 @@ export function SkillDetail({
                 variant="outline"
                 size="icon"
                 aria-label="Download skill"
-                disabled={download.isPending}
-                onClick={() => download.mutate({ id: data.id })}
+                onClick={() => download(data.id, data.name)}
               >
                 <DownloadIcon />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{download.isPending ? "Downloading…" : "Download skill"}</TooltipContent>
+            <TooltipContent>Download skill</TooltipContent>
           </Tooltip>
           {(canEditTags || canDelete) && (
             <DropdownMenu>
@@ -193,8 +155,6 @@ export function SkillDetail({
           )}
         </div>
       </Reveal>
-      {download.isError && <p className="text-sm text-destructive">{apiErrorMessage(download.error)}</p>}
-
       {data.tags.length > 0 && (
         <Reveal delayMs={100} className="flex flex-wrap items-center gap-1.5">
           {data.tags.map((tag) => (
@@ -209,17 +169,7 @@ export function SkillDetail({
         <div className="flex min-w-0 flex-col gap-4">
           <SkillInstallCard name={data.name} />
 
-          <Panel title="Description">
-            <p className="text-sm leading-relaxed font-medium">{data.description}</p>
-            <FrontmatterFields skill={data} />
-          </Panel>
-
-          <Panel title="SKILL.md">
-            <div
-              className="text-sm leading-relaxed text-pretty [&_a]:underline [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_img]:outline [&_img]:outline-1 [&_img]:-outline-offset-1 [&_img]:outline-[oklch(0_0_0/0.1)] dark:[&_img]:outline-[oklch(1_0_0/0.1)] [&_li]:ml-4 [&_p]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_ul]:list-disc [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1"
-              dangerouslySetInnerHTML={{ __html: bodyHtml }}
-            />
-          </Panel>
+          <SkillFilesPanel id={data.id} body={data.body} />
         </div>
 
         <div className="flex flex-col gap-4">

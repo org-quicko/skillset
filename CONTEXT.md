@@ -2,7 +2,8 @@
 
 A self-hosted registry for the things a coding agent loads — Skills, MCP Servers, and Plugins.
 Resources are published from the CLI or the web interface, stored as rows and (for the Kinds that
-have bytes) in object storage, and discovered by members of a single team.
+have bytes) as files in object storage, and discovered — read, previewed, and installed — by
+members of a single team.
 
 ## Language
 
@@ -11,7 +12,7 @@ Anything the Registry holds and a coding agent can obtain. Every Resource has a 
 unique within that Kind, a description, a publisher, optional markdown documentation (`body`),
 and any number of Tags; everything else about it lives in its Kind-specific payload (ADR-0026).
 Not every Resource has an Artifact (ADR-0027).
-_Avoid_: Package, entry, item, asset, artifact (which is the zip, not the thing)
+_Avoid_: Package, entry, item, asset, artifact (which is the files, not the thing)
 
 **Kind**:
 Which of the three things a Resource is — `skill`, `mcp-server`, or `plugin`. A Kind fixes the
@@ -79,16 +80,28 @@ one Registry per deployment, serving one team.
 _Avoid_: Server, hub, marketplace, repository
 
 **Artifact**:
-The zip archive of a Resource of a Kind that has one — Skill and Plugin. Uploaded directly to
-object storage by the client and stored as a single object per Resource, keyed by the Resource's
-`id` (ADR-0026). An MCP Server has no Artifact at all (ADR-0027).
-_Avoid_: Bundle, package, tarball, blob
+The files of a Resource of a Kind that has one — Skill and Plugin. Uploaded directly to object
+storage by the client, one object per file, under a prefix keyed by the Resource's `id`
+(ADR-0026, ADR-0032). An MCP Server has no Artifact at all (ADR-0027). A **zip** is one
+*representation* of an Artifact rather than the Artifact itself: the Registry assembles one on
+demand for `skillreg add`, the web Download control, and a Marketplace `archive` source, and
+stores none.
+_Avoid_: Bundle, package, tarball, blob, zip (which is a representation, not the thing)
+
+**Manifest**:
+An Artifact's files as a list of paths and sizes, with no content. It travels in both directions
+and means something slightly different each way: publishing *declares* one, which is what lets
+the Registry validate every path and enforce the file-count and size limits without reading any
+bytes (ADR-0001, ADR-0032), and reading returns the *actual* one, listed back from storage. The
+two agree once an upload has finished, and the read is the one to trust.
+_Avoid_: File list, index, tree, contents
 
 **Install**:
 A recorded, countable instance of a Resource being obtained — one event per occurrence. What
 "obtained" means depends on the Kind: a Download of the Artifact for a Skill or a Plugin, and the
-config being written or revealed for an MCP Server. Counts are therefore **not comparable across
-Kinds** (ADR-0028), and no longer order the catalog by default. "Download" still names the plain
+config being written or revealed for an MCP Server. Browsing an Artifact's files, or previewing
+one of them in the interface, is not obtaining and counts as nothing (ADR-0032). Counts are
+therefore **not comparable across Kinds** (ADR-0028), and no longer order the catalog by default. "Download" still names the plain
 act of fetching an Artifact's bytes; every Download produces one Install event, but Install is
 the countable unit the log, the count, and the API's `installs` field are named after.
 _Avoid_: Download (as the countable unit — Download is the action, Install is the count)

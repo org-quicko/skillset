@@ -1,9 +1,9 @@
 import { unzipSync } from "fflate";
 import {
-  ARTIFACT_MAX_ENTRIES,
   ARTIFACT_MAX_TRANSFER_BYTES,
-  ARTIFACT_MAX_UNCOMPRESSED_BYTES,
   stripWrappingDirectory,
+  validateArtifactPath,
+  validateArtifactSize,
   type SkillFile,
 } from "./artifact.js";
 import { SkillValidationError } from "./skill-rules.js";
@@ -104,27 +104,6 @@ function readCentralDirectory(bytes: Uint8Array, view: DataView): CentralDirecto
   return entries;
 }
 
-function validateEntryName(name: string): void {
-  if (name.includes("\0")) {
-    throw new SkillValidationError("entry_null_byte", `Artifact entry "${name}" contains a null byte.`);
-  }
-  // A zip name separates with "/" and nothing else (PKZIP APPNOTE 4.4.17.1), so a
-  // backslash is never a legitimate one. It has to be refused before the checks below
-  // rather than folded into them: on Windows `path.join` treats "\" as a separator, so
-  // `a\..\..\evil.md` walks out of the install directory while carrying no ".." segment
-  // and no leading "/" for either of them to catch. The same goes for a UNC name like
-  // `\\server\share`, which is absolute without starting with "/" or a drive letter.
-  if (name.includes("\\")) {
-    throw new SkillValidationError("entry_backslash", `Artifact entry "${name}" contains a backslash.`);
-  }
-  if (name.startsWith("/") || /^[A-Za-z]:/.test(name)) {
-    throw new SkillValidationError("entry_absolute_path", `Artifact entry "${name}" is an absolute path.`);
-  }
-  if (name.split("/").includes("..")) {
-    throw new SkillValidationError("entry_path_traversal", `Artifact entry "${name}" has a parent-directory segment.`);
-  }
-}
-
 /**
  * Holds an entry's two declarations of its own size against each other.
  *
@@ -158,24 +137,6 @@ function enforceDeclaredSizesAgree(bytes: Uint8Array, view: DataView, entry: Cen
   }
 }
 
-function enforceEntryCount(count: number): void {
-  if (count > ARTIFACT_MAX_ENTRIES) {
-    throw new SkillValidationError(
-      "too_many_entries",
-      `A Skill holds at most ${ARTIFACT_MAX_ENTRIES} files; this one has ${count}.`,
-    );
-  }
-}
-
-function enforceUncompressedSize(total: number): void {
-  if (total > ARTIFACT_MAX_UNCOMPRESSED_BYTES) {
-    throw new SkillValidationError(
-      "uncompressed_too_large",
-      `A Skill's files come to at most ${ARTIFACT_MAX_UNCOMPRESSED_BYTES} bytes uncompressed; these come to ${total}.`,
-    );
-  }
-}
-
 /**
  * Unpacks a downloaded Artifact into the files that will be written to disk.
  *
@@ -191,8 +152,8 @@ function enforceUncompressedSize(total: number): void {
  * readable zip or an entry does not hold the bytes it declares, `unsupported_archive` for
  * zip64, `too_many_entries` or `uncompressed_too_large` when a limit is exceeded,
  * `artifact_too_large` when the download itself is oversized, `entry_null_byte`,
- * `entry_absolute_path`, `entry_backslash`, `entry_path_traversal`, or `entry_symlink`
- * for a hostile entry, and — from `stripWrappingDirectory` — `ambiguous_layout` when
+ * `entry_absolute_path`, `entry_backslash`, `entry_path_traversal`, `entry_not_a_file`,
+ * or `entry_symlink` for a hostile entry, and — from `stripWrappingDirectory` — `ambiguous_layout` when
  * several directories each hold a `SKILL.md`, or `skill_md_missing` when none does.
  *
  * @remarks
@@ -225,11 +186,10 @@ export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
   const view = new DataView(zipBytes.buffer, zipBytes.byteOffset, zipBytes.byteLength);
   const entries = readCentralDirectory(zipBytes, view).filter((entry) => !entry.name.endsWith("/"));
 
-  enforceEntryCount(entries.length);
-  enforceUncompressedSize(entries.reduce((total, entry) => total + entry.declaredSize, 0));
+  validateArtifactSize(entries, (entry) => entry.declaredSize);
 
   for (const entry of entries) {
-    validateEntryName(entry.name);
+    validateArtifactPath(entry.name);
     if (entry.isSymlink) {
       throw new SkillValidationError("entry_symlink", `Artifact entry "${entry.name}" is a symlink.`);
     }

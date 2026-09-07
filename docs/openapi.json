@@ -3,7 +3,7 @@
   "info": {
     "title": "Skillset API",
     "version": "0.1.0",
-    "description": "A self-hosted Registry for Agent Skills. This is the contract the CLI depends on; the web interface uses the same routes and has no private data path of its own.\n\n**Conventions.** Every JSON key on the wire is snake_case, which means wire keys line up with Postgres column names. TypeScript types, interfaces, and classes are camelCase, so conversion happens once at the boundary in the shared module rather than ad hoc per call site.\n\n**Artifact bytes never pass through this API.** Publishing returns a presigned upload target that the caller writes to directly, and reading an Artifact redirects to a short-lived presigned location. The API therefore validates the metadata a caller claims about a Skill, never the Artifact itself (ADR-0001)."
+    "description": "A self-hosted Registry for Agent Skills. This is the contract the CLI depends on; the web interface uses the same routes and has no private data path of its own.\n\n**Conventions.** Every JSON key on the wire is snake_case, which means wire keys line up with Postgres column names. TypeScript types, interfaces, and classes are camelCase, so conversion happens once at the boundary in the shared module rather than ad hoc per call site.\n\n**Uploaded Artifact bytes never pass through this API.** An Artifact is stored as its files, one object each; publishing returns one presigned upload target per file, and the caller writes each directly. The API therefore validates the metadata and the file *manifest* a caller claims about a Skill, never the bytes themselves (ADR-0001, ADR-0032). Reads are the other way round: `GET /resources/{id}/artifact` assembles a zip from those files, and `GET /resources/{id}/files/{path}` serves one of them, so Artifact bytes do pass through on the way out."
   },
   "servers": [{ "url": "/api" }],
   "security": [{ "cookieAuth": [] }, { "bearerAuth": [] }],
@@ -559,14 +559,14 @@
       "put": {
         "tags": ["resources"],
         "summary": "Publish a Resource",
-        "description": "Create or replace, idempotent by `(kind, name)`: publishing an existing Resource replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002, amended by ADR-0026).\n\n`kind` comes from the path and is checked against the registered Kinds before anything else — an unrecognised value is refused here, naming the field, rather than falling through to a 404 (ADR-0026). `skill` is the only Kind registered so far, so this request body shape is Skill's own; a second Kind gets its own payload shape and validation, not a variant of this one.\n\nThe row is written first and an upload target returned. The caller then writes the Artifact to that target directly. Until it does, the Resource lists and reads but its Artifact cannot be retrieved.\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.\n\n`license`, `compatibility`, `metadata`, and `allowed_tools` are optional, but are validated exactly as strictly as `description` and `body` when present — any one of them failing rejects the whole publish, naming the specific field and rule (ADR-0009). Publishing always writes all four (a validated value, or null when absent), so a republish that no longer sets a field clears it. `tags` cannot be set through this endpoint at all — see `PUT /resources/{id}/tags`.",
+        "description": "Create or replace, idempotent by `(kind, name)`: publishing an existing Resource replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002, amended by ADR-0026).\n\n`kind` comes from the path and is checked against the registered Kinds before anything else — an unrecognised value is refused here, naming the field, rather than falling through to a 404 (ADR-0026). `skill` is the only Kind registered so far, so this request body shape is Skill's own; a second Kind gets its own payload shape and validation, not a variant of this one.\n\nThe row is written first and one upload target per declared file returned, in the order `files` declared them. The caller then writes each file to its own target directly. Until every one lands, the Resource lists and reads but its Artifact is incomplete — the file listing shows what arrived and the zip download refuses. A republish deletes the files its new manifest no longer names *before* those URLs are issued, so a dropped file is never left servable (ADR-0032).\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.\n\n`license`, `compatibility`, `metadata`, and `allowed_tools` are optional, but are validated exactly as strictly as `description` and `body` when present — any one of them failing rejects the whole publish, naming the specific field and rule (ADR-0009). Publishing always writes all four (a validated value, or null when absent), so a republish that no longer sets a field clears it. `tags` cannot be set through this endpoint at all — see `PUT /resources/{id}/tags`.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["description", "body"],
+                "required": ["description", "body", "files"],
                 "properties": {
                   "description": {
                     "type": "string",
@@ -593,6 +593,11 @@
                   "allowed_tools": {
                     "type": "string",
                     "description": "From the SKILL.md frontmatter. Optional; internal grammar unvalidated (experimental in the specification)."
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/ArtifactFile" },
+                    "description": "The Artifact's declared manifest — the paths and sizes about to be uploaded. Part of this body rather than a separate call because the presigned destinations in the response are derived from it: the API cannot sign a PUT for a key it has not been told about. Every path is validated before a row is written, so a manifest with a parent-directory segment, an absolute path, a backslash, a null byte, a duplicate, no root `SKILL.md`, or more files or bytes than an Artifact may hold rejects the whole publish, naming the rule (ADR-0032)."
                   }
                 }
               }
@@ -609,7 +614,7 @@
                   "required": ["skill", "upload"],
                   "properties": {
                     "skill": { "$ref": "#/components/schemas/Skill" },
-                    "upload": { "$ref": "#/components/schemas/UploadTarget" }
+                    "upload": { "$ref": "#/components/schemas/ArtifactUpload" }
                   }
                 }
               }
@@ -691,53 +696,74 @@
       "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
       "get": {
         "tags": ["resources"],
-        "summary": "Retrieve a Resource's Artifact",
-        "description": "Records one Install, then redirects to a presigned read location valid for about a minute. Callers must follow redirects. Unauthenticated — anyone who can reach the Registry may retrieve an Artifact (ADR-0013). The response body is the zip; the storage key is derived from the Resource's `id`, not its name (ADR-0026). A caller that sends `Accept: application/json` gets the Resource itself back instead alongside `url` to fetch the Artifact from, rather than a redirect; this is for a caller (the web app's own Download control) that needs to know the request succeeded before navigating there itself. Either representation records the same one Install. `installs` on that Resource reflects the last periodic refresh, not necessarily this request's own Install (ADR-0012).",
+        "summary": "Download a Resource's Artifact as a zip",
+        "description": "Assembles the Resource's stored files into a zip and returns it as an attachment named after the Resource. An Artifact is stored as its files, one object each, so this archive is built per request and cached nowhere (ADR-0032). Unauthenticated — anyone who can reach the Registry may retrieve an Artifact (ADR-0013). Records exactly one Install, and only once every file is in hand, so a failure never inflates the count; `installs` elsewhere reflects the last periodic refresh rather than this request's own Install (ADR-0012).\n\nThere is no `Accept: application/json` representation any more. It existed to hand back a presigned storage URL alongside the Resource, for a caller that needed to know the request had succeeded before navigating there; with the bytes served here, there is no such URL.",
         "security": [],
-        "parameters": [
-          {
-            "name": "Accept",
-            "in": "header",
-            "required": false,
-            "schema": { "type": "string", "enum": ["application/json"] },
-            "description": "Request the Skill-plus-url representation instead of the default redirect."
-          }
-        ],
         "responses": {
           "200": {
-            "description": "The Skill, plus a presigned url to fetch the Artifact from — returned instead of redirecting when the request sent `Accept: application/json`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    { "$ref": "#/components/schemas/Skill" },
-                    {
-                      "type": "object",
-                      "required": ["url"],
-                      "properties": {
-                        "url": {
-                          "type": "string",
-                          "format": "uri",
-                          "description": "Short-lived presigned read URL for the Artifact"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "302": {
-            "description": "Redirect to the presigned location — the default representation",
+            "description": "The Artifact, as a zip",
             "headers": {
-              "Location": {
-                "description": "Short-lived presigned read URL for the Artifact",
-                "schema": { "type": "string", "format": "uri" }
+              "Content-Disposition": {
+                "description": "Always `attachment; filename=\"<name>.zip\"` — the storage prefix is the Resource's `id`, so without this a browser would save the file under a UUID.",
+                "schema": { "type": "string" }
               }
-            }
+            },
+            "content": { "application/zip": { "schema": { "type": "string", "format": "binary" } } }
           },
           "404": {
-            "description": "No such Resource, or its Artifact was never uploaded",
+            "description": "No such Resource, or its Artifact holds no files — never uploaded, or an upload still in flight",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/resources/{id}/files": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
+      "get": {
+        "tags": ["resources"],
+        "summary": "List an Artifact's files",
+        "description": "Every file the Resource's Artifact holds, with its size, `SKILL.md` first — what the interface's file browser is built on. Read from object storage rather than from the manifest the publisher declared, so it reports what a reader will actually get: the two agree once an upload has finished and disagree while one is in flight (ADR-0032). Unauthenticated (ADR-0013), and not an Install: listing what a Skill contains is not obtaining it (ADR-0028).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The Artifact's files",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ArtifactManifest" } } }
+          },
+          "404": {
+            "description": "No such Resource, or its Artifact holds no files",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/resources/{id}/files/{path}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/SkillId" },
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "The file's path within the Artifact, relative to the Skill's root. May contain slashes — `references/style.md` is one file, not two segments — so encode each segment and leave the slashes between them. Refused with 400 if it would address an object outside the Resource's own storage prefix.",
+          "example": "references/style.md"
+        }
+      ],
+      "get": {
+        "tags": ["resources"],
+        "summary": "Read one file of an Artifact",
+        "description": "The file's bytes, with a `content-type` derived from its path — the API has never read these bytes and has no sniffed type to prefer (ADR-0001). Served here rather than redirected to object storage so the interface's preview can read it with `fetch` without depending on a bucket's CORS policy.\n\nEvery response carries `X-Content-Type-Options: nosniff`, since the type is guessed from the path and a browser must not be allowed to guess differently. An HTML or SVG file — the two types a publisher can upload that a browser executes — additionally carries a `Content-Security-Policy` forbidding scripts, plugins and external fetches, and sandboxing the result. Unauthenticated (ADR-0013), and not an Install: previewing a file is not obtaining the Resource (ADR-0028).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The file's bytes",
+            "content": { "*/*": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "400": {
+            "description": "The path would address an object outside the Resource's own prefix",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": {
+            "description": "No such Resource, or its Artifact holds no file at that path",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -1548,19 +1574,49 @@
           }
         ]
       },
-      "UploadTarget": {
+      "ArtifactFile": {
         "type": "object",
-        "description": "Where to write the Artifact. A presigned location on object storage — the bytes do not pass through this API.",
-        "required": ["url", "method", "headers", "expires_in_seconds"],
+        "description": "One file of an Artifact: a path relative to the Skill's root, and the size of its bytes. Never any content — an Artifact's bytes go to and from object storage, never through this schema. Sent as the declared manifest when publishing, and returned as the actual one when reading (ADR-0032).",
+        "required": ["path", "size"],
         "properties": {
-          "url": { "type": "string", "format": "uri" },
-          "method": { "type": "string", "const": "PUT" },
-          "headers": {
-            "type": "object",
-            "additionalProperties": { "type": "string" },
-            "description": "Headers that must be sent verbatim for the presigned signature to verify."
+          "path": { "type": "string", "example": "references/style.md" },
+          "size": { "type": "integer", "minimum": 0, "description": "The file's byte length." }
+        }
+      },
+      "ArtifactManifest": {
+        "type": "object",
+        "description": "Every file an Artifact holds, `SKILL.md` first, listed back from object storage.",
+        "required": ["files"],
+        "properties": {
+          "files": { "type": "array", "items": { "$ref": "#/components/schemas/ArtifactFile" } }
+        }
+      },
+      "ArtifactUpload": {
+        "type": "object",
+        "description": "Where to write the Artifact: one presigned location per file of the manifest the request declared, in that same order. The bytes do not pass through this API (ADR-0001).",
+        "required": ["files", "expires_in_seconds"],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "url", "method", "headers"],
+              "properties": {
+                "path": { "type": "string", "description": "The declared file this destination is for.", "example": "SKILL.md" },
+                "url": { "type": "string", "format": "uri" },
+                "method": { "type": "string", "const": "PUT" },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Headers that must be sent verbatim for the presigned signature to verify."
+                }
+              }
+            }
           },
-          "expires_in_seconds": { "type": "integer" }
+          "expires_in_seconds": {
+            "type": "integer",
+            "description": "Shared by every URL above — they are all signed by the one call."
+          }
         }
       },
       "Token": {

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import type { Role } from "@skill-registry/shared";
+import { extractSkillFiles, type Role } from "@skill-registry/shared";
 import { eq } from "drizzle-orm";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
@@ -40,9 +40,21 @@ interface ApiSkill {
   published_at: string;
 }
 
+interface ApiUploadTarget {
+  path: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+}
+
 interface ApiPublished {
   skill: ApiSkill;
-  upload: { url: string; method: string; headers: Record<string, string>; expires_in_seconds: number };
+  upload: { files: ApiUploadTarget[]; expires_in_seconds: number };
+}
+
+/** `GET /resources/{id}/files`'s shape. */
+interface ApiManifest {
+  files: { path: string; size: number }[];
 }
 
 /** `GET /resources`'s row shape (ticket 23) — distinct from `ApiSkill`: `published_by_name` and `updated_at`, not the full Publisher and `published_at`. */
@@ -116,6 +128,11 @@ async function createUserAndLogIn(
   return { cookie: sessionCookie(res), email: body.email, id: row.id };
 }
 
+/**
+ * Publishes a Skill. `files` defaults to a single `SKILL.md`, since a publish
+ * needs a manifest (ADR-0032) and almost every test here is about something
+ * else — a case that cares passes its own.
+ */
 async function publish(
   context: TestContext,
   session: Session,
@@ -125,8 +142,19 @@ async function publish(
   return context.app.request(`/api/resources/skill/${name}`, {
     method: "PUT",
     headers: { cookie: session.cookie, "content-type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ files: [{ path: "SKILL.md", size: 6 }], ...payload }),
   });
+}
+
+/**
+ * Writes an Artifact's files where the API reads them from, standing in for
+ * the presigned uploads a real publisher would make (ADR-0001: they never go
+ * through the API, so no request here can make them happen).
+ */
+async function putArtifact(context: TestContext, id: string, files: Record<string, string>): Promise<void> {
+  for (const [path, contents] of Object.entries(files)) {
+    await context.storage.put(`resources/${id}/${path}`, new TextEncoder().encode(contents));
+  }
 }
 
 const PASSWORD = "correct-horse-battery";
@@ -197,11 +225,15 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(published.skill.name).toBe("code-review");
     expect(published.skill.description).toBe("Reviews code.");
     expect(published.skill.published_by.email).toBe(writer.email);
-    expect(published.upload.method).toBe("PUT");
-    expect(published.upload.headers["content-type"]).toBe("application/zip");
     expect(published.upload.expires_in_seconds).toBeGreaterThan(0);
-    // One object per Resource, keyed by its id (ADR-0026).
-    expect(decodeURIComponent(published.upload.url)).toContain(`resources/${published.skill.id}.zip`);
+    expect(published.upload.files).toHaveLength(1);
+    const [target] = published.upload.files;
+    expect(target?.path).toBe("SKILL.md");
+    expect(target?.method).toBe("PUT");
+    expect(target?.headers["content-type"]).toBe("application/octet-stream");
+    // One object per file, under a prefix keyed by the Resource's id
+    // (ADR-0026, ADR-0032).
+    expect(decodeURIComponent(target?.url ?? "")).toContain(`resources/${published.skill.id}/SKILL.md`);
 
     const [row] = await context.db.select().from(resources).where(eq(resources.name, "code-review")).limit(1);
     expect(row?.id).toBe(published.skill.id);
@@ -1164,58 +1196,53 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     await stopTestContext(context, container);
   });
 
-  it("redirects a reader to a short-lived presigned location named after the Skill", async () => {
+  it("serves a zip it assembles from the Artifact's stored files, named after the Skill", async () => {
     const published = await publish(context, writer, "downloadable-skill", {
       description: "Has an Artifact.",
       body: "Body.\n",
+      files: [
+        { path: "SKILL.md", size: 6 },
+        { path: "references/style.md", size: 5 },
+      ],
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
-    await context.storage.put(`resources/${publishedSkill.id}.zip`, new Uint8Array([1, 2, 3]));
+    await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n", "references/style.md": "Style" });
 
     const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`, {
       headers: { cookie: reader.cookie },
-      redirect: "manual",
     });
-    expect(res.status).toBe(302);
-
-    const location = res.headers.get("location");
-    expect(location).not.toBeNull();
-    const decoded = decodeURIComponent(location ?? "");
-    expect(decoded).toContain(`resources/${publishedSkill.id}.zip`);
-    // The storage key is the id, not the Skill's name — without a
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/zip");
+    // The storage prefix is the id, not the Skill's name — without a
     // Content-Disposition naming the download, a browser's save dialog would
     // default to `<uuid>.zip`.
-    expect(decoded).toContain(`filename="downloadable-skill.zip"`);
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="downloadable-skill.zip"');
+
+    // The whole point of the new storage model is that the zip is derived,
+    // not stored — so what matters is that it round-trips every file. Read
+    // back through the shared extractor rather than a raw unzip, which also
+    // asserts the archive is one `skillreg add` accepts.
+    const files = extractSkillFiles(new Uint8Array(await res.arrayBuffer()));
+    expect(files.map((file) => file.path).sort()).toEqual(["SKILL.md", "references/style.md"]);
+    const style = files.find((file) => file.path === "references/style.md");
+    expect(new TextDecoder().decode(style?.bytes)).toBe("Style");
   });
 
-  it("returns the Skill plus a url instead of redirecting, when asked for JSON", async () => {
-    const published = await publish(context, writer, "json-downloadable-skill", {
+  it("records exactly one Install per download", async () => {
+    const published = await publish(context, writer, "counted-skill", {
       description: "Has an Artifact.",
       body: "Body.\n",
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
-    await context.storage.put(`resources/${publishedSkill.id}.zip`, new Uint8Array([1]));
+    await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n" });
 
-    const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`, {
-      headers: { cookie: reader.cookie, accept: "application/json" },
-      redirect: "manual",
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as ApiSkill & { url: string; installs: number };
-    expect(body.id).toBe(publishedSkill.id);
-    const decodedUrl = decodeURIComponent(body.url);
-    expect(decodedUrl).toContain(`resources/${publishedSkill.id}.zip`);
-    expect(decodedUrl).toContain(`filename="json-downloadable-skill.zip"`);
-    // `installs` reflects the last refresh, not necessarily this request's own
-    // Install (ADR-0012) — the count itself is analytics.test.ts's concern.
-    expect(typeof body.installs).toBe("number");
+    for (let i = 0; i < 2; i++) {
+      const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`, {
+        headers: { cookie: reader.cookie },
+      });
+      expect(res.status).toBe(200);
+    }
 
-    // Records the same one Install the redirect representation does — not a
-    // second one — regardless of which representation was requested.
-    await context.app.request(`/api/resources/${publishedSkill.id}/artifact`, {
-      headers: { cookie: reader.cookie, accept: "application/json" },
-      redirect: "manual",
-    });
     const events = await context.db
       .select()
       .from(resourceInstallEvents)
@@ -1229,20 +1256,16 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
       body: "Body.\n",
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
-    await context.storage.put(`resources/${publishedSkill.id}.zip`, new Uint8Array([1]));
+    await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n" });
 
     // What `skillreg add` does against a Registry the User never logged in to (ADR-0013).
-    const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`, {
-      redirect: "manual",
-    });
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBeTruthy();
+    const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`);
+    expect(res.status).toBe(200);
   });
 
   it("returns 404 for a Skill that does not exist", async () => {
     const res = await context.app.request(`/api/resources/${crypto.randomUUID()}/artifact`, {
       headers: { cookie: reader.cookie },
-      redirect: "manual",
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as ApiError;
@@ -1258,11 +1281,231 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
 
     const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`, {
       headers: { cookie: reader.cookie },
-      redirect: "manual",
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as ApiError;
     expect(body.error.code).toBe("artifact_missing");
+  });
+});
+
+/**
+ * Seam 1 — browsing an Artifact file by file, which is what the interface's
+ * preview is built on (ADR-0032). The listing is read back from storage
+ * rather than from the manifest a publisher declared, so these seed storage
+ * directly the way a presigned upload would.
+ */
+describe("Browsing an Artifact's files (ADR-0032)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let writer: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        email: "ada@example.com",
+        password: PASSWORD,
+      }),
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function publishWithFiles(name: string, files: Record<string, string>): Promise<string> {
+    const res = await publish(context, writer, name, {
+      description: "Has an Artifact.",
+      body: "Body.\n",
+      files: Object.entries(files).map(([path, contents]) => ({ path, size: contents.length })),
+    });
+    if (res.status !== 200) throw new Error(`Publishing ${name} failed: ${res.status} ${await res.text()}`);
+    const { skill } = (await res.json()) as ApiPublished;
+    await putArtifact(context, skill.id, files);
+    return skill.id;
+  }
+
+  it("lists every stored file with its size, SKILL.md first, unauthenticated", async () => {
+    const id = await publishWithFiles("listable-skill", {
+      "SKILL.md": "Body.\n",
+      "references/style.md": "Style",
+      "scripts/run.sh": "echo hi",
+    });
+
+    const res = await context.app.request(`/api/resources/${id}/files`);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as ApiManifest;
+    expect(body.files).toEqual([
+      { path: "SKILL.md", size: 6 },
+      { path: "references/style.md", size: 5 },
+      { path: "scripts/run.sh", size: 7 },
+    ]);
+  });
+
+  it("lists what storage holds, not what the manifest claimed", async () => {
+    // A publish whose upload only partly finished: the row and the declared
+    // manifest name two files, storage holds one. The listing is the honest
+    // one (ADR-0032).
+    const res = await publish(context, writer, "half-uploaded-skill", {
+      description: "Has an Artifact.",
+      body: "Body.\n",
+      files: [
+        { path: "SKILL.md", size: 6 },
+        { path: "references/style.md", size: 5 },
+      ],
+    });
+    const { skill } = (await res.json()) as ApiPublished;
+    await putArtifact(context, skill.id, { "SKILL.md": "Body.\n" });
+
+    const listed = await context.app.request(`/api/resources/${skill.id}/files`);
+    const body = (await listed.json()) as ApiManifest;
+    expect(body.files.map((file) => file.path)).toEqual(["SKILL.md"]);
+  });
+
+  it("404s the listing for a Skill whose Artifact was never uploaded", async () => {
+    const res = await publish(context, writer, "unlisted-skill", { description: "No bytes.", body: "Body.\n" });
+    const { skill } = (await res.json()) as ApiPublished;
+
+    const listed = await context.app.request(`/api/resources/${skill.id}/files`);
+    expect(listed.status).toBe(404);
+    expect(((await listed.json()) as ApiError).error.code).toBe("artifact_missing");
+  });
+
+  it("serves one file's bytes with a content type read off its path", async () => {
+    const id = await publishWithFiles("readable-skill", {
+      "SKILL.md": "Body.\n",
+      "references/style.md": "# Style\n",
+      "scripts/run.sh": "echo hi",
+    });
+
+    const markdown = await context.app.request(`/api/resources/${id}/files/references/style.md`);
+    expect(markdown.status).toBe(200);
+    expect(markdown.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(markdown.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await markdown.text()).toBe("# Style\n");
+
+    // The nested path is one file, not two path segments — the route has to
+    // let the parameter swallow the slash.
+    const script = await context.app.request(`/api/resources/${id}/files/scripts/run.sh`);
+    expect(script.status).toBe(200);
+    expect(script.headers.get("content-type")).toBe("text/x-shellscript; charset=utf-8");
+  });
+
+  it("404s a path the Artifact does not hold", async () => {
+    const id = await publishWithFiles("sparse-skill", { "SKILL.md": "Body.\n" });
+
+    const res = await context.app.request(`/api/resources/${id}/files/references/missing.md`);
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as ApiError).error.code).toBe("not_found");
+  });
+
+  it("refuses a path that would read outside the Resource's own prefix", async () => {
+    const id = await publishWithFiles("guarded-skill", { "SKILL.md": "Body.\n" });
+
+    // Sent pre-encoded so the traversal survives the router and reaches the
+    // service's own check rather than being normalised away in transit.
+    const res = await context.app.request(`/api/resources/${id}/files/..%2F..%2Fresources`);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as ApiError).error.code).toBe("entry_path_traversal");
+  });
+
+  it("republishing drops the files the new manifest no longer names", async () => {
+    const id = await publishWithFiles("shrinking-skill", {
+      "SKILL.md": "Body.\n",
+      "references/gone.md": "Bye",
+    });
+
+    const republished = await publish(context, writer, "shrinking-skill", {
+      description: "Fewer files now.",
+      body: "Body.\n",
+      files: [{ path: "SKILL.md", size: 6 }],
+    });
+    expect(republished.status).toBe(200);
+
+    // Deleted when the upload URLs were issued, not after the upload — a
+    // republish that drops a file must not leave it servable in between.
+    const listed = await context.app.request(`/api/resources/${id}/files`);
+    const body = (await listed.json()) as ApiManifest;
+    expect(body.files.map((file) => file.path)).toEqual(["SKILL.md"]);
+    expect(await context.storage.exists(`resources/${id}/references/gone.md`)).toBe(false);
+  });
+
+  const badManifests: Array<{ name: string; label: string; files: unknown; code: string }> = [
+    { name: "rejected-not-a-list", label: "not a list", files: { "SKILL.md": 6 }, code: "manifest_invalid" },
+    { name: "rejected-no-size", label: "an entry with no size", files: [{ path: "SKILL.md" }], code: "manifest_invalid" },
+    { name: "rejected-no-skill-md", label: "no SKILL.md", files: [{ path: "readme.md", size: 4 }], code: "skill_md_missing" },
+    {
+      name: "rejected-traversal",
+      label: "a parent-directory segment",
+      files: [
+        { path: "SKILL.md", size: 6 },
+        { path: "../escape.md", size: 4 },
+      ],
+      code: "entry_path_traversal",
+    },
+    {
+      name: "rejected-absolute",
+      label: "an absolute path",
+      files: [
+        { path: "SKILL.md", size: 6 },
+        { path: "/etc/passwd", size: 4 },
+      ],
+      code: "entry_absolute_path",
+    },
+    {
+      name: "rejected-duplicate",
+      label: "the same path twice",
+      files: [
+        { path: "SKILL.md", size: 6 },
+        { path: "SKILL.md", size: 7 },
+      ],
+      code: "entry_duplicate",
+    },
+  ];
+
+  for (const { name, label, files, code } of badManifests) {
+    it(`refuses a manifest with ${label}, without writing a row`, async () => {
+      const res = await context.app.request(`/api/resources/skill/${name}`, {
+        method: "PUT",
+        headers: { cookie: writer.cookie, "content-type": "application/json" },
+        body: JSON.stringify({ description: "A Skill.", body: "Body.\n", files }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as ApiError).error.code).toBe(code);
+
+      // A failing manifest rejects the publish exactly like a failing
+      // required field does (ADR-0009) — nothing about the Skill changes.
+      const rows = await context.db.select().from(resources).where(eq(resources.name, name));
+      expect(rows.length).toBe(0);
+    });
+  }
+
+  it("reads a file without recording an Install", async () => {
+    const id = await publishWithFiles("previewed-skill", { "SKILL.md": "Body.\n" });
+
+    await context.app.request(`/api/resources/${id}/files`);
+    await context.app.request(`/api/resources/${id}/files/SKILL.md`);
+
+    // Previewing is not obtaining (ADR-0028) — only the zip download counts.
+    const events = await context.db
+      .select()
+      .from(resourceInstallEvents)
+      .where(eq(resourceInstallEvents.resource_id, id));
+    expect(events.length).toBe(0);
   });
 });
 
@@ -1319,7 +1562,7 @@ describe("Deleting a Skill (ticket 12)", () => {
       body: "Body.\n",
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
-    await context.storage.put(`resources/${publishedSkill.id}.zip`, new Uint8Array([1, 2, 3]));
+    await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n", "references/style.md": "Style" });
 
     const res = await context.app.request(`/api/resources/${publishedSkill.id}`, {
       method: "DELETE",
@@ -1329,7 +1572,9 @@ describe("Deleting a Skill (ticket 12)", () => {
 
     const rows = await context.db.select().from(resources).where(eq(resources.name, "doomed-skill"));
     expect(rows.length).toBe(0);
-    expect(await context.storage.exists(`resources/${publishedSkill.id}.zip`)).toBe(false);
+    // Every file, not just the one at the root — an Artifact is a prefix now
+    // (ADR-0032).
+    expect(await context.storage.list(`resources/${publishedSkill.id}/`)).toEqual([]);
 
     const missing = await context.app.request(`/api/resources/${publishedSkill.id}`, { headers: { cookie: reader.cookie } });
     expect(missing.status).toBe(404);

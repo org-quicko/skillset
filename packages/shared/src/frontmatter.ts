@@ -31,6 +31,39 @@ export interface SkillDocument {
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n([\s\S]*))?$/;
 
 /**
+ * Splits a markdown file into its YAML frontmatter block and the body below
+ * it, without parsing or validating either.
+ *
+ * @remarks
+ * The lenient counterpart to `parseSkillDocument`, for a caller that only
+ * needs to know where the fence ends. Rendering is the case that wants this:
+ * a frontmatter block is configuration, and passing it to a markdown
+ * renderer turns `name: …  description: …` into a paragraph of prose at the
+ * top of the page. `parseSkillDocument` cannot serve that caller, because it
+ * throws for a file that is not a valid `SKILL.md` — and a Skill's
+ * `references/` files are ordinary markdown that may carry frontmatter of
+ * their own, or none.
+ *
+ * Both share the one pattern, so what counts as a fence cannot drift between
+ * the file that is validated and the file that is displayed.
+ *
+ * @param source - The raw contents of a markdown file.
+ * @returns The raw frontmatter block (`null` when there is no fence) and the
+ * body, which is the whole source when there is none.
+ * @example
+ * ```ts
+ * splitFrontmatter("---\nname: a\n---\n# Title\n");
+ * // -> { frontmatter: "name: a", body: "# Title\n" }
+ * ```
+ */
+export function splitFrontmatter(source: string): { frontmatter: string | null; body: string } {
+  const cleaned = source.replace(/^\uFEFF/, "");
+  const match = FRONTMATTER_PATTERN.exec(cleaned);
+  if (!match) return { frontmatter: null, body: cleaned };
+  return { frontmatter: match[1] ?? "", body: match[2] ?? "" };
+}
+
+/**
  * Parses a SKILL.md's YAML frontmatter and body.
  *
  * @param source - The raw contents of a SKILL.md file.

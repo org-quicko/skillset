@@ -11,7 +11,7 @@ import {
   type SkillFile,
 } from "@skill-registry/shared";
 import { rethrowValidationError } from "../errors.js";
-import { ApiError, registryFetch, uploadArtifact, type RegistryClient } from "../http.js";
+import { ApiError, registryFetch, uploadArtifactFile, type RegistryClient } from "../http.js";
 import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 import { describeError } from "../ui.js";
 
@@ -147,7 +147,18 @@ async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bu
     throw error;
   }
 
-  await uploadArtifact(fetchImpl, published.upload, bundle.artifact);
+  // One presigned destination per declared file, in the order the manifest
+  // declared them (ADR-0032), so the two lists line up index for index.
+  await Promise.all(
+    published.upload.files.map((target, index) => {
+      const file = bundle.files[index];
+      if (!file || file.path !== target.path) {
+        throw new Error("The Registry returned upload targets that do not match the files it was told about.");
+      }
+      return uploadArtifactFile(fetchImpl, target, file.bytes);
+    }),
+  );
+
   return { name: published.skill.name, id: published.skill.id, published_at: published.skill.published_at };
 }
 

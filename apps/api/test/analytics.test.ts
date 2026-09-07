@@ -76,17 +76,24 @@ async function publish(context: TestContext, session: Session, name: string): Pr
   const res = await context.app.request(`/api/resources/skill/${name}`, {
     method: "PUT",
     headers: { cookie: session.cookie, "content-type": "application/json" },
-    body: JSON.stringify({ description: "A Skill.", body: "Body.\n" }),
+    body: JSON.stringify({ description: "A Skill.", body: "Body.\n", files: [{ path: "SKILL.md", size: 6 }] }),
   });
   const { skill } = (await res.json()) as { skill: ApiSkill };
   return skill.id;
 }
 
+/** Downloads the assembled zip — the one read path that records an Install (ADR-0032). */
 async function download(context: TestContext, session: Session, skillId: string): Promise<Response> {
-  return context.app.request(`/api/resources/${skillId}/artifact`, {
-    headers: { cookie: session.cookie },
-    redirect: "manual",
-  });
+  return context.app.request(`/api/resources/${skillId}/artifact`, { headers: { cookie: session.cookie } });
+}
+
+/**
+ * Writes an Artifact where the API reads it from, standing in for the
+ * presigned upload a real publisher would make. One file is enough — these
+ * tests are about the Install count, not the Artifact's shape.
+ */
+async function putArtifact(context: TestContext, skillId: string): Promise<void> {
+  await context.storage.put(`resources/${skillId}/SKILL.md`, new TextEncoder().encode("Body.\n"));
 }
 
 async function getSkill(context: TestContext, session: Session, skillId: string): Promise<ApiSkill> {
@@ -159,7 +166,7 @@ describe("Recording installs (ticket 22)", () => {
 
   it("does not reflect a download until skill_analytics is next refreshed", async () => {
     const skillId = await publish(context, writer, "lagging-skill");
-    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+    await putArtifact(context, skillId);
     await refreshInstallCounts(context);
 
     await download(context, reader, skillId);
@@ -173,22 +180,22 @@ describe("Recording installs (ticket 22)", () => {
 
   it("increments by 1 each time the Artifact is downloaded, once refreshed", async () => {
     const skillId = await publish(context, writer, "counted-skill");
-    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+    await putArtifact(context, skillId);
 
     const first = await download(context, reader, skillId);
-    expect(first.status).toBe(302);
+    expect(first.status).toBe(200);
     await refreshInstallCounts(context);
     expect((await getSkill(context, reader, skillId)).installs).toBe(1);
 
     const second = await download(context, reader, skillId);
-    expect(second.status).toBe(302);
+    expect(second.status).toBe(200);
     await refreshInstallCounts(context);
     expect((await getSkill(context, reader, skillId)).installs).toBe(2);
   });
 
   it("accumulates correctly under concurrent downloads — no lost updates", async () => {
     const skillId = await publish(context, writer, "concurrent-skill");
-    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+    await putArtifact(context, skillId);
 
     await Promise.all(Array.from({ length: 10 }, () => download(context, reader, skillId)));
     await refreshInstallCounts(context);
@@ -210,14 +217,14 @@ describe("Recording installs (ticket 22)", () => {
 
   it("survives a republish of the same Skill unchanged", async () => {
     const skillId = await publish(context, writer, "republished-analytics-skill");
-    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+    await putArtifact(context, skillId);
     await download(context, reader, skillId);
     await refreshInstallCounts(context);
 
     const republished = await context.app.request("/api/resources/skill/republished-analytics-skill", {
       method: "PUT",
       headers: { cookie: writer.cookie, "content-type": "application/json" },
-      body: JSON.stringify({ description: "Updated.", body: "New body.\n" }),
+      body: JSON.stringify({ description: "Updated.", body: "New body.\n", files: [{ path: "SKILL.md", size: 6 }] }),
     });
     const { skill } = (await republished.json()) as { skill: ApiSkill };
     expect(skill.installs).toBe(1);
@@ -225,7 +232,7 @@ describe("Recording installs (ticket 22)", () => {
 
   it("records every download as its own event, tagged with source 'web'", async () => {
     const skillId = await publish(context, writer, "event-sourced-skill");
-    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+    await putArtifact(context, skillId);
 
     await download(context, reader, skillId);
     await download(context, reader, skillId);
@@ -312,7 +319,7 @@ describe("Install trend (installs/trend)", () => {
 
   it("counts today's Installs without waiting on refreshInstallCounts", async () => {
     const skillId = await publish(context, writer, "trending-skill");
-    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+    await putArtifact(context, skillId);
 
     await download(context, reader, skillId);
     await download(context, reader, skillId);

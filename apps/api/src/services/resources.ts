@@ -1,6 +1,10 @@
 import {
+  artifactMediaType,
+  buildArtifact,
   isKind,
   KIND_KEYS,
+  validateArtifactManifest,
+  validateArtifactPath,
   validateSkillAllowedTools,
   validateSkillBody,
   validateSkillCompatibility,
@@ -8,7 +12,11 @@ import {
   validateSkillLicense,
   validateSkillMetadata,
   validateSkillName,
+  normalizeSkillPath,
+  type ArtifactFile,
+  type ArtifactFileUpload,
   type Page,
+  type SkillFile,
   type SkillPayload,
 } from "@skill-registry/shared";
 import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
@@ -16,16 +24,23 @@ import type { Database } from "../db/client.js";
 import { isInvalidIdSyntax } from "../db/pg-errors.js";
 import { firstRow } from "../db/rows.js";
 import { resourceDirectory, resourceTags, resources, users, type UserRow } from "../db/schemas/index.js";
-import { ArtifactMissingError, ResourceDeleteFailedError, ResourceNotFoundError, ValidationError } from "../http/errors.js";
+import {
+  ArtifactFileNotFoundError,
+  ArtifactMissingError,
+  ResourceDeleteFailedError,
+  ResourceNotFoundError,
+  ValidationError,
+} from "../http/errors.js";
 import type { ResourceDirectoryQuery } from "../http/resource-directory-query.js";
 import type { Logger } from "../logger.js";
 import type { AnalyticsService, InstallTrendPoint } from "./analytics.js";
 import type { TagsService, TagSummary } from "./tags.js";
 import {
-  ARTIFACT_CONTENT_TYPE,
-  ARTIFACT_DOWNLOAD_EXPIRY_SECONDS,
+  ARTIFACT_UPLOAD_CONTENT_TYPE,
   ARTIFACT_UPLOAD_EXPIRY_SECONDS,
-  artifactKey,
+  artifactFileKey,
+  artifactPathFromKey,
+  artifactPrefix,
 } from "../storage/keys.js";
 import type { StorageAdapter } from "../storage/types.js";
 
@@ -88,11 +103,23 @@ interface SkillDetail extends SkillSummary {
   body: string;
 }
 
+/** `PUT /resources/{kind}/{name}`'s `upload`: one presigned destination per declared file. */
 interface SkillUpload {
-  url: string;
-  method: string;
-  headers: { "content-type": string };
+  files: ArtifactFileUpload[];
   expires_in_seconds: number;
+}
+
+/** `GET /resources/{id}/artifact`: the zip the API assembled, and the name to offer it under. */
+interface ArtifactArchive {
+  name: string;
+  bytes: Uint8Array;
+}
+
+/** `GET /resources/{id}/files/{path}`: one file of an Artifact, ready to serve. */
+interface ArtifactFileContent {
+  path: string;
+  bytes: Uint8Array;
+  contentType: string;
 }
 
 /** `GET /resources/stats`'s shape — see `ResourcesService.getStats`. */
@@ -441,10 +468,16 @@ export class ResourcesService {
    *
    * @remarks
    * Idempotent by `(kind, name)`: publishing an existing Skill replaces its
-   * description and body, and the publisher and published-at become
-   * whoever published it last (ADR-0002, amended by ADR-0026). The row is
-   * written before the Artifact is uploaded, so between the two the Skill
+   * description, body, and Artifact, and the publisher and published-at
+   * become whoever published it last (ADR-0002, amended by ADR-0026). The row
+   * is written before the Artifact is uploaded, so between the two the Skill
    * lists and reads but its Artifact cannot yet be retrieved.
+   *
+   * Replacing the Artifact means the files the new manifest does not name are
+   * deleted *before* the upload URLs are handed back (ADR-0032) — a republish
+   * that drops a file must not leave it behind to be served or zipped. That
+   * puts the window the other way round from the row: for the length of the
+   * upload the Artifact is incomplete rather than stale.
    *
    * `kind` is checked against `KINDS` (`@skill-registry/shared`) before
    * anything else: an unregistered Kind is refused here, naming the field,
@@ -498,6 +531,10 @@ export class ResourcesService {
     const compatibility = validateSkillCompatibility(payload.compatibility) ?? null;
     const metadata = validateSkillMetadata(payload.metadata) ?? null;
     const allowed_tools = validateSkillAllowedTools(payload.allowed_tools) ?? null;
+    // Validated before the row is written, so a bad manifest changes nothing
+    // (ADR-0009). Every path here becomes a storage key under this Resource's
+    // own prefix, which is what `validateArtifactManifest` guarantees.
+    const manifest = validateArtifactManifest(payload.files);
     const skillPayload: SkillPayload = { kind, license, compatibility, metadata, allowed_tools };
 
     // `tags` appears in neither the insert nor the conflict update: it is not a
@@ -537,12 +574,20 @@ export class ResourcesService {
       .returning();
     const row = firstRow(upserted, "Skill upsert");
 
-    const url = await this.storage.presignUpload(artifactKey(row.id), {
-      expiresInSeconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS,
-      contentType: ARTIFACT_CONTENT_TYPE,
-    });
+    await this.pruneArtifactFiles(row.id, manifest);
+    const uploads = await Promise.all(
+      manifest.map(async (file): Promise<ArtifactFileUpload> => ({
+        path: file.path,
+        url: await this.storage.presignUpload(artifactFileKey(row.id, file.path), {
+          expiresInSeconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS,
+          contentType: ARTIFACT_UPLOAD_CONTENT_TYPE,
+        }),
+        method: "PUT",
+        headers: { "content-type": ARTIFACT_UPLOAD_CONTENT_TYPE },
+      })),
+    );
 
-    this.logger.info({ skill_name: name, user_id: publisher.id }, "skill published");
+    this.logger.info({ skill_name: name, user_id: publisher.id, files: manifest.length }, "skill published");
 
     return {
       // Read back rather than assembled from `row` and `publisher`: one place
@@ -553,12 +598,7 @@ export class ResourcesService {
       // ever writes `resource_analytics` (ADR-0012); a brand new Skill simply
       // has neither yet.
       skill: await this.readSkill(eq(resources.id, row.id)),
-      upload: {
-        url,
-        method: "PUT",
-        headers: { "content-type": ARTIFACT_CONTENT_TYPE },
-        expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS,
-      },
+      upload: { files: uploads, expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS },
     };
   }
 
@@ -571,6 +611,10 @@ export class ResourcesService {
    * The storage delete goes first because the API already tolerates a row
    * with no Artifact, but not an Artifact with no row.
    *
+   * An Artifact is a prefix rather than a single object (ADR-0032), so this
+   * lists it and deletes every key under it — including any left by an
+   * earlier publish whose manifest a later one no longer named.
+   *
    * @param id - The Resource's id.
    * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
    * Resource exists by it.
@@ -581,7 +625,8 @@ export class ResourcesService {
     await this.getNameOrThrow(id);
 
     try {
-      await this.storage.delete(artifactKey(id));
+      const objects = await this.storage.list(artifactPrefix(id));
+      await Promise.all(objects.map((object) => this.storage.delete(object.key)));
       await this.db.delete(resources).where(eq(resources.id, id));
     } catch (cause) {
       throw new ResourceDeleteFailedError(cause);
@@ -591,42 +636,171 @@ export class ResourcesService {
   }
 
   /**
-   * Presigns a short-lived URL to download a Resource's Artifact.
+   * Deletes whatever of a Resource's Artifact the given manifest does not
+   * name — the files an earlier publish left behind.
    *
    * @remarks
-   * Unauthenticated, like every other read (ADR-0013). Counts as one Install
-   * (ADR-0012) — the only point the API can observe a download, since the
-   * Artifact transfers directly from storage. Recorded only once the Artifact
-   * is confirmed to exist, so a 404 never inflates the count.
+   * A file present in both manifests is left alone: the publisher's upload
+   * overwrites it. Only the ones being dropped are deleted, so a republish
+   * that changes nothing touches nothing.
+   */
+  private async pruneArtifactFiles(id: string, manifest: readonly ArtifactFile[]): Promise<void> {
+    const keep = new Set(manifest.map((file) => artifactFileKey(id, file.path)));
+    const objects = await this.storage.list(artifactPrefix(id));
+    await Promise.all(
+      objects.filter((object) => !keep.has(object.key)).map((object) => this.storage.delete(object.key)),
+    );
+  }
+
+  /**
+   * Every file a Resource's Artifact holds, sorted by path.
+   *
+   * @remarks
+   * Read from storage rather than from the manifest the publisher declared,
+   * because storage is what a reader will actually get (ADR-0032). The two
+   * agree once an upload has finished and disagree while one is in flight,
+   * and this reports the second state honestly instead of promising files
+   * that are not there yet.
+   *
+   * Unauthenticated, like every other read (ADR-0013), and not an Install:
+   * listing what a Skill contains is not obtaining it (ADR-0028).
    *
    * @param id - The Resource's id.
-   * @returns `string`
+   * @returns One entry per stored file, with its path and byte size.
    * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
    * Resource exists by it.
-   * @throws ArtifactMissingError if the Resource's Artifact was never
-   * uploaded.
+   * @throws ArtifactMissingError if the Resource's Artifact holds no files —
+   * either it was never uploaded, or the Kind has none (ADR-0027).
    * @example
    * ```ts
-   * const url = await resourcesService.getArtifactDownloadUrl(id);
+   * const files = await resourcesService.listArtifactFiles(id);
+   * // -> [{ path: "SKILL.md", size: 812 }, { path: "references/java.md", size: 4096 }]
    * ```
    */
-  async getArtifactDownloadUrl(id: string): Promise<string> {
+  async listArtifactFiles(id: string): Promise<ArtifactFile[]> {
+    await this.getNameOrThrow(id);
+    return this.readManifest(id);
+  }
+
+  /**
+   * One file of a Resource's Artifact, with the `content-type` to serve it
+   * under.
+   *
+   * @remarks
+   * The read path the interface's file preview is built on. `rawPath` is
+   * normalised and then held to `validateArtifactPath` before it becomes a
+   * storage key, so a caller cannot walk out of the Resource's own prefix
+   * (ADR-0032) — the same rule publishing applies to a declared manifest.
+   *
+   * The `content-type` comes from the path, since the API has never read
+   * these bytes and has no sniffed type to prefer (ADR-0001). Unauthenticated
+   * (ADR-0013), and not an Install: previewing a file is not obtaining the
+   * Resource (ADR-0028).
+   *
+   * @param id - The Resource's id.
+   * @param rawPath - The file's path within the Artifact, as the caller gave
+   * it and not yet known to be safe.
+   * @returns The file's normalised path, its bytes, and its `content-type`.
+   * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
+   * Resource exists by it.
+   * @throws SkillValidationError if `rawPath` would address an object outside
+   * the Resource's prefix.
+   * @throws ArtifactFileNotFoundError if the Artifact holds no file there.
+   * @example
+   * ```ts
+   * const file = await resourcesService.readArtifactFile(id, "references/java.md");
+   * ```
+   */
+  async readArtifactFile(id: string, rawPath: string): Promise<ArtifactFileContent> {
+    await this.getNameOrThrow(id);
+
+    const path = normalizeSkillPath(rawPath);
+    validateArtifactPath(path);
+
+    const bytes = await this.storage.get(artifactFileKey(id, path));
+    if (!bytes) throw new ArtifactFileNotFoundError(path);
+
+    return { path, bytes, contentType: artifactMediaType(path).contentType };
+  }
+
+  /**
+   * Assembles a Resource's Artifact into a zip and records the Install.
+   *
+   * @remarks
+   * An Artifact is stored as its files (ADR-0032); a zip is the
+   * representation `skillreg add`, the web Download control, and a
+   * marketplace `archive` source all want, so the API builds one on demand.
+   * This is the read path where Artifact bytes do pass through the API, which
+   * is what ADR-0032 amends ADR-0001 to allow — uploading still bypasses it
+   * entirely.
+   *
+   * Nothing is cached: the zip is rebuilt per request, which is the price of
+   * having exactly one stored representation to keep correct. Bounded by the
+   * same 25 MiB of files a publish may declare.
+   *
+   * Unauthenticated, like every other read (ADR-0013). Counts as exactly one
+   * Install (ADR-0012, ADR-0028), recorded only once every file is in hand so
+   * a failure never inflates the count.
+   *
+   * @param id - The Resource's id.
+   * @returns The Resource's name, for the download filename, and the zip.
+   * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
+   * Resource exists by it.
+   * @throws ArtifactMissingError if the Resource's Artifact holds no files,
+   * or a file the listing named has since gone.
+   * @throws SkillValidationError if the stored files exceed what an Artifact
+   * may hold — reachable only for an Artifact whose uploaded bytes overran
+   * the sizes its publisher declared, which is the drift ADR-0001 accepts.
+   * @example
+   * ```ts
+   * const { name, bytes } = await resourcesService.buildArtifactArchive(id);
+   * ```
+   */
+  async buildArtifactArchive(id: string): Promise<ArtifactArchive> {
     const name = await this.getNameOrThrow(id);
+    const manifest = await this.readManifest(id);
 
-    const key = artifactKey(id);
-    if (!(await this.storage.exists(key))) throw new ArtifactMissingError();
+    const files = await Promise.all(
+      manifest.map(async (file): Promise<SkillFile> => {
+        const bytes = await this.storage.get(artifactFileKey(id, file.path));
+        // Between the listing and the read — a delete, or a republish that
+        // dropped this file. Refusing beats serving a zip missing a file the
+        // caller was told to expect.
+        if (!bytes) throw new ArtifactMissingError();
+        return { path: file.path, bytes };
+      }),
+    );
 
+    const bytes = buildArtifact(files);
     await this.analytics.recordInstall(id, "web");
 
-    // The storage key is the Resource's id (docs/data-model.md), so without
-    // this the browser's save dialog would default to `<uuid>.zip` — naming
-    // the download after the key rather than the thing a person asked for.
-    // `name` is already constrained to SKILL_NAME_PATTERN, so it's safe to
-    // drop into the header unescaped.
-    return this.storage.presignDownload(key, {
-      expiresInSeconds: ARTIFACT_DOWNLOAD_EXPIRY_SECONDS,
-      contentDisposition: `attachment; filename="${name}.zip"`,
-    });
+    return { name, bytes };
+  }
+
+  /**
+   * The Artifact's files as storage holds them, sorted by path.
+   *
+   * @throws ArtifactMissingError if the prefix is empty — the shared answer
+   * for "this Resource has no Artifact yet", whether it was never uploaded or
+   * the upload is still in flight.
+   */
+  private async readManifest(id: string): Promise<ArtifactFile[]> {
+    const objects = await this.storage.list(artifactPrefix(id));
+
+    const files = objects
+      .flatMap((object) => {
+        const path = artifactPathFromKey(id, object.key);
+        return path ? [{ path, size: object.size }] : [];
+      })
+      // Code-unit order, not `localeCompare`: a listing has to be the same
+      // everywhere, and locale collation both varies by runtime and folds
+      // case — which sorts `SKILL.md` into the middle of the lowercase
+      // directory names instead of at the top, where the file that defines
+      // the Skill belongs.
+      .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+
+    if (files.length === 0) throw new ArtifactMissingError();
+    return files;
   }
 
   /**

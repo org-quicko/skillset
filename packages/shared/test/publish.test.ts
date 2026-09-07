@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { unzipSync } from "fflate";
 import {
   ARTIFACT_MAX_ENTRIES,
   ARTIFACT_MAX_UNCOMPRESSED_BYTES,
   buildSkillBundle,
   SkillValidationError,
+  type SkillBundle,
   type SkillFile,
   type SkillRule,
 } from "../src/index.js";
@@ -34,15 +34,22 @@ function ruleFor(files: SkillFile[]): SkillRule | "no error" {
   }
 }
 
-function entryNames(artifact: Uint8Array): string[] {
-  return Object.keys(unzipSync(artifact)).sort();
+/**
+ * The paths a bundle would upload. Read off the declared manifest rather than
+ * the files array so it also asserts that the two agree — they are what the
+ * publish response's upload targets are paired against, index for index.
+ */
+function entryNames(bundle: SkillBundle): string[] {
+  expect(bundle.files.map((file) => file.path)).toEqual(bundle.request.files.map((file) => file.path));
+  return bundle.request.files.map((file) => file.path).sort();
 }
 
 /**
  * Seam 2 — the shared publishing pipeline (spec, "Testing Decisions"): pure
- * functions, files in and validated metadata plus an Artifact out. Because
- * the API never inspects an Artifact (ADR-0001), this is the only place the
- * structural rules are covered at all.
+ * functions, files in and validated metadata plus the Artifact's files out.
+ * The API validates the manifest those files are declared as (ADR-0032) but
+ * still never reads their bytes (ADR-0001), so this is the only place the
+ * structural rules are covered against real files.
  */
 describe("Skill validation (ticket 03)", () => {
   const nameCases: Array<{ name: string; expected: SkillRule | "no error" }> = [
@@ -112,7 +119,7 @@ describe("Skill validation (ticket 03)", () => {
 describe("Artifact layout (ticket 03)", () => {
   it("archives the Skill's contents at the Artifact's root", () => {
     const bundle = buildSkillBundle(validSkill([file("references/style.md", "Style guide")]));
-    expect(entryNames(bundle.artifact)).toEqual(["SKILL.md", "references/style.md"]);
+    expect(entryNames(bundle)).toEqual(["SKILL.md", "references/style.md"]);
   });
 
   it("strips a single wrapping directory rather than archiving it", () => {
@@ -120,7 +127,7 @@ describe("Artifact layout (ticket 03)", () => {
       file("code-review/SKILL.md", skillMd("name: code-review\ndescription: Reviews code.")),
       file("code-review/references/style.md", "Style guide"),
     ]);
-    expect(entryNames(bundle.artifact)).toEqual(["SKILL.md", "references/style.md"]);
+    expect(entryNames(bundle)).toEqual(["SKILL.md", "references/style.md"]);
   });
 
   it("rejects a layout holding several Skills rather than guessing which one to publish", () => {
@@ -169,6 +176,7 @@ describe("Artifact layout (ticket 03)", () => {
       compatibility: "Claude Code",
       allowed_tools: "Read, Grep",
       metadata: { team: "platform" },
+      files: [{ path: "SKILL.md", size: bundle.files[0]!.bytes.byteLength }],
     });
   });
 
@@ -176,8 +184,9 @@ describe("Artifact layout (ticket 03)", () => {
     const bundle = buildSkillBundle(validSkill());
 
     // `name` is the path segment, so repeating it in the body would give one
-    // value two homes; the four optional fields are simply absent.
-    expect(Object.keys(bundle.request).sort()).toEqual(["body", "description"]);
+    // value two homes; the four optional fields are simply absent. `files` is
+    // always there — an Artifact with no manifest could not be uploaded.
+    expect(Object.keys(bundle.request).sort()).toEqual(["body", "description", "files"]);
     expect("name" in bundle.request).toBe(false);
   });
 });
@@ -199,7 +208,7 @@ describe("Artifact exclusions and limits (ticket 03)", () => {
   for (const path of excluded) {
     it(`excludes ${path} from the Artifact`, () => {
       const bundle = buildSkillBundle(validSkill([file(path, "junk")]));
-      expect(entryNames(bundle.artifact)).toEqual(["SKILL.md"]);
+      expect(entryNames(bundle)).toEqual(["SKILL.md"]);
     });
   }
 
@@ -207,7 +216,7 @@ describe("Artifact exclusions and limits (ticket 03)", () => {
     const bundle = buildSkillBundle(
       validSkill([file("references/style.md", "Style"), file("scripts/run.sh", "echo hi")]),
     );
-    expect(entryNames(bundle.artifact)).toEqual(["SKILL.md", "references/style.md", "scripts/run.sh"]);
+    expect(entryNames(bundle)).toEqual(["SKILL.md", "references/style.md", "scripts/run.sh"]);
   });
 
   it(`rejects more than ${ARTIFACT_MAX_ENTRIES} entries`, () => {

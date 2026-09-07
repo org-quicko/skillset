@@ -15,6 +15,7 @@ export * from "./tag-rules.js";
 export * from "./tag.js";
 export * from "./frontmatter.js";
 export * from "./artifact.js";
+export * from "./artifact-media.js";
 export * from "./publish.js";
 export * from "./git-provider-config.js";
 export * from "./git-provider-oauth.js";

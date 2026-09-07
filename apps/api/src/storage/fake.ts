@@ -1,4 +1,4 @@
-import type { PresignOptions, StorageAdapter } from "./types.js";
+import type { PresignOptions, StorageAdapter, StorageObject } from "./types.js";
 
 /**
  * In-memory StorageAdapter for tests. Presigned URLs are deterministic
@@ -24,8 +24,10 @@ export class FakeStorageAdapter implements StorageAdapter {
     this.objects.delete(key);
   }
 
-  async list(prefix: string): Promise<string[]> {
-    return [...this.objects.keys()].filter((key) => key.startsWith(prefix));
+  async list(prefix: string): Promise<StorageObject[]> {
+    return [...this.objects.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, body]) => ({ key, size: body.byteLength }));
   }
 
   async presignUpload(key: string, options?: PresignOptions): Promise<string> {

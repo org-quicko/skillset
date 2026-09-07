@@ -97,9 +97,9 @@ export async function registryFetch<T>(
  * @throws ApiError when the Registry answered with a non-2xx status.
  *
  * @remarks
- * The server 302s to a presigned storage URL; `fetch` follows redirects by default, and
- * strips `Authorization` on a cross-origin redirect (standard fetch/undici behaviour), so
- * the presigned request never sees our Bearer Token.
+ * The Registry serves the bytes itself — for an Artifact, a zip it assembles from the
+ * files it stores (ADR-0032) — so this is one request to one origin, authenticated with
+ * our own Bearer Token.
  *
  * @example
  * ```ts
@@ -112,23 +112,25 @@ export async function downloadBinary(client: RegistryClient, path: string): Prom
 }
 
 /**
- * Uploads Artifact bytes straight to storage, bypassing the API entirely (ADR-0001) —
- * hence no `/api` prefix and no auth header, since the URL is already presigned.
+ * Uploads one file of an Artifact straight to storage, bypassing the API entirely
+ * (ADR-0001) — hence no `/api` prefix and no auth header, since the URL is already
+ * presigned.
  *
  * @param fetchImpl - The fetch implementation to use.
- * @param target - The presigned destination, as the publish response returned it.
- * @param bytes - The Artifact.
+ * @param target - The presigned destination for this file, as the publish response
+ * returned it.
+ * @param bytes - The file's bytes.
  * @throws RegistryUnreachableError when storage never got an answer.
- * @throws Error when storage answered with a non-2xx status.
+ * @throws Error naming the file when storage answered with a non-2xx status.
  *
  * @example
  * ```ts
- * await uploadArtifact(fetch, published.upload, bundle.artifact);
+ * await uploadArtifactFile(fetch, published.upload.files[0], bundle.files[0].bytes);
  * ```
  */
-export async function uploadArtifact(
+export async function uploadArtifactFile(
   fetchImpl: typeof fetch,
-  target: { url: string; method: "PUT"; headers: Record<string, string> },
+  target: { path: string; url: string; method: "PUT"; headers: Record<string, string> },
   bytes: Uint8Array,
 ): Promise<void> {
   let res: Response;
@@ -138,6 +140,6 @@ export async function uploadArtifact(
     throw new RegistryUnreachableError(target.url, error);
   }
   if (!res.ok) {
-    throw new Error(`Uploading the Artifact failed with status ${res.status}.`);
+    throw new Error(`Uploading "${target.path}" failed with status ${res.status}.`);
   }
 }

@@ -174,15 +174,27 @@ is: a display name the Resource list and full-text search (below) can use withou
 `users`, and one that doesn't change if that User later renames themselves — a republish is what
 refreshes it, the same full-replace semantics every other publish-time field has.
 
-The Artifact's storage key is **derived** from the Resource's `id` rather than stored (ADR-0026;
-ticket 2 moved it off `name`, which would otherwise make a future Kind whose name contains a slash,
-like an MCP Server, create a nested object path). Existing objects under `skills/<name>.zip` were
-not migrated — nothing was deployed. There is no size or digest column: the API never sees the
-bytes, so it has nothing truthful to record.
+The Artifact's storage keys are **derived** from the Resource's `id` rather than stored (ADR-0026;
+ticket 2 moved them off `name`, which would otherwise make a future Kind whose name contains a
+slash, like an MCP Server, create a nested object path). An Artifact is a **prefix**,
+`resources/<id>/`, holding one object per file at the path the Skill's own folder had it at
+(ADR-0032) — not one zip. Objects at the old `resources/<id>.zip` were not migrated; those Skills
+were re-published.
+
+**Nothing about the Artifact is a column, including the list of files it holds.** Storage is the
+source of truth for that: `GET /resources/{id}/files` lists the prefix rather than reading back
+the manifest the publisher declared, so a publish whose per-file uploads only partly finished
+reports what is actually there. Keeping the manifest in `payload` as well would make a second
+copy that a failed upload silently falsifies. There is still no size or digest column either: the
+API never sees the uploaded bytes, so it has nothing truthful to record (ADR-0001, as amended by
+ADR-0032 for the read path only).
 
 There is no status column and no soft delete. A row exists from the moment publishing starts,
-before its Artifact has been uploaded — the accepted consequence being that an abandoned
+before any of its Artifact has been uploaded — the accepted consequence being that an abandoned
 publish leaves a Resource that lists and reads but fails to download until an Admin removes it.
+Since an Artifact is now uploaded a file at a time, that abandonment has a partial form too: a
+row whose prefix holds some of its files. It reads the same way — the listing shows what arrived,
+and the zip download refuses.
 
 The generated column and its index — folding in `published_by_name` (ticket 23) alongside `name`
 and `description`, so a search term matching only a Resource's publisher still returns it:
@@ -271,9 +283,11 @@ this table (spec: `.scratch/generic-resources/spec.md`). It has two values: `web
 a Kind's Artifact through the API) or `cli` (`skillreg add`, ticket 09). Downloading a Skill's
 Artifact appends one row here today, via an internal `recordInstall` function (not a public
 endpoint — nothing lets a client inflate this directly for a Kind with an Artifact), called once
-the Artifact is confirmed to exist and right before the presigned download URL is issued. The
-write is best-effort: a failure is logged and swallowed, never allowed to fail the download
-itself.
+every file of the Artifact is in hand and the zip has been assembled (ADR-0032) — so a download
+that fails part-way never inflates the count. Browsing an Artifact's files, or reading one of
+them, records nothing: listing or previewing what a Skill contains is not obtaining it
+(ADR-0028). The write is best-effort: a failure is logged and swallowed, never allowed to fail
+the download itself.
 
 There is no `updated_at`. Every other table in this schema carries the pair by convention, but a
 row here is never touched again after insert — a column that could only ever equal `created_at`
@@ -630,4 +644,6 @@ catch them:
 - **Role permissions** — readers cannot publish, writers cannot delete a Skill or manage
   Users.
 - **Write ordering.** The row is created before the Artifact is uploaded, and the Skill list
-  is refreshed only once the upload completes.
+  is refreshed only once every file's upload completes. A republish deletes the files its new
+  manifest no longer names *before* handing back upload URLs, so a dropped file is never left
+  servable (ADR-0032).

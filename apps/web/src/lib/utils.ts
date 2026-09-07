@@ -40,3 +40,17 @@ export function formatRelativeTime(value: string | null): string {
   }
   return "just now"
 }
+
+const BYTE_UNITS = ["B", "KB", "MB"]
+
+/** A file size in the shape a file browser shows it — "812 B", "4.1 KB", "1.2 MB". */
+export function formatBytes(bytes: number): string {
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  // Whole bytes read oddly with a decimal place; anything scaled reads oddly without one.
+  return `${unit === 0 ? value : value.toFixed(1)} ${BYTE_UNITS[unit]}`
+}

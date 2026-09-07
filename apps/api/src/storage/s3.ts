@@ -1,4 +1,4 @@
-import type { PresignOptions, StorageAdapter } from "./types.js";
+import type { PresignOptions, StorageAdapter, StorageObject } from "./types.js";
 
 export interface S3Settings {
   bucket: string;
@@ -21,10 +21,10 @@ export interface S3Settings {
 const DEFAULT_EXPIRY_SECONDS = 60;
 
 /**
- * The S3 StorageAdapter, built on Bun's own S3 client — no AWS SDK. Artifact
- * bytes never pass through the API (ADR-0001), so the two presigners are what
- * request flows actually reach for; the rest of the contract is implemented
- * because the contract is the target a second implementation aims at.
+ * The S3 StorageAdapter, built on Bun's own S3 client — no AWS SDK. Uploaded
+ * Artifact bytes never pass through the API (ADR-0001), so `presignUpload` is
+ * what publishing reaches for; reads go through `get` and `list`, since the
+ * API assembles the zip and serves file previews itself (ADR-0032).
  */
 export class S3StorageAdapter implements StorageAdapter {
   private readonly client: Bun.S3Client;
@@ -59,8 +59,8 @@ export class S3StorageAdapter implements StorageAdapter {
     await this.client.delete(key);
   }
 
-  async list(prefix: string): Promise<string[]> {
-    const keys: string[] = [];
+  async list(prefix: string): Promise<StorageObject[]> {
+    const objects: StorageObject[] = [];
     let continuationToken: string | undefined;
 
     // S3 pages its listing, so a caller asking for a prefix gets every key
@@ -68,12 +68,15 @@ export class S3StorageAdapter implements StorageAdapter {
     do {
       const page = await this.client.list({ prefix, continuationToken });
       for (const object of page.contents ?? []) {
-        keys.push(object.key);
+        // S3 types `size` optional; a listing that omits it is reported as 0
+        // rather than guessed at — the manifest's sizes are a display detail,
+        // and `get` is what actually reads the bytes.
+        objects.push({ key: object.key, size: object.size ?? 0 });
       }
       continuationToken = page.isTruncated ? page.nextContinuationToken : undefined;
     } while (continuationToken);
 
-    return keys;
+    return objects;
   }
 
   async presignUpload(key: string, options?: PresignOptions): Promise<string> {

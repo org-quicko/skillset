@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { unzipSync } from "fflate";
 import { runPublish, type PublishDeps, type PublishOutcome, type PublishResult } from "../src/commands/publish.js";
 import { writeConfig } from "../src/config.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
@@ -58,13 +57,39 @@ function fakePublished() {
       tags: [],
       installs: 0,
     },
-    upload: {
-      url: "https://storage.example/bucket/code-review.zip?sig=abc",
-      method: "PUT",
-      headers: { "content-type": "application/zip" },
-      expires_in_seconds: 60,
-    },
   };
+}
+
+const STORAGE_BASE = "https://storage.example/bucket";
+
+/**
+ * The `upload` a Registry answers a publish with: one presigned destination
+ * per file of the manifest the request declared, in that same order
+ * (ADR-0032). Derived from the request body rather than hard-coded, because
+ * that pairing is exactly what the CLI relies on — a stub that invented its
+ * own list would not exercise it.
+ */
+function uploadFor(requestBody: unknown) {
+  const { files } = JSON.parse(String(requestBody)) as { files: { path: string }[] };
+  return {
+    files: files.map((file) => ({
+      path: file.path,
+      url: `${STORAGE_BASE}/${file.path}?sig=abc`,
+      method: "PUT" as const,
+      headers: { "content-type": "application/octet-stream" },
+    })),
+    expires_in_seconds: 60,
+  };
+}
+
+/** Whether a URL is one of the presigned destinations `uploadFor` hands out. */
+function isStorageUrl(url: string): boolean {
+  return url.startsWith(`${STORAGE_BASE}/`);
+}
+
+/** The Artifact path a presigned destination writes to. */
+function storagePath(url: string): string {
+  return url.slice(`${STORAGE_BASE}/`.length, url.indexOf("?"));
 }
 
 describe("runPublish", () => {
@@ -94,7 +119,7 @@ describe("runPublish", () => {
     }
   });
 
-  it("publishes: PUTs metadata, then PUTs the Artifact to the presigned URL, excluding node_modules", async () => {
+  it("publishes: PUTs metadata, then PUTs each file to its own presigned URL, excluding node_modules", async () => {
     const skillDir = await makeSkillDir(async (dir) => {
       await mkdir(join(dir, "node_modules", "left-pad"), { recursive: true });
       await writeFile(join(dir, "node_modules", "left-pad", "index.js"), "module.exports = {};");
@@ -107,15 +132,15 @@ describe("runPublish", () => {
       await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
 
       const published = fakePublished();
-      let uploadedBody: Uint8Array | undefined;
+      const uploaded = new Map<string, string>();
       const { fetch: fetchImpl, calls } = stubFetch((url, init) => {
         if (url === "https://registry.example/api/resources/skill/code-review") {
           const body = JSON.parse(String(init?.body));
           expect(body).toMatchObject({ description: "Reviews code.", body: "How to do the thing.\n" });
-          return jsonResponse(200, published);
+          return jsonResponse(200, { ...published, upload: uploadFor(init?.body) });
         }
-        if (url === "https://storage.example/bucket/code-review.zip?sig=abc") {
-          uploadedBody = init?.body as Uint8Array;
+        if (isStorageUrl(url)) {
+          uploaded.set(storagePath(url), new TextDecoder().decode(init?.body as Uint8Array));
           return new Response(null, { status: 200 });
         }
         throw new Error(`Unexpected request to ${url}`);
@@ -124,12 +149,15 @@ describe("runPublish", () => {
       const result = asResult(await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd: skillDir }), {}));
 
       expect(result).toEqual({ name: "code-review", id: "skill-1", published_at: published.skill.published_at });
-      expect(calls).toHaveLength(2);
+      // The metadata PUT, then one PUT per file — and nothing for the excluded
+      // `node_modules` tree, which is what makes the count meaningful.
+      expect(calls).toHaveLength(3);
       expect(calls[0]?.init?.headers).toMatchObject({ authorization: "Bearer writer-token" });
-      expect(calls[1]?.init?.headers).toMatchObject({ "content-type": "application/zip" });
 
-      const entries = Object.keys(unzipSync(uploadedBody!)).sort();
-      expect(entries).toEqual(["SKILL.md", "scripts/helper.sh"]);
+      expect([...uploaded.keys()].sort()).toEqual(["SKILL.md", "scripts/helper.sh"]);
+      // Each file's own bytes reach its own destination, not merely the right
+      // number of requests.
+      expect(uploaded.get("scripts/helper.sh")).toBe("#!/bin/sh\necho hi\n");
     } finally {
       await rm(skillDir, { recursive: true, force: true });
       await rm(configDir, { recursive: true, force: true });
@@ -174,12 +202,10 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
       if (match && init?.method === "PUT") {
         return jsonResponse(200, {
           skill: { ...fakePublished().skill, name: match, id: `id-${match}` },
-          upload: { url: `https://storage.example/${match}.zip`, method: "PUT", headers: {}, expires_in_seconds: 60 },
+          upload: uploadFor(init?.body),
         });
       }
-      if (names.some((name) => url === `https://storage.example/${name}.zip`)) {
-        return new Response(null, { status: 200 });
-      }
+      if (isStorageUrl(url)) return new Response(null, { status: 200 });
       throw new Error(`Unexpected request to ${url}`);
     });
   }
@@ -200,7 +226,15 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
           const result = asResult(await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd: root }), {}));
 
           expect(result.name).toBe("code-review");
-          expect(calls).toHaveLength(2);
+          // One publish, not two. Counted by metadata PUTs rather than by
+          // total requests: an Artifact is uploaded a file at a time
+          // (ADR-0032), so the request count now tracks how many files the
+          // root Skill happens to hold rather than how many Skills were
+          // published.
+          const publishes = calls.filter((call) => call.url.startsWith("https://registry.example/api/resources/"));
+          expect(publishes.map((call) => call.url)).toEqual([
+            "https://registry.example/api/resources/skill/code-review",
+          ]);
         } finally {
           await rm(configDir, { recursive: true, force: true });
         }
@@ -377,10 +411,10 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
             if (url === "https://registry.example/api/resources/skill/pdf-tools" && init?.method === "PUT") {
               return jsonResponse(200, {
                 skill: { ...fakePublished().skill, name: "pdf-tools", id: "id-pdf-tools" },
-                upload: { url: "https://storage.example/pdf-tools.zip", method: "PUT", headers: {}, expires_in_seconds: 60 },
+                upload: uploadFor(init?.body),
               });
             }
-            if (url === "https://storage.example/pdf-tools.zip") return new Response(null, { status: 200 });
+            if (isStorageUrl(url)) return new Response(null, { status: 200 });
             throw new Error(`Unexpected request to ${url}`);
           });
 

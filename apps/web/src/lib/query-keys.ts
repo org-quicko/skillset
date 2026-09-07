@@ -63,6 +63,19 @@ export function resourceInstallTrendQueryKey(id: string) {
   return ["resources", "installs-trend", id] as const;
 }
 
+/** Every file a Resource's Artifact holds — keyed by id, like the route it reads. */
+export function resourceArtifactFilesQueryKey(id: string) {
+  return ["resources", "artifact-files", id] as const;
+}
+
+/**
+ * One file of a Resource's Artifact, cached per path so switching between
+ * files in the preview never refetches one already read.
+ */
+export function resourceArtifactFileQueryKey(id: string, path: string) {
+  return ["resources", "artifact-file", id, path] as const;
+}
+
 /** The whole Tag catalog — what a tag editor's autocomplete filters against. */
 export const tagsListQueryKey = ["tags", "list"] as const;
 

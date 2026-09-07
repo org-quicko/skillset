@@ -54,7 +54,10 @@ export type SkillRule =
   | "entry_absolute_path"
   | "entry_backslash"
   | "entry_null_byte"
-  | "entry_symlink";
+  | "entry_symlink"
+  | "entry_not_a_file"
+  | "entry_duplicate"
+  | "manifest_invalid";
 
 /**
  * Thrown when a Skill fails one of the shared validation rules. Carries the

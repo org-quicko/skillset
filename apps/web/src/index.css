@@ -93,6 +93,10 @@
     --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.705 0.015 286.067);
+    /* The scrollbar thumb, a translucent tint of the foreground so it reads
+       as part of whatever surface it sits on rather than as browser chrome. */
+    --scrollbar-thumb: oklch(0.141 0.005 285.823 / 0.2);
+    --scrollbar-thumb-hover: oklch(0.141 0.005 285.823 / 0.36);
 }
 
 .dark {
@@ -129,6 +133,8 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.552 0.016 285.938);
+    --scrollbar-thumb: oklch(1 0 0 / 0.18);
+    --scrollbar-thumb-hover: oklch(1 0 0 / 0.32);
 }
 
 /* Scrolls, but draws no scrollbar. For a panel whose scrolling is already
@@ -146,6 +152,29 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* Firefox has no width of its own to give — `thin` is the nearest it
+       offers to the 8px below. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+  /* A thin thumb over a transparent track, so a scrolling panel keeps its own
+     background all the way to its edge and nothing shifts when the scrollbar
+     appears. The `scrollbar-hidden` utility still overrides this, being a
+     utility. */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+    }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 9999px;
+    }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
     }
   body {
     @apply bg-background text-foreground antialiased;
