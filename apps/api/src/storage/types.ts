@@ -1,6 +1,7 @@
 export interface PresignOptions {
   expiresInSeconds?: number;
   contentType?: string;
+  contentDisposition?: string;
 }
 
 /**

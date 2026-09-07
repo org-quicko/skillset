@@ -3,6 +3,11 @@
 > **Amended by ADR-0029.** All of this is Skill-only. `add` for an MCP Server merges a
 > project's `.mcp.json`, names no Agent, and never touches `.agents/skills`.
 
+> **Amended by ADR-0031.** The Agent table is no longer vendored wholesale from
+> `vercel-labs/skills` — it is hand-curated and independently verified. Everything below about
+> *how* an install lands (the canonical directory, the symlink, the fallback to a copy) is
+> unaffected; only the table's source and size changed.
+
 `skillreg add` writes every Skill's files to the canonical `.agents/skills/<name>` directory,
 and for an Agent that reads somewhere else — `claude-code` at `.claude/skills`, `pi` at
 `.pi/skills` — it creates a symlink there pointing back at the canonical copy. The Agent list

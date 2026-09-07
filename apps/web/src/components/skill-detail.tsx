@@ -1,16 +1,24 @@
 import type { Publisher, Skill } from "@skill-registry/shared";
-import { DownloadIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
+import { InstallTrendChart } from "@/components/install-trend-chart";
 import { Panel } from "@/components/panel";
 import { Reveal } from "@/components/reveal";
 import { SkillInstallCard } from "@/components/skill-install-card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useDownloadSkillArtifact, useSkill } from "@/hooks/use-skills";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useDownloadSkillArtifact, useSkill, useSkillInstallTrend } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
 import { renderSkillBody } from "@/lib/render-skill-body";
 import { formatDate } from "@/lib/utils";
@@ -97,10 +105,11 @@ function FrontmatterFields({ skill }: { skill: Skill }) {
 }
 
 /**
- * A Skill's page: breadcrumb and title, then a two-column layout — the
- * install command, description, and rendered `SKILL.md` on the left; installs,
- * publisher details, and the download/manage actions on the right. Fetches
- * the Skill once; the widgets below take it as a prop.
+ * A Skill's page: breadcrumb, then title with download and manage actions
+ * aligned beside it, then a two-column layout — the install command,
+ * description, and rendered `SKILL.md` on the left; installs and publisher
+ * details on the right. Fetches the Skill once; the widgets below take it
+ * as a prop.
  */
 export function SkillDetail({
   name,
@@ -118,6 +127,7 @@ export function SkillDetail({
   onDeleted: () => void;
 }) {
   const skill = useSkill(name);
+  const trend = useSkillInstallTrend(skill.data?.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editTagsOpen, setEditTagsOpen] = useState(false);
   const download = useDownloadSkillArtifact();
@@ -141,9 +151,49 @@ export function SkillDetail({
         </nav>
       </Reveal>
 
-      <Reveal delayMs={50} className="text-3xl font-medium tracking-tight text-balance">
-        <h1>{data.name}</h1>
+      <Reveal delayMs={50} className="flex items-center justify-between gap-3">
+        <h1 className="text-3xl font-medium tracking-tight text-balance">{data.name}</h1>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Download skill"
+                disabled={download.isPending}
+                onClick={() => download.mutate({ id: data.id })}
+              >
+                <DownloadIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{download.isPending ? "Downloading…" : "Download skill"}</TooltipContent>
+          </Tooltip>
+          {(canEditTags || canDelete) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="More actions">
+                  <EllipsisIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {canEditTags && (
+                  <DropdownMenuItem onClick={() => setEditTagsOpen(true)}>
+                    <PencilIcon />
+                    Edit tags
+                  </DropdownMenuItem>
+                )}
+                {canDelete && (
+                  <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
+                    <Trash2Icon />
+                    Delete
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </Reveal>
+      {download.isError && <p className="text-sm text-destructive">{apiErrorMessage(download.error)}</p>}
 
       {data.tags.length > 0 && (
         <Reveal delayMs={100} className="flex flex-wrap items-center gap-1.5">
@@ -173,11 +223,19 @@ export function SkillDetail({
         </div>
 
         <div className="flex flex-col gap-4">
-          <Panel title="Installs">
-            <span className="text-[28px] font-medium tabular-nums">{data.installs.toLocaleString()}</span>
-            <span className="mt-1 block text-xs text-muted-foreground">
+          <Panel title="Analytics">
+            <span className="text-[44px] leading-none font-semibold">{data.installs.toLocaleString()}</span>
+            <span className="mt-1.5 block text-xs text-muted-foreground">
               {data.installs === 1 ? "install" : "installs"} recorded
             </span>
+            {trend.data && trend.data.points.length > 0 && (
+              <div className="mt-3.5 border-t pt-3.5">
+                <InstallTrendChart points={trend.data.points} />
+                <span className="mt-1.5 block text-[11px] text-muted-foreground">
+                  Last {trend.data.points.length} days
+                </span>
+              </div>
+            )}
           </Panel>
 
           <Panel title="Details" contentClassName="p-0">
@@ -191,31 +249,6 @@ export function SkillDetail({
             </DetailRow>
             <DetailRow label="Published">{formatDate(data.published_at)}</DetailRow>
           </Panel>
-
-          <div className="flex flex-col gap-2">
-            <Button
-              className="w-full"
-              disabled={download.isPending}
-              onClick={() => download.mutate({ id: data.id })}
-            >
-              <DownloadIcon />
-              {download.isPending ? "Downloading…" : "Download skill"}
-            </Button>
-            {download.isError && (
-              <p className="text-sm text-destructive">{apiErrorMessage(download.error)}</p>
-            )}
-            {canEditTags && (
-              <Button variant="outline" className="w-full" onClick={() => setEditTagsOpen(true)}>
-                Edit tags
-              </Button>
-            )}
-            {canDelete && (
-              <Button variant="destructive" className="w-full" onClick={() => setDeleteOpen(true)}>
-                <Trash2Icon />
-                Delete
-              </Button>
-            )}
-          </div>
         </div>
       </Reveal>
 

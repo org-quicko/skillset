@@ -223,7 +223,7 @@ export function SkillList({
                       event.stopPropagation();
                       onSelect(skill.name);
                     }}
-                    className="rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                    className="rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     {skill.name}
                   </a>

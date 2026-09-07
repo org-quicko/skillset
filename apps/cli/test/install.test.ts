@@ -69,16 +69,6 @@ describe("installSkill — alsoServes names the other Agents a directory already
     });
   });
 
-  it("names a sibling Agent that coincidentally shares the same directory of its own", async () => {
-    await withTempRoots(async ({ cwd, homeDir }) => {
-      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "qoder", {
-        copy: false,
-      });
-
-      expect(report.alsoServes).toEqual(["qoder-cn"]);
-    });
-  });
-
   it("names every other Agent reading the canonical directory directly", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", {
@@ -131,19 +121,6 @@ describe("installSkill — non-universal Agents get a symlink", () => {
     });
   });
 
-  it("pi is asymmetric — .pi/skills at project, .pi/agent/skills at user", async () => {
-    await withTempRoots(async ({ cwd, homeDir }) => {
-      const projectReport = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "pi", {
-        copy: false,
-      });
-      expect(projectReport.link).toEqual({ kind: "symlink", path: join(cwd, ".pi", "skills", "code-review") });
-
-      const userReport = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "user", "pi", {
-        copy: false,
-      });
-      expect(userReport.link).toEqual({ kind: "symlink", path: join(homeDir, ".pi", "agent", "skills", "code-review") });
-    });
-  });
 });
 
 describe("installSkill — --copy", () => {
@@ -159,16 +136,6 @@ describe("installSkill — --copy", () => {
       expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toContain("code-review");
       // The canonical copy still exists too.
       expect(await exists(join(cwd, ".agents", "skills", "code-review", "SKILL.md"))).toBe(true);
-    });
-  });
-});
-
-describe("installSkill — user scope for an Agent with no user directory", () => {
-  it("refuses rather than guessing a location", async () => {
-    await withTempRoots(async ({ cwd, homeDir }) => {
-      await expect(
-        installSkill({ cwd, env: {}, homeDir }, "code-review", files, "user", "eve", { copy: false }),
-      ).rejects.toThrow(/no user-level skills directory/);
     });
   });
 });

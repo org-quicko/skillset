@@ -58,6 +58,11 @@ export function resourceQueryKey(name: string) {
 /** The catalog's hero stats — unfiltered, unlike `resourcesListQueryKey`'s pages. */
 export const resourceStatsQueryKey = ["resources", "stats"] as const;
 
+/** A single Skill's install trend chart — keyed by id, not name, since the route it reads is `/resources/{id}/installs/trend`. */
+export function resourceInstallTrendQueryKey(id: string) {
+  return ["resources", "installs-trend", id] as const;
+}
+
 /** The whole Tag catalog — what a tag editor's autocomplete filters against. */
 export const tagsListQueryKey = ["tags", "list"] as const;
 

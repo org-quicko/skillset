@@ -12,9 +12,9 @@ import {
 const ctx = (env: Record<string, string | undefined> = {}) => ({ env, homeDir: "/home/dev", projectRoot: "/repo" });
 
 describe("AGENTS table", () => {
-  it("carries the full vendored Agent list, with no duplicate ids", () => {
+  it("carries the hand-curated Agent list, with no duplicate ids", () => {
     const ids = AGENTS.map((a) => a.id);
-    expect(ids.length).toBeGreaterThan(70);
+    expect(ids.length).toBeGreaterThan(15);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -22,9 +22,8 @@ describe("AGENTS table", () => {
     expect(AGENTS.map((a) => a.id as string)).not.toContain("generic");
   });
 
-  it("names claude-code and pi, the two the User asked about", () => {
+  it("names claude-code, the Agent the User asked about", () => {
     expect(AGENTS.some((a) => a.id === "claude-code")).toBe(true);
-    expect(AGENTS.some((a) => a.id === "pi")).toBe(true);
   });
 });
 
@@ -37,7 +36,7 @@ describe("isUniversalAgent", () => {
 
   it("is false for Agents with their own directory", () => {
     expect(isUniversalAgent("claude-code")).toBe(false);
-    expect(isUniversalAgent("pi")).toBe(false);
+    expect(isUniversalAgent("windsurf")).toBe(false);
   });
 
   it("every universal Agent's project directory is exactly the canonical one", () => {
@@ -60,7 +59,7 @@ describe("canonicalSkillsDir", () => {
 describe("agentSkillsDir — project scope", () => {
   it("resolves a non-universal Agent to its own directory", () => {
     expect(agentSkillsDir("claude-code", "project", ctx())).toBe("/repo/.claude/skills");
-    expect(agentSkillsDir("pi", "project", ctx())).toBe("/repo/.pi/skills");
+    expect(agentSkillsDir("windsurf", "project", ctx())).toBe("/repo/.windsurf/skills");
   });
 
   it("resolves a universal Agent to the canonical directory", () => {
@@ -78,7 +77,6 @@ describe("agentSkillsDir — user scope", () => {
     { agent: "github-copilot", env: { XDG_CONFIG_HOME: "/custom/config" }, expected: "/home/dev/.copilot/skills" },
     { agent: "opencode", env: {}, expected: "/home/dev/.config/opencode/skills" },
     { agent: "opencode", env: { XDG_CONFIG_HOME: "/custom/config" }, expected: "/custom/config/opencode/skills" },
-    { agent: "pi", env: {}, expected: "/home/dev/.pi/agent/skills" },
     { agent: "grok", env: { GROK_HOME: "/custom/grok" }, expected: "/custom/grok/skills" },
   ];
 
@@ -88,20 +86,8 @@ describe("agentSkillsDir — user scope", () => {
     });
   }
 
-  it("returns null for an Agent with no user-level directory", () => {
-    expect(agentSkillsDir("eve", "user", ctx())).toBeNull();
-    expect(agentSkillsDir("promptscript", "user", ctx())).toBeNull();
-  });
-
   it("an env override that is blank or whitespace-only falls back to the default", () => {
     expect(agentSkillsDir("claude-code", "user", ctx({ CLAUDE_CONFIG_DIR: "   " }))).toBe("/home/dev/.claude/skills");
-  });
-});
-
-describe("pi — the Agent whose two Scopes use different suffixes", () => {
-  it("project Scope ends in /skills, user Scope ends in /agent/skills", () => {
-    expect(agentSkillsDir("pi", "project", ctx())).toBe("/repo/.pi/skills");
-    expect(agentSkillsDir("pi", "user", ctx())).toBe("/home/dev/.pi/agent/skills");
   });
 });
 

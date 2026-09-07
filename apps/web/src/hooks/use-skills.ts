@@ -2,6 +2,7 @@ import {
   buildSkillBundle,
   SkillDirectoryPageSchema,
   SkillDirectoryStatsSchema,
+  SkillInstallTrendSchema,
   SkillPublishedSchema,
   SkillSchema,
   SkillWithArtifactUrlSchema,
@@ -12,7 +13,13 @@ import {
 } from "@skill-registry/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import { resourceDirectoryQueryKey, resourceQueryKey, resourcesListQueryKey, resourceStatsQueryKey } from "@/lib/query-keys";
+import {
+  resourceDirectoryQueryKey,
+  resourceInstallTrendQueryKey,
+  resourceQueryKey,
+  resourcesListQueryKey,
+  resourceStatsQueryKey,
+} from "@/lib/query-keys";
 
 export interface SkillDirectoryFilters {
   /** Trimmed before use; blank is treated as no search term. */
@@ -110,6 +117,26 @@ export function useSkill(name: string) {
     // (usePublishSkill's onSuccess) — avoid an immediate, redundant refetch
     // of what was just returned when the reader lands straight on it.
     staleTime: 30_000,
+  });
+}
+
+/**
+ * Fetches a Skill's install trend: one point per day for a fixed trailing
+ * window, oldest first, zero-filled for days with no recorded Install — the
+ * Installs panel's chart.
+ *
+ * @param id - The Skill's id (`skill.id`, from `useSkill`) — the endpoint is
+ * id-keyed, unlike `useSkill` itself. Pass `undefined` while the owning
+ * Skill is still loading; the query stays disabled until it settles.
+ * @returns The TanStack Query result for `GET /resources/{id}/installs/trend`.
+ * @example
+ * const trend = useSkillInstallTrend(skill.data?.id);
+ */
+export function useSkillInstallTrend(id: string | undefined) {
+  return useQuery({
+    queryKey: resourceInstallTrendQueryKey(id ?? ""),
+    queryFn: () => apiFetch(`/resources/${encodeURIComponent(id ?? "")}/installs/trend`, SkillInstallTrendSchema),
+    enabled: Boolean(id),
   });
 }
 

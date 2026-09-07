@@ -90,6 +90,7 @@ export class S3StorageAdapter implements StorageAdapter {
       method: "GET",
       expiresIn: options?.expiresInSeconds ?? DEFAULT_EXPIRY_SECONDS,
       endpoint: this.publicEndpoint,
+      contentDisposition: options?.contentDisposition,
     });
   }
 }

@@ -19,7 +19,7 @@ import { resourceDirectory, resourceTags, resources, users, type UserRow } from 
 import { ArtifactMissingError, ResourceDeleteFailedError, ResourceNotFoundError, ValidationError } from "../http/errors.js";
 import type { ResourceDirectoryQuery } from "../http/resource-directory-query.js";
 import type { Logger } from "../logger.js";
-import type { AnalyticsService } from "./analytics.js";
+import type { AnalyticsService, InstallTrendPoint } from "./analytics.js";
 import type { TagsService, TagSummary } from "./tags.js";
 import {
   ARTIFACT_CONTENT_TYPE,
@@ -191,6 +191,9 @@ async function selectByIdOrUndefined<T>(query: () => Promise<T[]>): Promise<T | 
     throw cause;
   }
 }
+
+/** The install trend chart's fixed window — see `ResourcesService.getInstallTrend`. */
+const INSTALL_TREND_DAYS = 30;
 
 /**
  * Resources: the catalog listing, reads, publishing, deletion, and Artifact
@@ -575,7 +578,7 @@ export class ResourcesService {
    * fails.
    */
   async remove(id: string): Promise<void> {
-    await this.assertExists(id);
+    await this.getNameOrThrow(id);
 
     try {
       await this.storage.delete(artifactKey(id));
@@ -608,29 +611,54 @@ export class ResourcesService {
    * ```
    */
   async getArtifactDownloadUrl(id: string): Promise<string> {
-    await this.assertExists(id);
+    const name = await this.getNameOrThrow(id);
 
     const key = artifactKey(id);
     if (!(await this.storage.exists(key))) throw new ArtifactMissingError();
 
     await this.analytics.recordInstall(id, "web");
 
-    return this.storage.presignDownload(key, { expiresInSeconds: ARTIFACT_DOWNLOAD_EXPIRY_SECONDS });
+    // The storage key is the Resource's id (docs/data-model.md), so without
+    // this the browser's save dialog would default to `<uuid>.zip` — naming
+    // the download after the key rather than the thing a person asked for.
+    // `name` is already constrained to SKILL_NAME_PATTERN, so it's safe to
+    // drop into the header unescaped.
+    return this.storage.presignDownload(key, {
+      expiresInSeconds: ARTIFACT_DOWNLOAD_EXPIRY_SECONDS,
+      contentDisposition: `attachment; filename="${name}.zip"`,
+    });
   }
 
   /**
-   * Confirms a Resource exists by id, so a route needs only the id the wire
-   * gives it — the Artifact's storage key is derived from that same id
-   * (docs/data-model.md), so no name lookup is needed any more.
+   * A Resource's daily Install counts for the last `INSTALL_TREND_DAYS` days
+   * — the Skill detail page's install trend chart.
+   *
+   * @param id - The Resource's id.
+   * @returns One point per day, oldest first.
+   * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
+   * Resource exists by it.
+   * @example
+   * ```ts
+   * const trend = await resourcesService.getInstallTrend(id);
+   * ```
+   */
+  async getInstallTrend(id: string): Promise<InstallTrendPoint[]> {
+    await this.getNameOrThrow(id);
+    return this.analytics.getInstallTimeseries(id, INSTALL_TREND_DAYS);
+  }
+
+  /**
+   * Confirms a Resource exists by id, returning its name.
    *
    * @param id - The Resource's id.
    * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
    * Resource exists by it.
    */
-  private async assertExists(id: string): Promise<void> {
+  private async getNameOrThrow(id: string): Promise<string> {
     const row = await selectByIdOrUndefined(() =>
-      this.db.select({ id: resources.id }).from(resources).where(eq(resources.id, id)).limit(1),
+      this.db.select({ name: resources.name }).from(resources).where(eq(resources.id, id)).limit(1),
     );
     if (!row) throw new ResourceNotFoundError();
+    return row.name;
   }
 }

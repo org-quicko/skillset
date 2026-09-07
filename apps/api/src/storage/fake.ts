@@ -33,6 +33,7 @@ export class FakeStorageAdapter implements StorageAdapter {
   }
 
   async presignDownload(key: string, options?: PresignOptions): Promise<string> {
-    return `fake://download/${encodeURIComponent(key)}?expires=${options?.expiresInSeconds ?? 60}`;
+    const disposition = options?.contentDisposition ? `&disposition=${encodeURIComponent(options.contentDisposition)}` : "";
+    return `fake://download/${encodeURIComponent(key)}?expires=${options?.expiresInSeconds ?? 60}${disposition}`;
   }
 }

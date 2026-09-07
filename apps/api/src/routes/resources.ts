@@ -1,6 +1,7 @@
 import {
   SkillDirectoryPageSchema,
   SkillDirectoryStatsSchema,
+  SkillInstallTrendSchema,
   SkillPublishedSchema,
   SkillSchema,
   SkillTagsSchema,
@@ -52,6 +53,15 @@ export function registerResourcesRoutes(app: Hono<{ Variables: AuthVariables }>,
 
   app.get("/resources/:id", async (c) => {
     return c.json(SkillSchema.parse(await deps.resources.get(c.req.param("id"))));
+  });
+
+  // Four path segments, so no ordering concern against the two- and
+  // three-segment routes above — the Skill detail page's install trend
+  // chart, fetched separately from the Skill itself since most reads never
+  // need it.
+  app.get("/resources/:id/installs/trend", async (c) => {
+    const points = await deps.resources.getInstallTrend(c.req.param("id"));
+    return c.json(SkillInstallTrendSchema.parse({ points }));
   });
 
   // Ahead of `/resources/:kind/:name` below: both are three path segments
