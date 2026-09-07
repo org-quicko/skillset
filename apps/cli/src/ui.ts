@@ -25,7 +25,7 @@ const LOGO = [
 const COMMANDS: readonly (readonly [string, string])[] = [
   ["skillreg login --registry <url> --token <token>", "Authenticate this machine against a Registry"],
   ["skillreg whoami", "Show which Registry and identity are active"],
-  ["skillreg publish [path]", "Publish the Skill in a directory"],
+  ["skillreg publish [path]", "Publish a Skill, or every Skill under a directory"],
   ["skillreg add <name> [--agent <id>] [--scope <scope>]", "Install a Skill for a coding Agent"],
 ];
 
@@ -155,6 +155,28 @@ export async function promptChoice(question: string, choices: readonly string[])
   }
 
   return answer as string;
+}
+
+/**
+ * Asks the User to confirm or cancel, using clack's confirm prompt.
+ *
+ * @param question - The line shown with the yes/no choice.
+ * @returns Whether the User confirmed.
+ *
+ * @remarks
+ * Injected into `runPublish` as `deps.confirm`, called only when a terminal is attached and
+ * publishing more than one Skill was not already confirmed with `--yes`. Unlike the other
+ * prompts here, a Ctrl-C is not forced to exit: cancelling a confirmation is answering "no",
+ * not an unrecoverable interruption.
+ *
+ * @example
+ * ```ts
+ * const proceed = await promptConfirm("Publish 3 Skills, replacing any of the same name?");
+ * ```
+ */
+export async function promptConfirm(question: string): Promise<boolean> {
+  const answer = await p.confirm({ message: question });
+  return p.isCancel(answer) ? false : answer;
 }
 
 /**

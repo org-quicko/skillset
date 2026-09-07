@@ -1180,7 +1180,12 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
 
     const location = res.headers.get("location");
     expect(location).not.toBeNull();
-    expect(decodeURIComponent(location ?? "")).toContain(`resources/${publishedSkill.id}.zip`);
+    const decoded = decodeURIComponent(location ?? "");
+    expect(decoded).toContain(`resources/${publishedSkill.id}.zip`);
+    // The storage key is the id, not the Skill's name — without a
+    // Content-Disposition naming the download, a browser's save dialog would
+    // default to `<uuid>.zip`.
+    expect(decoded).toContain(`filename="downloadable-skill.zip"`);
   });
 
   it("returns the Skill plus a url instead of redirecting, when asked for JSON", async () => {
@@ -1198,7 +1203,9 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ApiSkill & { url: string; installs: number };
     expect(body.id).toBe(publishedSkill.id);
-    expect(decodeURIComponent(body.url)).toContain(`resources/${publishedSkill.id}.zip`);
+    const decodedUrl = decodeURIComponent(body.url);
+    expect(decodedUrl).toContain(`resources/${publishedSkill.id}.zip`);
+    expect(decodedUrl).toContain(`filename="json-downloadable-skill.zip"`);
     // `installs` reflects the last refresh, not necessarily this request's own
     // Install (ADR-0012) — the count itself is analytics.test.ts's concern.
     expect(typeof body.installs).toBe("number");

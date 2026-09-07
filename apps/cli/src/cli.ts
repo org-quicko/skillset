@@ -9,7 +9,7 @@ import { runLogin } from "./commands/login.js";
 import { runPublish } from "./commands/publish.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveConfigPath } from "./config.js";
-import { bannerText, fail, promptAgent, promptChoice, promptToken } from "./ui.js";
+import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken } from "./ui.js";
 
 const program = new Command();
 program.name("skillreg").description("Publish and manage Skills on Skillset.");
@@ -71,19 +71,51 @@ program
 
 program
   .command("publish")
-  .description("Publish the Skill at [path] (defaults to the current directory).")
-  .argument("[path]", "Path to the Skill's directory")
-  .action(async (path: string | undefined) => {
+  .description("Publish the Skill at [path], or every Skill beneath it (defaults to the current directory).")
+  .argument("[path]", "Path to a Skill's directory, or a directory holding several")
+  .option("--yes", "Skip confirming a publish of more than one Skill")
+  .action(async (path: string | undefined, opts: { yes?: boolean }) => {
     p.intro(label("publish"));
     const s = p.spinner();
-    s.start("Validating and uploading the Skill");
+    s.start("Validating and uploading");
     try {
       const result = await runPublish(
-        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd() },
-        { path },
+        {
+          fetch,
+          configPath: resolveConfigPath(process.env),
+          env: process.env,
+          cwd: process.cwd(),
+          isTTY: process.stdin.isTTY === true,
+          // Stopped and restarted around the prompt: an animating spinner and clack's own
+          // interactive prompt both assume they own the terminal's render loop, and running
+          // together garbles the output.
+          confirm: async (names) => {
+            s.stop("Waiting for confirmation");
+            const proceed = await promptConfirm(`Publish and replace ${names.length} Skills: ${names.join(", ")}?`);
+            s.start("Validating and uploading");
+            return proceed;
+          },
+        },
+        { path, yes: opts.yes },
       );
-      s.stop(`Published ${pc.cyan(result.name)}`);
-      p.outro(pc.dim(`${result.id} · ${result.published_at}`));
+
+      if (!Array.isArray(result)) {
+        s.stop(`Published ${pc.cyan(result.name)}`);
+        p.outro(pc.dim(`${result.id} · ${result.published_at}`));
+        return;
+      }
+
+      const failed = result.filter((outcome) => outcome.status === "failed");
+      s.stop(`Published ${result.length - failed.length}/${result.length} Skills`);
+      for (const outcome of result) {
+        if (outcome.status === "published") {
+          p.log.success(`${pc.cyan(outcome.name)} ${pc.dim(`(${outcome.id})`)}`);
+        } else {
+          p.log.error(`${pc.red(outcome.name)}: ${outcome.error}`);
+        }
+      }
+      if (failed.length > 0) process.exitCode = 1;
+      p.outro(failed.length > 0 ? pc.red(`${failed.length} Skill(s) failed`) : "Done");
     } catch (error) {
       s.error(pc.red("Publish failed"));
       fail(error);

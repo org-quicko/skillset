@@ -19,6 +19,10 @@ interface ApiSkill {
   installs: number;
 }
 
+interface ApiInstallTrend {
+  points: { date: string; count: number }[];
+}
+
 interface ApiPage {
   items: ApiSkill[];
 }
@@ -88,6 +92,10 @@ async function download(context: TestContext, session: Session, skillId: string)
 async function getSkill(context: TestContext, session: Session, skillId: string): Promise<ApiSkill> {
   const res = await context.app.request(`/api/resources/${skillId}`, { headers: { cookie: session.cookie } });
   return (await res.json()) as ApiSkill;
+}
+
+async function getInstallTrend(context: TestContext, session: Session, skillId: string): Promise<Response> {
+  return context.app.request(`/api/resources/${skillId}/installs/trend`, { headers: { cookie: session.cookie } });
 }
 
 const PASSWORD = "correct-horse-battery";
@@ -239,5 +247,85 @@ describe("Recording installs (ticket 22)", () => {
 
     await refreshInstallCounts(context);
     expect((await getSkill(context, reader, skillId)).installs).toBe(0);
+  });
+});
+
+/**
+ * The install trend chart's data source. Unlike `installs` above, this reads
+ * `resource_install_events` directly rather than the periodically-refreshed
+ * `resource_analytics` view — so, unlike every other install count in the
+ * app, it needs no `refreshInstallCounts` to reflect a just-recorded Install.
+ */
+describe("Install trend (installs/trend)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let writer: Session;
+  let reader: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ first_name: "Ada", last_name: "Lovelace", email: "ada@example.com", password: PASSWORD }),
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("returns 30 zero-filled days, oldest first, ending today, for a Skill with no Installs", async () => {
+    const skillId = await publish(context, writer, "trendless-skill");
+
+    const res = await getInstallTrend(context, reader, skillId);
+    expect(res.status).toBe(200);
+    const { points } = (await res.json()) as ApiInstallTrend;
+
+    expect(points.length).toBe(30);
+    expect(points.every((point) => point.count === 0)).toBe(true);
+
+    const today = new Date().toISOString().slice(0, 10);
+    expect(points.at(-1)?.date).toBe(today);
+    // Ascending: each day's date string sorts before the next.
+    for (let i = 1; i < points.length; i++) {
+      expect(points[i - 1]!.date < points[i]!.date).toBe(true);
+    }
+  });
+
+  it("counts today's Installs without waiting on refreshInstallCounts", async () => {
+    const skillId = await publish(context, writer, "trending-skill");
+    await context.storage.put(`resources/${skillId}.zip`, new Uint8Array([1]));
+
+    await download(context, reader, skillId);
+    await download(context, reader, skillId);
+    // Deliberately no refreshInstallCounts call: the trend reads the event
+    // log directly, not the materialized view `installs` lags behind.
+
+    const { points } = (await (await getInstallTrend(context, reader, skillId)).json()) as ApiInstallTrend;
+    expect(points.at(-1)?.count).toBe(2);
+    expect(points.slice(0, -1).every((point) => point.count === 0)).toBe(true);
+  });
+
+  it("returns 404 for a Skill that does not exist", async () => {
+    const res = await getInstallTrend(context, reader, crypto.randomUUID());
+    expect(res.status).toBe(404);
   });
 });

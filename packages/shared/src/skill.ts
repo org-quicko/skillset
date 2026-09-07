@@ -176,6 +176,19 @@ export const SkillDirectoryStatsSchema = z.object({
 });
 export type SkillDirectoryStats = z.infer<typeof SkillDirectoryStatsSchema>;
 
+/** One day of `SkillInstallTrendSchema` — `date` is `YYYY-MM-DD`, UTC. */
+export const SkillInstallTrendPointSchema = z.object({
+  date: z.string(),
+  count: z.number().int().nonnegative(),
+});
+export type SkillInstallTrendPoint = z.infer<typeof SkillInstallTrendPointSchema>;
+
+/** `GET /resources/{id}/installs/trend`: a Skill's daily Install counts over a fixed trailing window, oldest first. */
+export const SkillInstallTrendSchema = z.object({
+  points: z.array(SkillInstallTrendPointSchema),
+});
+export type SkillInstallTrend = z.infer<typeof SkillInstallTrendSchema>;
+
 /**
  * PUT /resources/\{kind\}/\{name\} request body. The name comes from the path.
  * The four frontmatter extras are optional and unvalidated at this layer —

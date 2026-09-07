@@ -1,13 +1,22 @@
-import { providerForHost, SkillValidationError, type SkillFile } from "@skill-registry/shared";
+import { providerForHost, SkillValidationError, type SkillFile, type SkillSourceLocation } from "@skill-registry/shared";
 import { useRef, useState, type DragEvent } from "react";
 import { connectHref, useConnections } from "@/hooks/use-connections";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { SkillUploadError, usePublishSkill } from "@/hooks/use-skills";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { fetchSkillSourceFiles } from "@/lib/read-source-files";
+import { discoverSkillSources, fetchSkillFilesAt } from "@/lib/read-source-files";
 import { readDroppedFiles, readPickedFiles } from "@/lib/read-skill-files";
+
+/** One Skill folder's label in the picker — the repository root reads better named than blank. */
+function sourceLabel(location: SkillSourceLocation): string {
+  return location.path || "/ (repository root)";
+}
+
+/** One Skill's outcome from importing more than one at once — reported individually, never aborting the rest. */
+type ImportOutcome = { path: string; status: "published"; name: string } | { path: string; status: "failed"; message: string };
 
 function describeFailure(error: unknown): string {
   if (error instanceof SkillValidationError) {
@@ -94,24 +103,45 @@ export function PublishSkillForm({
   const [readError, setReadError] = useState<ReadFailure | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  // More than one Skill was discovered under the pasted URL, awaiting the
+  // writer's pick of which to import — `null` once there is nothing to choose
+  // from, whether because none has been searched for yet or because exactly
+  // one was found and imported directly.
+  const [candidates, setCandidates] = useState<SkillSourceLocation[] | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<ReadonlySet<string>>(new Set());
+  const [isBatchImporting, setIsBatchImporting] = useState(false);
+  const [batchOutcomes, setBatchOutcomes] = useState<ImportOutcome[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const publish = usePublishSkill();
   // Only for the repository-selection remedy's URL, which is built server-side
   // from the Integration's app slug that this form cannot see.
   const connections = useConnections();
 
+  const isBusy = publish.isPending || isImporting || isBatchImporting;
+
   function handleFiles(files: SkillFile[]) {
     setReadError(null);
+    // A stale batch's report would otherwise keep suppressing `publish.isError`
+    // (see the render below) for an unrelated single-Skill attempt made afterwards.
+    setBatchOutcomes(null);
     publish.mutate(files, { onSuccess: (skill) => onPublished(skill.name) });
   }
 
   async function handleImportSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isImporting || publish.isPending) return;
+    if (isBusy) return;
     setIsImporting(true);
     setReadError(null);
+    setCandidates(null);
+    setBatchOutcomes(null);
     try {
-      handleFiles(await fetchSkillSourceFiles(sourceUrl));
+      const found = await discoverSkillSources(sourceUrl);
+      if (found.length === 1) {
+        handleFiles(await fetchSkillFilesAt(found[0]));
+      } else {
+        setCandidates(found);
+        setSelectedPaths(new Set(found.map((location) => location.path)));
+      }
     } catch (error) {
       // The provider is discovered from the URL, never chosen — so it is only
       // known once the URL parsed, and a URL that did not parse has no remedy
@@ -122,10 +152,45 @@ export function PublishSkillForm({
     }
   }
 
+  function toggleCandidate(path: string, checked: boolean) {
+    setSelectedPaths((current) => {
+      const next = new Set(current);
+      if (checked) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }
+
+  /**
+   * Imports every checked candidate, one at a time — a Skill's own failure to
+   * fetch or publish is reported and does not stop the rest, the same
+   * "outcome per Skill" shape the CLI's own multi-Skill publish reports.
+   */
+  async function handleImportSelected() {
+    if (!candidates || isBusy) return;
+    const chosen = candidates.filter((location) => selectedPaths.has(location.path));
+    if (chosen.length === 0) return;
+
+    setIsBatchImporting(true);
+    const outcomes: ImportOutcome[] = [];
+    for (const location of chosen) {
+      try {
+        const files = await fetchSkillFilesAt(location);
+        const skill = await publish.mutateAsync(files);
+        outcomes.push({ path: location.path, status: "published", name: skill.name });
+      } catch (error) {
+        outcomes.push({ path: location.path, status: "failed", message: describeFailure(error) });
+      }
+    }
+    setIsBatchImporting(false);
+    setCandidates(null);
+    setBatchOutcomes(outcomes);
+  }
+
   async function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
-    if (publish.isPending || isImporting) return;
+    if (isBusy) return;
     try {
       handleFiles(await readDroppedFiles(event.dataTransfer.items));
     } catch {
@@ -140,7 +205,7 @@ export function PublishSkillForm({
     // a reference held past this point instead of swapping in a new one.
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (files.length === 0 || publish.isPending || isImporting) return;
+    if (files.length === 0 || isBusy) return;
     try {
       handleFiles(await readPickedFiles(files));
     } catch {
@@ -169,12 +234,7 @@ export function PublishSkillForm({
       >
         <p className="text-sm text-muted-foreground">Drag a Skill&apos;s folder here</p>
         <p className="text-xs text-muted-foreground">or</p>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={publish.isPending || isImporting}
-          onClick={() => inputRef.current?.click()}
-        >
+        <Button type="button" variant="outline" disabled={isBusy} onClick={() => inputRef.current?.click()}>
           Choose folder…
         </Button>
         <input
@@ -199,20 +259,62 @@ export function PublishSkillForm({
             placeholder="Eg. https://github.com/owner/repo or https://gitlab.com/group/project"
             value={sourceUrl}
             onChange={(event) => setSourceUrl(event.target.value)}
-            disabled={publish.isPending || isImporting}
+            disabled={isBusy}
           />
-          <Button
-            type="submit"
-            variant="outline"
-            disabled={sourceUrl.trim().length === 0 || publish.isPending || isImporting}
-          >
+          <Button type="submit" variant="outline" disabled={sourceUrl.trim().length === 0 || isBusy}>
             Publish
           </Button>
         </form>
       </div>
 
+      {candidates && candidates.length > 1 && (
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+          <p className="text-sm text-muted-foreground">
+            Found {candidates.length} Skills — choose which to publish:
+          </p>
+          <ul className="flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+            {candidates.map((location) => (
+              <li key={location.path} className="flex items-center gap-2">
+                <Checkbox
+                  id={`candidate-${location.path}`}
+                  checked={selectedPaths.has(location.path)}
+                  onCheckedChange={(checked) => toggleCandidate(location.path, checked === true)}
+                  disabled={isBusy}
+                />
+                <label htmlFor={`candidate-${location.path}`} className="cursor-pointer text-sm">
+                  {sourceLabel(location)}
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <Button type="button" onClick={handleImportSelected} disabled={isBusy || selectedPaths.size === 0}>
+              Publish {selectedPaths.size} selected
+            </Button>
+            <Button type="button" variant="ghost" disabled={isBusy} onClick={() => setCandidates(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {batchOutcomes && (
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+          <ul className="flex flex-col gap-1 text-sm">
+            {batchOutcomes.map((outcome) => (
+              <li key={outcome.path} className={outcome.status === "failed" ? "text-destructive" : undefined}>
+                {outcome.status === "published"
+                  ? `${outcome.name} — published`
+                  : `${outcome.path || "/ (repository root)"} — ${outcome.message}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {publish.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
       {isImporting && <p className="text-sm text-muted-foreground">Reading the repository…</p>}
+      {isBatchImporting && <p className="text-sm text-muted-foreground">Publishing selected Skills…</p>}
       {readError && (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm text-destructive">{readError.message}</p>
@@ -242,10 +344,14 @@ export function PublishSkillForm({
           })()}
         </div>
       )}
-      {publish.isError && <p className="text-sm text-destructive">{describeFailure(publish.error)}</p>}
+      {/* Suppressed once a batch ran: each Skill's own outcome above already covers it, and
+          `publish`'s own error state after a batch reflects only its last attempt. */}
+      {publish.isError && !batchOutcomes && <p className="text-sm text-destructive">{describeFailure(publish.error)}</p>}
 
-      <Button type="button" variant="ghost" disabled={publish.isPending || isImporting} onClick={onCancel}>
-        Cancel
+      {/* Same action either way — nothing left to confirm once a batch has finished — but
+          "Cancel" reads wrong for a dialog that already did what it was asked. */}
+      <Button type="button" variant="ghost" disabled={isBusy} onClick={onCancel}>
+        {batchOutcomes ? "Done" : "Cancel"}
       </Button>
     </div>
   );

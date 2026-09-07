@@ -1,4 +1,5 @@
 import {
+  discoverSkillFolders,
   gitProviderConfig,
   readSkillFolder,
   SkillFolderError,
@@ -159,6 +160,89 @@ export class ImportsService {
       "imported a skill folder",
     );
     return files;
+  }
+
+  /**
+   * Finds every Skill folder in a project the caller's Connection can see,
+   * private ones included (ADR-0024) — the discovery companion to
+   * {@link fetchSkillFiles} for a location that may hold more than one Skill.
+   *
+   * @remarks
+   * Shares every precondition and diagnosis {@link fetchSkillFiles} has: an
+   * Integration must be configured, the caller must hold a Connection, and a
+   * 404 is diagnosed against `GET /user/installations` before it is reported
+   * as a missing project rather than an uninstalled app. Two reasons read
+   * differently because they describe a walk's outcome, not one named
+   * folder's: finding nothing at all means no Skill was found, not that the
+   * folder itself is empty, and running out of room means the project has
+   * more to search than a walk will look through, not that one folder holds
+   * too many files.
+   *
+   * @param userId - The writer discovering, whose Connection is spent.
+   * @param location - The provider, project, ref, and folder to search from.
+   * @param fetchImpl - The `fetch` to reach the provider with. Defaults to
+   * the global one; tests pass a fake so a request never leaves the process.
+   * @returns Every Skill folder found, as a `SkillSourceLocation` each.
+   * @throws IntegrationNotConfiguredError if no Integration is configured for
+   * that Git Provider.
+   * @throws NotConnectedError if the caller holds no Connection to it.
+   * @throws ConnectionExpiredError if the grant can no longer be refreshed, or
+   * the provider refuses it outright.
+   * @throws AppNotInstalledError if a 404 turns out to be the app not being
+   * installed on the project's owner, rather than a missing folder.
+   * @throws ImportFailedError if the provider refuses for any other reason,
+   * rate-limits the request, or cannot be reached.
+   * @throws ImportRejectedError if no Skill was found, or the project holds
+   * more entries than a discovery walk will search.
+   * @example
+   * ```ts
+   * const found = await imports.listSkillFolders(user.id, {
+   *   provider: "github", project: "acme/skills", ref: null, path: "",
+   * });
+   * ```
+   */
+  async listSkillFolders(
+    userId: string,
+    location: SkillSourceLocation,
+    fetchImpl?: typeof fetch,
+  ): Promise<SkillSourceLocation[]> {
+    const configured = await this.integrations.listByProvider(location.provider);
+    if (configured.length === 0) {
+      this.logger.info(
+        { user_id: userId, provider: location.provider },
+        "refused a discovery walk because no integration is configured for that git provider",
+      );
+      throw new IntegrationNotConfiguredError(location.provider);
+    }
+
+    const token = await this.connections.accessTokenFor(userId, location.provider, fetchImpl);
+
+    let found: SkillSourceLocation[];
+    try {
+      found = await discoverSkillFolders(location, { token, fetch: fetchImpl });
+    } catch (cause) {
+      if (!(cause instanceof SkillFolderError)) throw cause;
+
+      // Unlike fetchSkillFiles's own folder, these two reasons describe a *walk*
+      // outcome, not a single named folder's — REJECTION_MESSAGES's wording for
+      // both ("that folder is empty" / "that folder holds more files than a
+      // Skill may contain") is written for the latter and would mislead here.
+      if (cause.reason === "empty_folder") {
+        throw new ImportRejectedError("No Skill was found under that project or folder.");
+      }
+      if (cause.reason === "too_many_entries") {
+        throw new ImportRejectedError("That project has more to search than a discovery walk will look through.");
+      }
+
+      const integration = await this.connections.integrationFor(userId, location.provider);
+      throw await this.refusal(cause, userId, location, integration?.app_slug ?? null, token, fetchImpl);
+    }
+
+    this.logger.info(
+      { user_id: userId, provider: location.provider, project: location.project, found: found.length },
+      "discovered skill folders",
+    );
+    return found;
   }
 
   /**

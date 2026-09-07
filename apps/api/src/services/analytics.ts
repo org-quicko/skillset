@@ -6,6 +6,13 @@ import type { Logger } from "../logger.js";
 /** Where a recorded Install came from — see `resourceInstallSourceEnum` (ADR-0012). */
 export type InstallSource = "web" | "cli";
 
+/** One day's Install count, as returned by `getInstallTimeseries`. */
+export interface InstallTrendPoint {
+  /** The day this point covers, as `YYYY-MM-DD`, UTC. */
+  date: string;
+  count: number;
+}
+
 /**
  * Install bookkeeping: appending Install events, and reading the counts back
  * off `resource_analytics` (ADR-0012, ADR-0028).
@@ -131,5 +138,44 @@ export class AnalyticsService {
       .select({ total: sql<string>`coalesce(${sum(resourceAnalytics.install_count)}, '0')` })
       .from(resourceAnalytics);
     return Number(row?.total ?? 0);
+  }
+
+  /**
+   * Fetches one Resource's daily Install counts for the trailing `days` days
+   * (today inclusive), zero-filled for days with no recorded Install.
+   *
+   * @remarks
+   * `resource_analytics` only ever holds the running total (ADR-0012), so a
+   * day-by-day breakdown has to come from `resource_install_events` — the
+   * event log — directly, live rather than through that view. Bucketed by
+   * UTC calendar day regardless of the caller's own timezone, so the same
+   * request returns the same counts no matter which server answers it.
+   * `generate_series` supplies the empty days; a plain `group by` would
+   * silently drop them, leaving gaps in a trend chart.
+   *
+   * @param resourceId - The Resource's id.
+   * @param days - How many trailing days to return, today inclusive.
+   * @returns One point per day, oldest first.
+   * @example
+   * ```ts
+   * const trend = await analytics.getInstallTimeseries(skillId, 30);
+   * ```
+   */
+  async getInstallTimeseries(resourceId: string, days: number): Promise<InstallTrendPoint[]> {
+    const rows = await this.db.execute<{ date: string; count: number }>(sql`
+      select gs.day::date::text as date, coalesce(count(rie.id), 0)::int as count
+      from generate_series(
+        (current_date - ${days - 1} * interval '1 day')::date,
+        current_date::date,
+        interval '1 day'
+      ) as gs(day)
+      left join ${resourceInstallEvents} as rie
+        on rie.resource_id = ${resourceId}
+        and rie.created_at >= gs.day
+        and rie.created_at < gs.day + interval '1 day'
+      group by gs.day
+      order by gs.day
+    `);
+    return rows.map((row) => ({ date: row.date, count: row.count }));
   }
 }

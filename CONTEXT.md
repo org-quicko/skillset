@@ -107,10 +107,11 @@ _Avoid_: API key, credential, secret
 
 **Agent**:
 A coding agent that reads Skills from a conventional directory on a developer's machine.
-The offered list is the full Agent → directory table vendored from `vercel-labs/skills`
-(ADR-0022). `add` writes to the canonical `.agents/skills` and symlinks the chosen Agent's
-own directory to it. The table is about **Skills only**: an MCP Server is installed by merging
-a project's `.mcp.json` and names no Agent (ADR-0029).
+The offered list is a hand-curated Agent → directory table, each row verified against that
+Agent's own documentation (ADR-0031). `add` writes to the canonical `.agents/skills` and
+symlinks the chosen Agent's own directory to it (ADR-0022). The table is about **Skills
+only**: an MCP Server is installed by merging a project's `.mcp.json` and names no Agent
+(ADR-0029).
 _Avoid_: Client, tool, editor, IDE
 
 **Scope**:
