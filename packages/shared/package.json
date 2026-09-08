@@ -1,5 +1,5 @@
 {
-  "name": "@skill-registry/shared",
+  "name": "@skillset/shared",
   "private": true,
   "version": "0.0.0",
   "type": "module",

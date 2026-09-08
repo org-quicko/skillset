@@ -1,4 +1,4 @@
-import { validateTagName, validateTagNames } from "@skill-registry/shared";
+import { validateTagName, validateTagNames } from "@skillset/shared";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { firstRow } from "../db/rows.js";

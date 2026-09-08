@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import type { Role } from "@skill-registry/shared";
+import type { Role } from "@skillset/shared";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
 import { users } from "../src/db/schemas/index.js";

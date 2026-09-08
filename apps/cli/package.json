@@ -1,9 +1,9 @@
 {
-  "name": "@skill-registry/cli",
+  "name": "@skillset/cli",
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "skillreg": "./dist/cli.js"
+    "skillset": "./dist/cli.js"
   },
   "files": [
     "dist"
@@ -22,7 +22,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@skill-registry/shared": "workspace:*",
+    "@skillset/shared": "workspace:*",
     "@types/bun": "^1.4.0",
     "typescript": "^5.7.2"
   }

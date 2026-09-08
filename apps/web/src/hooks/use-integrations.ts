@@ -3,7 +3,7 @@ import {
   IntegrationSchema,
   type IntegrationCreate,
   type IntegrationUpdate,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { connectionsQueryKey, integrationsQueryKey } from "@/lib/query-keys";

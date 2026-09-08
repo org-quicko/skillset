@@ -5,7 +5,7 @@ import {
   type AssignableRole,
   type User,
   type UserCreated,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { meQueryKey, usersListQueryKey, usersQueryKey } from "@/lib/query-keys";

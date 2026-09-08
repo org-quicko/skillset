@@ -1,4 +1,4 @@
-import type { SkillInstallTrendPoint } from "@skill-registry/shared";
+import type { SkillInstallTrendPoint } from "@skillset/shared";
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
 const CHART_WIDTH = 300;

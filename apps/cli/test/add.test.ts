@@ -58,8 +58,8 @@ function baseDeps(overrides: Partial<AddDeps> & { fetch: typeof fetch; configPat
 }
 
 async function withTempDirs<T>(run: (dirs: { configDir: string; cwd: string }) => Promise<T>): Promise<T> {
-  const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
-  const cwd = await mkdtemp(join(tmpdir(), "skillreg-add-cwd-"));
+  const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
+  const cwd = await mkdtemp(join(tmpdir(), "skillset-add-cwd-"));
   try {
     return await run({ configDir, cwd });
   } finally {
@@ -87,7 +87,7 @@ describe("runAdd", () => {
         baseDeps({
           fetch: fetchImpl,
           configPath: join(configDir, "config.json"),
-          env: { SKILLREG_REGISTRY: "https://registry.example" },
+          env: { SKILLSET_REGISTRY: "https://registry.example" },
           cwd,
           homeDir: cwd,
         }),

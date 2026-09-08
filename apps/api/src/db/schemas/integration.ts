@@ -27,7 +27,7 @@ export const integrations = pgTable("integrations", {
   // The Git Provider this app is for: `github`, `gitlab`. Plain text rather
   // than an enum, so adding a provider is an insert and not a migration
   // (ADR-0024). The values it may take are the keys of `GIT_PROVIDERS` in
-  // `@skill-registry/shared`, checked in the service. No longer unique — see
+  // `@skillset/shared`, checked in the service. No longer unique — see
   // ADR-0025 — so it carries no foreign key from `connections` any more;
   // `connections.integration_id` references `id` instead.
   provider: text("provider").notNull(),

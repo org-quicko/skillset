@@ -1,4 +1,4 @@
-import { artifactMediaType, SKILL_FILE_NAME, splitFrontmatter, type ArtifactFile } from "@skill-registry/shared";
+import { artifactMediaType, SKILL_FILE_NAME, splitFrontmatter, type ArtifactFile } from "@skillset/shared";
 import { ChevronDownIcon, CodeIcon, ExternalLinkIcon, EyeIcon, FileIcon, FolderIcon } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { Panel } from "@/components/panel";

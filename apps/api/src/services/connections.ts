@@ -4,7 +4,7 @@ import {
   isGitProvider,
   type ConnectableProvider,
   type GitProviderOAuth,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
@@ -38,7 +38,7 @@ const STATE_TTL_MS = 5 * 60_000;
 const REFRESH_MARGIN_MS = 60_000;
 
 /** Providers ask that a caller identify itself. */
-const USER_AGENT = "skill-registry";
+const USER_AGENT = "skillset";
 
 /**
  * One Connection as the list route reports it.

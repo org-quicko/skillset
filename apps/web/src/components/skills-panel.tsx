@@ -5,7 +5,7 @@ import {
   type Role,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";

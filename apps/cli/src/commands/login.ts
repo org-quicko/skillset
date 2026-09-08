@@ -1,4 +1,4 @@
-import { UserSchema, type Role } from "@skill-registry/shared";
+import { UserSchema, type Role } from "@skillset/shared";
 import { writeConfig, type Config } from "../config.js";
 import { ApiError, registryFetch, type RegistryClient } from "../http.js";
 

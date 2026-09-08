@@ -1,4 +1,4 @@
-import { ConnectionListSchema } from "@skill-registry/shared";
+import { ConnectionListSchema } from "@skillset/shared";
 import type { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
@@ -18,7 +18,7 @@ export type ConnectionRouteDependencies = AuthDependencies & {
  * top-level GET navigation from the provider, and `Strict` would withhold the
  * cookie on exactly that request, breaking every connection attempt.
  */
-const STATE_COOKIE = "skillreg_connection_state";
+const STATE_COOKIE = "skillset_connection_state";
 
 /** Where a writer lands once the callback is done, successfully or not. */
 const SETTINGS_PATH = "/settings";

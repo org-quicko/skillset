@@ -1,4 +1,4 @@
-import { roleMeets, type User } from "@skill-registry/shared";
+import { roleMeets, type User } from "@skillset/shared";
 import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { IntegrationsCard } from "@/components/integrations-card";

@@ -1,6 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Hono } from "hono";
-import type { Role } from "@skill-registry/shared";
+import type { Role } from "@skillset/shared";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
 import { createDatabase } from "../src/db/client.js";

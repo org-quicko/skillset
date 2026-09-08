@@ -3,7 +3,7 @@ import {
   type IdentityProviderCreate,
   type IdentityProviderUpdate,
   type PublicIdentityProvider,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { asc, eq } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { firstRow } from "../db/rows.js";

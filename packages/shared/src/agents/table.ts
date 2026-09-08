@@ -57,7 +57,7 @@ const envOrHomeRelative = (envKey: string, fallbackDir: string, suffix: string) 
   `${nonBlank(env[envKey]) ?? `${homeDir}/${fallbackDir}`}/${suffix}`;
 
 /**
- * Every Agent `skillreg add` can install for, alphabetically — the order the searchable
+ * Every Agent `skillset add` can install for, alphabetically — the order the searchable
  * prompt lists them in.
  *
  * @remarks

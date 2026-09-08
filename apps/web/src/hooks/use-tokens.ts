@@ -4,7 +4,7 @@ import {
   type Token,
   type TokenCreated,
   type TokenMint,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { apiFetch } from "@/lib/api";

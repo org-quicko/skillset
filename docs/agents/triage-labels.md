@@ -14,7 +14,7 @@ When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the 
 
 This repo tracks issues on GitHub, so a label is a real GitHub label — apply it with
 `gh issue create --label` or `gh issue edit --add-label`. All five exist on
-`org-quicko/skill-registry`, alongside `ready-for-review` for work that is built and awaiting
+`org-quicko/skillset`, alongside `ready-for-review` for work that is built and awaiting
 review.
 
 Edit the right-hand column to match whatever vocabulary you actually use.

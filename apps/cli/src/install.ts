@@ -10,7 +10,7 @@ import {
   type AgentId,
   type Scope,
   type SkillFile,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 
 /** How the chosen Agent's own directory was pointed at the canonical `.agents/skills` copy. */
 export type LinkResult =

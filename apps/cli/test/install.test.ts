@@ -13,8 +13,8 @@ const files = [
 
 /** Separate roots so a "project" install and a "user" install can never be confused for one another. */
 async function withTempRoots<T>(run: (roots: { cwd: string; homeDir: string }) => Promise<T>): Promise<T> {
-  const cwd = await mkdtemp(join(tmpdir(), "skillreg-install-cwd-"));
-  const homeDir = await mkdtemp(join(tmpdir(), "skillreg-install-home-"));
+  const cwd = await mkdtemp(join(tmpdir(), "skillset-install-cwd-"));
+  const homeDir = await mkdtemp(join(tmpdir(), "skillset-install-home-"));
   try {
     return await run({ cwd, homeDir });
   } finally {

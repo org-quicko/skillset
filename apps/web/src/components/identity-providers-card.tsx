@@ -1,4 +1,4 @@
-import { isUngated, type IdentityProvider } from "@skill-registry/shared";
+import { isUngated, type IdentityProvider } from "@skillset/shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";

@@ -1,4 +1,4 @@
-import type { User } from "@skill-registry/shared";
+import type { User } from "@skillset/shared";
 import { LogOutIcon, SettingsIcon } from "lucide-react";
 import { ThemeSegmentedControl, ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";

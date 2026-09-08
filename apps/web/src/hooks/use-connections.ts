@@ -1,4 +1,4 @@
-import { ConnectionListSchema } from "@skill-registry/shared";
+import { ConnectionListSchema } from "@skillset/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { connectionsQueryKey } from "@/lib/query-keys";

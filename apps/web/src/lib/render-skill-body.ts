@@ -1,4 +1,4 @@
-import { splitFrontmatter } from "@skill-registry/shared";
+import { splitFrontmatter } from "@skillset/shared";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 

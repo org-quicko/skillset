@@ -7,7 +7,7 @@ import { writeConfig } from "../src/config.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
 
 async function makeSkillDir(extra?: (dir: string) => Promise<void>): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
   await writeFile(
     join(dir, "SKILL.md"),
     "---\nname: code-review\ndescription: Reviews code.\n---\nHow to do the thing.\n",
@@ -94,7 +94,7 @@ function storagePath(url: string): string {
 
 describe("runPublish", () => {
   it("errors clearly when nothing under the path holds a SKILL.md, and makes no network call", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
       await expect(
@@ -126,7 +126,7 @@ describe("runPublish", () => {
       await mkdir(join(dir, "scripts"), { recursive: true });
       await writeFile(join(dir, "scripts", "helper.sh"), "#!/bin/sh\necho hi\n");
     });
-    const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(configDir, "config.json");
       await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -166,7 +166,7 @@ describe("runPublish", () => {
 
   it("refuses a reader's Token with a message about permissions, not a generic failure", async () => {
     const skillDir = await makeSkillDir();
-    const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(configDir, "config.json");
       await writeConfig(configPath, { registry: "https://registry.example", token: "reader-token" });
@@ -187,7 +187,7 @@ describe("runPublish", () => {
 
 describe("runPublish: publishing many Skills from a directory (ticket 7)", () => {
   async function withRoot(build: (root: string) => Promise<void>, run: (root: string) => Promise<void>): Promise<void> {
-    const root = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const root = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       await build(root);
       await run(root);
@@ -217,7 +217,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "sibling", "unrelated");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -249,7 +249,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "apps/pdf-tools", "pdf-tools");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -279,7 +279,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "code-review/examples/nested", "not-a-skill");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -303,7 +303,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "a/b/c", "at-limit");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -326,7 +326,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "a/b/c/d", "past-limit");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -351,7 +351,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "skills/code-review", "code-review");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -376,7 +376,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeFile(join(root, "apps", "broken", "SKILL.md"), "no frontmatter here");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -400,7 +400,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(root, "apps/pdf-tools", "pdf-tools");
       },
       async (root) => {
-        const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+        const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
         try {
           const configPath = join(configDir, "config.json");
           await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -437,7 +437,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
 
   describe("confirming a publish of more than one Skill", () => {
     async function twoSkillRoot(build: (root: string) => Promise<void>): Promise<string> {
-      const root = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const root = await mkdtemp(join(tmpdir(), "skillset-test-"));
       await build(root);
       return root;
     }
@@ -447,7 +447,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(r, "apps/code-review", "code-review");
         await writeSkillAt(r, "apps/pdf-tools", "pdf-tools");
       });
-      const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
       try {
         const configPath = join(configDir, "config.json");
         await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -478,7 +478,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
       const root = await twoSkillRoot(async (r) => {
         await writeSkillAt(r, "apps/code-review", "code-review");
       });
-      const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
       try {
         const configPath = join(configDir, "config.json");
         await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -510,7 +510,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(r, "apps/code-review", "code-review");
         await writeSkillAt(r, "apps/pdf-tools", "pdf-tools");
       });
-      const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
       try {
         const configPath = join(configDir, "config.json");
         await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -531,7 +531,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(r, "apps/code-review", "code-review");
         await writeSkillAt(r, "apps/pdf-tools", "pdf-tools");
       });
-      const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
       try {
         const configPath = join(configDir, "config.json");
         await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -566,7 +566,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(r, "apps/code-review", "code-review");
         await writeSkillAt(r, "apps/pdf-tools", "pdf-tools");
       });
-      const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
       try {
         const configPath = join(configDir, "config.json");
         await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
@@ -587,7 +587,7 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await writeSkillAt(r, "apps/code-review", "code-review");
         await writeSkillAt(r, "apps/pdf-tools", "pdf-tools");
       });
-      const configDir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+      const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
       try {
         const configPath = join(configDir, "config.json");
         // No config written: not logged in.

@@ -33,13 +33,13 @@ back in if a client secret expires. See [ADR-0015](docs/adr/0015-identity-provid
 ## Development
 
 This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres), `apps/web`
-(Vite + React + Tailwind + shadcn/ui), `apps/cli` (the `skillreg` command), and
+(Vite + React + Tailwind + shadcn/ui), `apps/cli` (the `skillset` command), and
 `packages/shared` (the rules and schemas all three are built against).
 
 ```bash
 bun install
 bun run typecheck
 bun run test   # apps/api; spins up Postgres via testcontainers, needs Docker
-bun --filter @skill-registry/web dev
-bun --filter @skill-registry/api dev
+bun --filter @skillset/web dev
+bun --filter @skillset/api dev
 ```

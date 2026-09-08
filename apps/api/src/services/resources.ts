@@ -18,7 +18,7 @@ import {
   type Page,
   type SkillFile,
   type SkillPayload,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/client.js";
 import { isInvalidIdSyntax } from "../db/pg-errors.js";
@@ -479,7 +479,7 @@ export class ResourcesService {
    * puts the window the other way round from the row: for the length of the
    * upload the Artifact is incomplete rather than stale.
    *
-   * `kind` is checked against `KINDS` (`@skill-registry/shared`) before
+   * `kind` is checked against `KINDS` (`@skillset/shared`) before
    * anything else: an unregistered Kind is refused here, naming the field,
    * rather than falling through to a 404 further down the route (ADR-0026).
    * `skill` is the only Kind registered so far, so this is also what makes
@@ -728,7 +728,7 @@ export class ResourcesService {
    *
    * @remarks
    * An Artifact is stored as its files (ADR-0032); a zip is the
-   * representation `skillreg add`, the web Download control, and a
+   * representation `skillset add`, the web Download control, and a
    * marketplace `archive` source all want, so the API builds one on demand.
    * This is the read path where Artifact bytes do pass through the API, which
    * is what ADR-0032 amends ADR-0001 to allow — uploading still bypasses it

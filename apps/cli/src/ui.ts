@@ -23,14 +23,14 @@ const LOGO = [
 ];
 
 const COMMANDS: readonly (readonly [string, string])[] = [
-  ["skillreg login --registry <url> --token <token>", "Authenticate this machine against a Registry"],
-  ["skillreg whoami", "Show which Registry and identity are active"],
-  ["skillreg publish [path]", "Publish a Skill, or every Skill under a directory"],
-  ["skillreg add <name> [--agent <id>] [--scope <scope>]", "Install a Skill for a coding Agent"],
+  ["skillset login --registry <url> --token <token>", "Authenticate this machine against a Registry"],
+  ["skillset whoami", "Show which Registry and identity are active"],
+  ["skillset publish [path]", "Publish a Skill, or every Skill under a directory"],
+  ["skillset add <name> [--agent <id>] [--scope <scope>]", "Install a Skill for a coding Agent"],
 ];
 
 /**
- * Renders the wordmark, tagline, and command list shown for a bare `skillreg`
+ * Renders the wordmark, tagline, and command list shown for a bare `skillset`
  * invocation and at the top of `--help`.
  *
  * @returns The banner as a single string, ready to hand to `console.log` or

@@ -3,7 +3,7 @@ import {
   IntegrationListSchema,
   IntegrationSchema,
   IntegrationUpdateSchema,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { parseBody } from "../http/body.js";

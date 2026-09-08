@@ -1,4 +1,4 @@
-import { ASSIGNABLE_ROLES, type AssignableRole } from "@skill-registry/shared";
+import { ASSIGNABLE_ROLES, type AssignableRole } from "@skillset/shared";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";

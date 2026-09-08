@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { extractSkillFiles, type Role } from "@skill-registry/shared";
+import { extractSkillFiles, type Role } from "@skillset/shared";
 import { eq } from "drizzle-orm";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
@@ -565,7 +565,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       description: "Read without a session.",
       body: "Body.\n",
     });
-    // The path `skillreg add` takes with no Token configured (ADR-0013).
+    // The path `skillset add` takes with no Token configured (ADR-0013).
     const anonymous = await context.app.request("/api/resources/skill/by-name/by-name-anonymous-attempt");
     expect(anonymous.status).toBe(200);
     expect(((await anonymous.json()) as ApiSkill).name).toBe("by-name-anonymous-attempt");
@@ -1221,7 +1221,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     // The whole point of the new storage model is that the zip is derived,
     // not stored — so what matters is that it round-trips every file. Read
     // back through the shared extractor rather than a raw unzip, which also
-    // asserts the archive is one `skillreg add` accepts.
+    // asserts the archive is one `skillset add` accepts.
     const files = extractSkillFiles(new Uint8Array(await res.arrayBuffer()));
     expect(files.map((file) => file.path).sort()).toEqual(["SKILL.md", "references/style.md"]);
     const style = files.find((file) => file.path === "references/style.md");
@@ -1258,7 +1258,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n" });
 
-    // What `skillreg add` does against a Registry the User never logged in to (ADR-0013).
+    // What `skillset add` does against a Registry the User never logged in to (ADR-0013).
     const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`);
     expect(res.status).toBe(200);
   });

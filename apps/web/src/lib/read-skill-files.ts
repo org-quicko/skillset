@@ -1,4 +1,4 @@
-import type { SkillFile } from "@skill-registry/shared";
+import type { SkillFile } from "@skillset/shared";
 
 async function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
   const all: FileSystemEntry[] = [];

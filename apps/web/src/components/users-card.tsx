@@ -3,7 +3,7 @@ import {
   type AssignableRole,
   type User,
   type UserListItem,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CreateUserDialog } from "@/components/create-user-dialog";

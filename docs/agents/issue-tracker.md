@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Implementation tickets for this repo live as **GitHub issues** on `org-quicko/skill-registry`.
+Implementation tickets for this repo live as **GitHub issues** on `org-quicko/skillset`.
 Use the `gh` CLI.
 
 Specs stay in the repo as markdown — a spec is a long-form document that belongs in version

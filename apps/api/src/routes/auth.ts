@@ -1,4 +1,4 @@
-import { PublicIdentityProviderListSchema } from "@skill-registry/shared";
+import { PublicIdentityProviderListSchema } from "@skillset/shared";
 import type { Hono } from "hono";
 import type { AuthRegistry } from "../auth/instance.js";
 import type { AuthVariables } from "../auth/middleware.js";

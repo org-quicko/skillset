@@ -1,4 +1,4 @@
-import { GIT_PROVIDERS, type ConnectableProvider, type Connection } from "@skill-registry/shared";
+import { GIT_PROVIDERS, type ConnectableProvider, type Connection } from "@skillset/shared";
 import { EllipsisIcon, ExternalLinkIcon, Link2OffIcon } from "lucide-react";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Panel } from "@/components/panel";

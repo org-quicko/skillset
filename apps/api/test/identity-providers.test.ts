@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import type { Role } from "@skill-registry/shared";
+import type { Role } from "@skillset/shared";
 import { eq } from "drizzle-orm";
 import { organisationGate } from "../src/auth/instance.js";
 import { identityProviders, users, type IdentityProviderRow } from "../src/db/schemas/index.js";

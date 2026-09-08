@@ -43,8 +43,8 @@ const TRANSPARENT_SURFACES = {
 /** Matches the app's `::-webkit-scrollbar` width, since the two sit on the same page. */
 export const MONACO_SCROLLBAR_SIZE = 8;
 
-export const MONACO_LIGHT_THEME = "skillreg-light";
-export const MONACO_DARK_THEME = "skillreg-dark";
+export const MONACO_LIGHT_THEME = "skillset-light";
+export const MONACO_DARK_THEME = "skillset-dark";
 
 let themesDefined = false;
 
@@ -75,7 +75,7 @@ export function defineMonacoThemes(): void {
  * Answered out of Monaco's own language registry rather than a table of our
  * own: each registered language already declares the extensions and bare
  * filenames it covers, so asking it is both shorter and more complete than
- * restating a subset here. `artifactMediaType` (`@skill-registry/shared`) is
+ * restating a subset here. `artifactMediaType` (`@skillset/shared`) is
  * the separate question of whether a file is text *at all* — this one only
  * runs once the answer to that is yes.
  *

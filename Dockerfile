@@ -10,7 +10,7 @@ FROM deps AS build-web
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/web apps/web
-RUN bun run --filter '@skill-registry/web' build
+RUN bun run --filter '@skillset/web' build
 
 FROM oven/bun:1-slim AS runtime
 WORKDIR /app

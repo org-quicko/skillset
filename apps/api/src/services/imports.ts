@@ -5,7 +5,7 @@ import {
   SkillFolderError,
   type SkillFile,
   type SkillSourceLocation,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import {
   AppNotInstalledError,
   ConnectionExpiredError,
@@ -345,7 +345,7 @@ export class ImportsService {
         headers: {
           accept: "application/json",
           authorization: `Bearer ${token}`,
-          "user-agent": "skill-registry",
+          "user-agent": "skillset",
         },
         redirect: "manual",
       });

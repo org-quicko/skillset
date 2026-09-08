@@ -1,4 +1,4 @@
-import { ApiError, apiErrorFrom, parseApiResponse } from "@skill-registry/shared";
+import { ApiError, apiErrorFrom, parseApiResponse } from "@skillset/shared";
 import type { z } from "zod";
 import { queryClient } from "./query-client";
 import { discardSessionState } from "./query-keys";

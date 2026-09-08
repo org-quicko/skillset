@@ -1,4 +1,4 @@
-import { SetupInitSchema, SetupStateSchema, UserSchema } from "@skill-registry/shared";
+import { SetupInitSchema, SetupStateSchema, UserSchema } from "@skillset/shared";
 import type { Hono } from "hono";
 import type { AuthRegistry } from "../auth/instance.js";
 import type { AuthVariables } from "../auth/middleware.js";

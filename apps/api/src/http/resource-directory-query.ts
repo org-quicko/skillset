@@ -6,7 +6,7 @@ import {
   SKILL_DIRECTORY_MIN_PAGE_SIZE,
   SKILL_DIRECTORY_SORT_FIELDS,
   SKILL_DIRECTORY_SORT_ORDERS,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import type { Context } from "hono";
 import { z } from "zod";
 import { parseValue } from "./body.js";

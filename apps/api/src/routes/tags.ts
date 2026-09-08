@@ -1,4 +1,4 @@
-import { TagListSchema, TagSchema } from "@skill-registry/shared";
+import { TagListSchema, TagSchema } from "@skillset/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { readJsonObject } from "../http/body.js";

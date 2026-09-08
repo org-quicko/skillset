@@ -1,4 +1,4 @@
-import { UserSchema, type Role } from "@skill-registry/shared";
+import { UserSchema, type Role } from "@skillset/shared";
 import { registryFetch } from "../http.js";
 import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 

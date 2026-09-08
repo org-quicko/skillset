@@ -1,4 +1,4 @@
-import type { User } from "@skill-registry/shared";
+import type { User } from "@skillset/shared";
 import { useEffect, useRef, useState } from "react";
 import { InfoRow } from "@/components/info-row";
 import { ChangePasswordDialog } from "@/components/password-card";

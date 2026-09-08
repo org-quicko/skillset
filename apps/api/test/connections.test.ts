@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import type { ConnectionList, Role } from "@skill-registry/shared";
+import type { ConnectionList, Role } from "@skillset/shared";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { and, eq } from "drizzle-orm";
 import { connections, integrations, users, type IntegrationRow, type UserRow } from "../src/db/schemas/index.js";
@@ -197,7 +197,7 @@ describe("Connections (ADR-0024)", () => {
       expect(setCookie).toContain("HttpOnly");
       expect(setCookie.toLowerCase()).toContain("samesite=lax");
       // The nonce must not travel where a referrer or a log could carry it.
-      const nonce = /skillreg_connection_state=([^;]+)/.exec(setCookie)?.[1] ?? "";
+      const nonce = /skillset_connection_state=([^;]+)/.exec(setCookie)?.[1] ?? "";
       expect(nonce.length).toBeGreaterThan(10);
       expect(res.headers.get("location") ?? "").not.toContain(nonce);
     });
@@ -287,7 +287,7 @@ describe("Connections (ADR-0024)", () => {
       const { state, nonce } = await service.start(writer, "github");
 
       const res = await callback(
-        `${writerCookie}; skillreg_connection_state=${nonce}`,
+        `${writerCookie}; skillset_connection_state=${nonce}`,
         `error=access_denied&state=${encodeURIComponent(state)}`,
       );
 
@@ -314,7 +314,7 @@ describe("Connections (ADR-0024)", () => {
       const tampered = `${state.slice(0, -2)}xx`;
 
       const res = await callback(
-        `${writerCookie}; skillreg_connection_state=${nonce}`,
+        `${writerCookie}; skillset_connection_state=${nonce}`,
         `code=abc&state=${encodeURIComponent(tampered)}`,
       );
 
@@ -330,7 +330,7 @@ describe("Connections (ADR-0024)", () => {
       const state = new URL(redirect_to).searchParams.get("state") ?? "";
 
       const res = await callback(
-        `${writerCookie}; skillreg_connection_state=${nonce}`,
+        `${writerCookie}; skillset_connection_state=${nonce}`,
         `code=abc&state=${encodeURIComponent(state)}`,
       );
 
@@ -355,7 +355,7 @@ describe("Connections (ADR-0024)", () => {
       const state = new URL(redirect_to).searchParams.get("state") ?? "";
 
       const res = await callback(
-        `${writerCookie}; skillreg_connection_state=someone-elses-nonce`,
+        `${writerCookie}; skillset_connection_state=someone-elses-nonce`,
         `code=abc&state=${encodeURIComponent(state)}`,
       );
 
@@ -383,13 +383,13 @@ describe("Connections (ADR-0024)", () => {
       await seedIntegration();
       const { redirect_to, nonce } = await service.start(writer, "github");
       const state = new URL(redirect_to).searchParams.get("state") ?? "";
-      const cookie = `${writerCookie}; skillreg_connection_state=${nonce}`;
+      const cookie = `${writerCookie}; skillset_connection_state=${nonce}`;
       const query = `code=abc&state=${encodeURIComponent(state)}`;
 
       const first = await callback(cookie, query);
       // The exchange itself fails here (no stub reaches the route), but the
       // response must clear the cookie either way — that is what burns it.
-      expect(first.headers.get("set-cookie") ?? "").toMatch(/skillreg_connection_state=;|Max-Age=0/);
+      expect(first.headers.get("set-cookie") ?? "").toMatch(/skillset_connection_state=;|Max-Age=0/);
     });
   });
 

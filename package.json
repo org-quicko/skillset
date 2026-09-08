@@ -1,7 +1,7 @@
 {
-  "name": "skill-registry",
+  "name": "skillset",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -10,13 +10,13 @@
     "bun": ">=1.4.0"
   },
   "scripts": {
-    "dev": "bun --filter @skill-registry/api dev",
+    "dev": "bun --filter @skillset/api dev",
     "prebuild": "bun run lint",
-    "build:web": "bun --filter '@skill-registry/web' build",
-    "build:api": "bun --filter '@skill-registry/api' build",
-    "build:cli": "bun --filter '@skill-registry/cli' build",
+    "build:web": "bun --filter @skillset/web build",
+    "build:api": "bun --filter @skillset/api build",
+    "build:cli": "bun --filter @skillset/cli build",
     "build": "bun run build:web && bun run build:api && bun run build:cli",
-    "test": "bun run --filter '@skill-registry/shared' --filter '@skill-registry/api' --filter '@skill-registry/cli' test",
+    "test": "bun run --filter @skillset/shared --filter @skillset/api --filter @skillset/cli test",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint ."
   },

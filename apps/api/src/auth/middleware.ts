@@ -1,4 +1,4 @@
-import { roleMeets, type Role } from "@skill-registry/shared";
+import { roleMeets, type Role } from "@skillset/shared";
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import type { Database } from "../db/client.js";

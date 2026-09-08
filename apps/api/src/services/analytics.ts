@@ -25,7 +25,7 @@ export class AnalyticsService {
 
   /**
    * Records one Install of a Skill — a Download of its Artifact today, and
-   * eventually a `skillreg add` too (ticket 09 would call this same method
+   * eventually a `skillset add` too (ticket 09 would call this same method
    * with `source: "cli"`).
    *
    * @remarks

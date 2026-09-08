@@ -1,5 +1,5 @@
 import { count, sql } from "drizzle-orm";
-import type { SetupInit } from "@skill-registry/shared";
+import type { SetupInit } from "@skillset/shared";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
 import { advisoryLockKey } from "../db/advisory-lock.js";
@@ -13,7 +13,7 @@ import type { Logger } from "../logger.js";
 // Transaction-scoped (pg_advisory_xact_lock) rather than session-scoped:
 // postgres.js pools connections per statement, so a session-level
 // lock/unlock pair isn't guaranteed to run on the same backend session.
-const INIT_LOCK_KEY = advisoryLockKey("skill-registry:setup-init");
+const INIT_LOCK_KEY = advisoryLockKey("skillset:setup-init");
 
 /** First-run initialisation: whether the instance has a superadmin, and creating one. */
 export class SetupService {

@@ -1,4 +1,4 @@
-import type { Tag } from "@skill-registry/shared";
+import type { Tag } from "@skillset/shared";
 import { ChevronsUpDownIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

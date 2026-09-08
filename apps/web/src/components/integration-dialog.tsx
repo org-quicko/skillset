@@ -1,4 +1,4 @@
-import type { Integration } from "@skill-registry/shared";
+import type { Integration } from "@skillset/shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";

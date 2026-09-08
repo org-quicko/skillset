@@ -1,4 +1,4 @@
-import { SkillValidationError } from "@skill-registry/shared";
+import { SkillValidationError } from "@skillset/shared";
 
 /**
  * Turns a shared-rules validation failure into the one-line, rule-naming message the CLI

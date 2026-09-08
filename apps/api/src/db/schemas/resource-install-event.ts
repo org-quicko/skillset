@@ -4,7 +4,7 @@ import { resources } from "./resource";
 
 /**
  * Where a recorded Install came from (ADR-0012): a web Download for a Kind
- * with an Artifact, or `skillreg add` (ticket 09). The Postgres type is
+ * with an Artifact, or `skillset add` (ticket 09). The Postgres type is
  * still named `skill_install_source` — nothing about "where an Install came
  * from" is Skill-specific, but renaming it is out of this ticket's scope
  * (spec: `.scratch/generic-resources/spec.md`).

@@ -1,4 +1,4 @@
-import { SkillFilesSchema, SkillSourceLocationSchema, SkillSourcesSchema } from "@skill-registry/shared";
+import { SkillFilesSchema, SkillSourceLocationSchema, SkillSourcesSchema } from "@skillset/shared";
 import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { parseValue, readJsonObject } from "../http/body.js";

@@ -1,4 +1,4 @@
-import { AGENTS, extractSkillFiles, SkillSchema, type AgentId, type Scope } from "@skill-registry/shared";
+import { AGENTS, extractSkillFiles, SkillSchema, type AgentId, type Scope } from "@skillset/shared";
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch } from "../http.js";
 import { installSkill, type WriteReport } from "../install.js";

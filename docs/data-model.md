@@ -10,7 +10,7 @@ Git Provider, Integration, Connection, Import.
 
 Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
 TypeScript type — there is no separate camelCase domain shape or conversion boundary. Types are
-`z.infer`red from the Zod schemas in `@skill-registry/shared`, so a Drizzle row, a wire payload,
+`z.infer`red from the Zod schemas in `@skillset/shared`, so a Drizzle row, a wire payload,
 and a TypeScript type all agree on the same field names by construction. A column name appearing
 in a wire payload is therefore expected, not a leak.
 
@@ -123,7 +123,7 @@ generated once, on first insert, and never changes across republishes of the sam
 (the conflict-update path never sets it).
 
 `kind` is plain text, validated in the service against the `KINDS` map in
-`@skill-registry/shared` — the same treatment `integrations.provider` gets against
+`@skillset/shared` — the same treatment `integrations.provider` gets against
 `GIT_PROVIDERS` (ADR-0024) — rather than a Postgres enum, so registering a new Kind is an insert,
 not a migration.
 
@@ -142,7 +142,7 @@ supplies one, though Skill's own shared validation still requires it. Rendered t
 allowlist sanitiser, never trusted as markup.
 
 **`payload`** carries the Kind's own fields, validated by `ResourcePayloadSchema`'s discriminated
-union in `@skill-registry/shared` (ADR-0026). For `skill`, this is the four optional Agent Skills
+union in `@skillset/shared` (ADR-0026). For `skill`, this is the four optional Agent Skills
 spec fields the table used to carry as flat columns — `license`, `compatibility`, `metadata`, and
 `allowed_tools` — each `null` until a publish sets it. A value that fails validation rejects the
 whole publish rather than being stored or dropped silently (ADR-0009). Publishing always writes
@@ -280,7 +280,7 @@ row per Install, an append-only history rather than a running total. Replaces
 The Postgres enum is still named `skill_install_source` — nothing about "where an Install came
 from" is Skill-specific, but renaming the type was out of scope for the ticket that generalised
 this table (spec: `.scratch/generic-resources/spec.md`). It has two values: `web` (a Download of
-a Kind's Artifact through the API) or `cli` (`skillreg add`, ticket 09). Downloading a Skill's
+a Kind's Artifact through the API) or `cli` (`skillset add`, ticket 09). Downloading a Skill's
 Artifact appends one row here today, via an internal `recordInstall` function (not a public
 endpoint — nothing lets a client inflate this directly for a Kind with an Artifact), called once
 every file of the Artifact is in hand and the zip has been assembled (ADR-0032) — so a download
@@ -457,7 +457,7 @@ it.
 
 `provider` is **plain text, not an enum**, so registering a new Git Provider is an insert rather
 than a migration (ADR-0024). The values it may take are the keys of `GIT_PROVIDERS` in
-`@skill-registry/shared`, checked in the service. Since ADR-0025, `provider` carries no uniqueness
+`@skillset/shared`, checked in the service. Since ADR-0025, `provider` carries no uniqueness
 constraint and no incoming foreign key: `connections.integration_id` references this table's `id`
 instead, recording which specific app a grant was issued through, while `connections.provider`
 stays denormalized for the provider-keyed read paths that never needed to change.

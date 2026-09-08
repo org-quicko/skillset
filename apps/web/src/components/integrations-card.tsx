@@ -1,4 +1,4 @@
-import { GIT_PROVIDERS, type Integration } from "@skill-registry/shared";
+import { GIT_PROVIDERS, type Integration } from "@skillset/shared";
 import { EllipsisIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { DeleteIntegrationDialog } from "@/components/delete-integration-dialog";

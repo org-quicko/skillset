@@ -59,7 +59,7 @@ export function isExcludedPath(path: string): boolean {
  *
  * @remarks
  * Applied at two edges, which is why it lives here rather than in the zip
- * reader it started in: `skillreg add` checks every entry of a downloaded
+ * reader it started in: `skillset add` checks every entry of a downloaded
  * Artifact before writing it to a developer's filesystem, and the API checks
  * every path a publisher declares before turning it into a storage key
  * (ADR-0032). The same rules describe both dangers — a path that is safe as
@@ -110,7 +110,7 @@ export function validateArtifactPath(path: string): void {
  * @remarks
  * Both limits are properties of the files themselves rather than of any
  * archive built from them, so they apply identically to a client about to
- * upload, to the API validating a declared manifest, and to `skillreg add`
+ * upload, to the API validating a declared manifest, and to `skillset add`
  * unpacking a download. `sizeOf` is what lets the API apply them to a
  * manifest of `(path, size)` pairs it has no bytes for.
  *
@@ -279,7 +279,7 @@ export function collectSkillFiles(files: SkillFile[]): SkillFile[] {
  * @remarks
  * An Artifact is *stored* as its files, one object each (ADR-0032); a zip is
  * a representation the API assembles on demand for the consumers that want
- * one — `skillreg add`, the web Download control, and a marketplace
+ * one — `skillset add`, the web Download control, and a marketplace
  * `archive` source. Limits are checked before compressing, so an over-limit
  * set of files is refused without spending the work, and the transfer limit
  * afterwards, since it is a property of the compressed bytes.

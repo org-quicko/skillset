@@ -8,7 +8,7 @@ import {
   type SkillFile,
   type SkillFolderReason,
   type SkillSourceLocation,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { ApiError, apiFetch } from "@/lib/api";
 
 /**

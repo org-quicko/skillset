@@ -1,4 +1,4 @@
-import type { SkillDirectorySortField, SkillDirectorySortOrder } from "@skill-registry/shared";
+import type { SkillDirectorySortField, SkillDirectorySortOrder } from "@skillset/shared";
 import { ArrowDownIcon, ArrowUpIcon, SearchXIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";

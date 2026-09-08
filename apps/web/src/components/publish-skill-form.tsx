@@ -1,4 +1,4 @@
-import { providerForHost, SkillValidationError, type SkillFile, type SkillSourceLocation } from "@skill-registry/shared";
+import { providerForHost, SkillValidationError, type SkillFile, type SkillSourceLocation } from "@skillset/shared";
 import { useRef, useState, type DragEvent } from "react";
 import { connectHref, useConnections } from "@/hooks/use-connections";
 import { Button } from "@/components/ui/button";

@@ -1,4 +1,4 @@
-import { SkillValidationError, TagValidationError } from "@skill-registry/shared";
+import { SkillValidationError, TagValidationError } from "@skillset/shared";
 import type { Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AuthVariables } from "../auth/middleware.js";

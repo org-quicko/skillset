@@ -1,4 +1,4 @@
-import { validateTagName, type Tag } from "@skill-registry/shared";
+import { validateTagName, type Tag } from "@skillset/shared";
 import { PencilIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";

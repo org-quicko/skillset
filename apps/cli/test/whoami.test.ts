@@ -21,7 +21,7 @@ function fakeUser(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe("runWhoami", () => {
   it("reports the resolved identity when authenticated via the config file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
@@ -36,7 +36,7 @@ describe("runWhoami", () => {
   });
 
   it("prefers env credentials over the config file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       await writeConfig(configPath, { registry: "https://file.example", token: "file-token" });
@@ -48,7 +48,7 @@ describe("runWhoami", () => {
       const result = await runWhoami({
         fetch: fetchImpl,
         configPath,
-        env: { SKILLREG_REGISTRY: "https://env.example", SKILLREG_TOKEN: "env-token" },
+        env: { SKILLSET_REGISTRY: "https://env.example", SKILLSET_TOKEN: "env-token" },
       });
 
       expect(result).toEqual({ registry: "https://env.example", email: "ci@example.com", role: "writer" });
@@ -60,7 +60,7 @@ describe("runWhoami", () => {
   });
 
   it("errors clearly when not logged in, with no request made", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skillreg-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, fakeUser()));

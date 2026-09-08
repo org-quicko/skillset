@@ -5,7 +5,7 @@ import {
   type SetupInit,
   type SetupState,
   type User,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";

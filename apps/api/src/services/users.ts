@@ -5,7 +5,7 @@ import {
   type PasswordReplace,
   type UserCreate,
   type UserUpdateName,
-} from "@skill-registry/shared";
+} from "@skillset/shared";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getPasswordCredential, setPasswordCredential } from "../auth/credential.js";
