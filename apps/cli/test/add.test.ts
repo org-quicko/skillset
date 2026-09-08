@@ -36,7 +36,7 @@ function validArtifactZip(): Uint8Array {
 function stubRegistry(artifact: Uint8Array = validArtifactZip()) {
   return stubFetch((url) => {
     if (url === "https://registry.example/api/resources/skill/by-name/code-review") return jsonResponse(200, fakeSkill());
-    if (url === "https://registry.example/api/resources/skill-1/artifact") return new Response(artifact, { status: 200 });
+    if (url === "https://registry.example/api/resources/skill-1/artifact?source=cli") return new Response(artifact, { status: 200 });
     throw new Error(`Unexpected request to ${url}`);
   });
 }
@@ -98,6 +98,26 @@ describe("runAdd", () => {
       for (const call of calls) {
         expect(call.init?.headers).not.toHaveProperty("authorization");
       }
+    });
+  });
+
+  it("downloads the Artifact with `?source=cli`, tagging the Install as the CLI's (ticket 48)", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const { fetch: fetchImpl, calls } = stubRegistry();
+
+      await runAdd(
+        baseDeps({
+          fetch: fetchImpl,
+          configPath: join(configDir, "config.json"),
+          env: { SKILLSET_REGISTRY: "https://registry.example" },
+          cwd,
+          homeDir: cwd,
+        }),
+        { name: "code-review", scope: "project", agent: "codex" },
+      );
+
+      const artifactCall = calls.find((call) => call.url.includes("/resources/skill-1/artifact"));
+      expect(artifactCall?.url).toBe("https://registry.example/api/resources/skill-1/artifact?source=cli");
     });
   });
 

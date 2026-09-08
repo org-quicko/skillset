@@ -11,9 +11,17 @@ import type { Hono } from "hono";
 import { requireAuth, requireRole, type AuthDependencies, type AuthVariables } from "../auth/middleware.js";
 import { readJsonObject } from "../http/body.js";
 import { parseResourceDirectoryQuery } from "../http/resource-directory-query.js";
+import type { InstallSource } from "../services/analytics.js";
 import type { ResourcesService } from "../services/resources.js";
 import { ARTIFACT_ARCHIVE_CONTENT_TYPE } from "../storage/keys.js";
 import type { TagsService } from "../services/tags.js";
+
+/** Every value `?source=` on `GET /resources/:id/artifact` recognises. */
+const INSTALL_SOURCES: readonly InstallSource[] = ["web", "cli", "mcp"];
+
+function isInstallSource(value: string): value is InstallSource {
+  return (INSTALL_SOURCES as readonly string[]).includes(value);
+}
 
 /**
  * The Content-Security-Policy one Artifact file is served under, or
@@ -165,7 +173,14 @@ export function registerResourcesRoutes(app: Hono<{ Variables: AuthVariables }>,
   // Download control uses — no `Accept: application/json` representation any
   // more, since there is no presigned URL left to hand back.
   app.get("/resources/:id/artifact", async (c) => {
-    const { name, bytes } = await deps.resources.buildArtifactArchive(c.req.param("id"));
+    // `?source=` identifies the caller (ticket 48): the web interface's
+    // Download button sends none, `skillset add` sends `cli`. Anything
+    // missing or unrecognised defaults to `web` rather than refusing the
+    // download, so a stale or unknown client keeps working exactly as
+    // before.
+    const rawSource = c.req.query("source");
+    const source: InstallSource = rawSource && isInstallSource(rawSource) ? rawSource : "web";
+    const { name, bytes } = await deps.resources.buildArtifactArchive(c.req.param("id"), source);
     // `name` is already constrained to SKILL_NAME_PATTERN, so it is safe to
     // drop into the header unescaped.
     return c.body(bytes as unknown as ArrayBuffer, 200, {

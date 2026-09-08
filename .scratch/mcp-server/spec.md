@@ -47,19 +47,90 @@ It exposes two tools.
 search, returning each Skill's `name` and its `description` — the frontmatter description, which is
 written precisely so an Agent can judge relevance.
 
-`add_skills` installs one or more Skills into the directory the configured Agent actually reads
+`add_skills` installs one or more Skills into the directory the detected Agent actually reads
 from. Because the server runs on the User's machine, it performs the whole install itself: resolve,
 download, validate, stage, move, clean up. The User never names a path, never picks an Agent from a
 list, and never sees a zip.
+
+## Configuration
+
+Everything the server needs is an argument in the client's own MCP configuration. There is no
+config file, no `login`, and no state carried between runs.
+
+| Flag | Meaning | Required | Default |
+| --- | --- | --- | --- |
+| `--registry <url>` | The Registry to read from. Falls back to `SKILLSET_REGISTRY`. | Yes | — |
+| `--scope <project\|user>` | Where to install. | No | `project` |
+| `--agent <id>` | Override the detected Agent. Escape hatch, not part of setup. | No | detected |
+| `--log-level <level>` | Diagnostics on stderr. | No | `warn` |
+
+```json
+{
+  "mcpServers": {
+    "skillset": {
+      "command": "npx",
+      "args": ["-y", "@skillset/mcp@latest", "--registry", "https://registry.example"],
+      "env": {}
+    }
+  }
+}
+```
+
+The Registry's URL is the only thing a User supplies. It is required and has no default: a Registry
+is self-hosted, so there is no address to guess, and silently reading from the wrong one is worse
+than refusing. Its absence is an error naming both the flag and the environment variable.
+
+The server carries no credential at all — there is no `--token` and no `SKILLSET_TOKEN`. Reads are
+open (ADR-0013), so it never needs one, and holding one would make it the first thing here capable
+of acting as a User. The environment block stays empty.
+
+The web interface should render this snippet with the Registry's own URL already filled in, so that
+adopting the server is a copy rather than a transcription. That is the whole of the setup story for
+the User this feature exists for.
+
+## Detecting the Agent
+
+The Agent is not configured. Asking a User which coding Agent they are running, in order to install
+into a directory that Agent already owns, is a question the server should be able to answer itself.
+
+**What makes this tractable is that precision is not required.** Ten of the twenty-five rows in the
+Agent table read Skills from the canonical `.agents/skills` directory at project Scope, and `shared`
+already exposes the predicate for it. Failing to distinguish *among those ten* costs nothing,
+because the install each of them produces is byte-identical. Detection only has to answer a
+narrower question: is this one of the fifteen Agents with a directory of its own, and if so, which?
+
+Resolution proceeds in order, stopping at the first answer:
+
+1. **The client identity in the request's `_meta`.** The 2026-07-28 revision carries version,
+   identity, and capabilities as per-request metadata, so a modern client names itself on every
+   call. Matched case-insensitively against the Agent table's ids and display names. This is the
+   protocol-native signal and the one to trust.
+2. **Environment markers the host sets.** Several Agents already announce themselves this way, and
+   the table reads some of these keys for other purposes.
+3. **A single unambiguous Agent directory in the project.** Decisive only when exactly one
+   non-universal Agent's own directory is present; two or more is not an answer and resolution
+   continues.
+4. **The canonical directory, unlinked.** Install into `.agents/skills` and link nothing. This is
+   outright correct for the ten universal Agents and a working — if unlinked — install for the rest.
+
+Step 4 restores the use case ADR-0014's `generic` Agent served, as a fallback *behaviour* rather
+than a table row, which is what ADR-0022 removed. Worth saying plainly so it does not read as an
+oversight.
+
+**Every result names the Agent that was detected, which step answered, and the exact path written.**
+This is the mitigation for the real risk here, which is that a wrong detection writes somewhere the
+User never chose and — unlike a wrong flag — is nobody's visible mistake. `--agent` overrides the
+ladder entirely and exists for that case; it stays out of the setup snippet so that the ordinary
+User never meets it.
 
 ## Install Sequence
 
 `add_skills` performs this per Skill, entirely within the server process:
 
 1. Resolve the Skill by `name` against the Registry, yielding its id, `description`, and `body`.
-2. Resolve the target directory from the configured Agent and Scope, and the directory name from the
-   Skill's `name` through the existing sanitiser. An Agent with no skills directory at this Scope
-   goes to step 8.
+2. Resolve the target directory from the detected Agent and the configured Scope, and the directory
+   name from the Skill's `name` through the existing sanitiser. An Agent with no skills directory at
+   this Scope goes to step 8.
 3. If the target already exists and overwrite was not requested, refuse — naming the Skill that is
    already there — and stop. This Skill contributes a refusal to the batch's outcomes.
 4. Download the Artifact from the Registry.
@@ -123,23 +194,32 @@ is preferred to a remote server here.
     one, so that I do not sit waiting for a Skill that has not been loaded yet.
 24. As a developer, I want the `SKILL.md` body returned alongside the install, so that the current
     session can use the Skill immediately even before it is loaded properly.
-25. As a developer whose Agent is not in the Registry's Agent table, I want to name my Agent
-    explicitly in the configuration, so that the server still knows where to write.
-26. As a developer, I want to point the server at a different Registry by changing one flag, so that
+25. As a User, I want the server to work out which coding Agent I am running, so that setting it up
+    is naming my Registry and nothing else.
+26. As a User of an Agent the server cannot identify, I want the Skill installed into the canonical
+    directory anyway, so that an unrecognised Agent degrades to a working install rather than a
+    refusal.
+27. As a User, I want every install to tell me which Agent was detected and where it wrote, so that
+    a wrong guess is visible to me rather than silent.
+28. As a developer whose Agent is detected wrongly, or is not in the table at all, I want to override
+    the detection, so that I am not stuck with an answer I cannot correct.
+29. As a developer, I want to point the server at a different Registry by changing one flag, so that
     working against a staging Registry costs nothing.
-27. As a User of an Agent with no skills directory at the configured Scope, I want the Artifact's
+30. As a User of an Agent with no skills directory at the configured Scope, I want the Artifact's
     location and the Skill's body anyway, so that the tool is useful rather than merely refusing.
-28. As a writer, I want an Install through the MCP server counted, so that my Skill's usage is not
+31. As a writer, I want an Install through the MCP server counted, so that my Skill's usage is not
     undercounted as adoption moves off the CLI.
-29. As an Admin, I want an MCP Install distinguishable from a web Download and a CLI `add`, so that
+32. As an Admin, I want an MCP Install distinguishable from a web Download and a CLI `add`, so that
     I can see which consumption path the team actually uses.
-30. As an Admin, I want the server to expose no publish, delete, or administrative tool, so that it
+33. As an Admin, I want the server to expose no publish, delete, or administrative tool, so that it
     cannot change the Registry however it is configured.
-31. As an Admin, I want the server to serve only the `skill` Kind, so that it cannot be mistaken for
+34. As an Admin, I want the server to hold no credential at all, so that a process configured once
+    and then forgotten can never act as one of my Users.
+35. As an Admin, I want the server to serve only the `skill` Kind, so that it cannot be mistaken for
     a way to obtain an MCP Server or a Plugin.
-32. As a maintainer, I want one installer shared by the CLI and the MCP server, so that the two
+36. As a maintainer, I want one installer shared by the CLI and the MCP server, so that the two
     paths cannot drift into disagreeing about what installing means.
-33. As a maintainer, I want the tool handlers testable without standing up an MCP client, so that
+37. As a maintainer, I want the tool handlers testable without standing up an MCP client, so that
     the behaviour is covered by fast tests at a seam that already exists.
 
 ## Implementation Decisions
@@ -166,10 +246,18 @@ The paste-a-JSON-block story depends on `npx` resolving a real package from a re
 release pipeline — version, scope, access, and what goes in `files` — has to exist before the
 feature is usable by the User it is for. Worth sequencing first rather than discovering late.
 
-**Configuration is flags in the client's MCP configuration, not a config file.** The Registry's URL,
-the Agent, and the Scope are passed as arguments. The server reads no config file of its own and
-performs no `login`; a Token may be supplied by flag or environment for parity with the CLI, but
-nothing requires one because reads are open (ADR-0013).
+**Configuration is flags in the client's MCP configuration, not a config file.** The Registry's URL
+and the Scope are passed as arguments; the Agent is detected. The server reads no config file of its
+own, performs no `login`, and holds no credential — no Token flag, no Token environment variable, no
+fallback to the CLI's stored config. It sends no authorization header on any request.
+
+**Carrying no credential is a decision, not an omission.** Reads are open (ADR-0013), so a Token
+would buy nothing today, and the cost of having one is not zero: it would make this the first
+component here capable of acting *as* a User, and it would do so unattended, inside a process the
+User configured once and then forgot. A Registry deployment that gates reads therefore cannot be
+used with this server — that is the accepted consequence, and `skillset add` remains the path for
+such a deployment. Introducing a credential later means answering how it is obtained, stored, and
+scoped, which is a different spec.
 
 **There is no OAuth, and this was decided rather than deferred.** Two facts settle it. MCP's
 authorization specification governs HTTP transports only — it says in as many words that a stdio
@@ -178,9 +266,8 @@ the client-driven handshake is not available to us regardless. And nothing here 
 both tools are reads (ADR-0013), and the one thing a sign-in flow would otherwise establish, which
 Registry to talk to, is a setup flag. Running an OAuth flow of our own would reintroduce the
 browser-and-terminal step that `npx` distribution exists to remove, in exchange for nothing this
-feature does. Should a Registry deployment ever gate reads, the optional Token above is the escape
-hatch; adopting OAuth would be a change to the Registry's own authentication story, not to this
-server.
+feature does. With no Token either, this server simply holds no credential of any kind; adopting
+OAuth would be a change to the Registry's own authentication story, not to this server.
 
 **No tool writes to the Registry, under any flag.** `discourse-mcp` gates mutations behind
 `--allow_writes`; the equivalent here is simply not to build them. Publishing and deleting need a
@@ -212,10 +299,12 @@ explicitly asked to update or replace, and the refusal names the existing Skill 
 something concrete to put to the User. The divergence lives in the tool handler, not the shared
 installer, so `skillset add` is unaffected.
 
-**The target Agent comes from configuration, not from the tool call.** The Agent invoking the tool
-is the Agent being installed for; making the model assert its own identity is a worse interface than
-a flag set once. Where the host's advertised identity maps onto a row in the Agent table it may be
-used, but the flag is the contract and the fallback.
+**The Agent is detected, not configured and not a tool argument.** It is neither the User's job to
+declare which coding Agent they are running nor the model's to assert its own identity — the server
+is running inside the answer. The ladder in Detecting the Agent above resolves it, `--agent`
+overrides it, and no tool takes it as a parameter. The consequence to accept knowingly is that a
+misdetection is our error rather than the User's, and invisible where a bad flag would not be, which
+is why every result reports what was detected and where it wrote.
 
 **The Artifact download records an Install, and needs its own source.** Building the Artifact
 archive currently records the Install against the web source unconditionally. ADR-0028 makes each
@@ -234,10 +323,16 @@ the handler got there — not the order of internal calls, not the staging direc
 helper was used.
 
 **One seam: the tool handler functions.** Each tool is a function taking an injected `fetch`, an
-environment, a working directory, a home directory, and the configured Agent and Scope, returning
-its result. The MCP protocol layer is a thin registration around these functions and is not itself
+environment, a working directory, a home directory, the resolved Agent, and the Scope, returning its
+result. The MCP protocol layer is a thin registration around these functions and is not itself
 tested; standing up a client to assert on filesystem effects would be a worse test of the same
 behaviour. This is the same seam and the same shape the CLI's `add` command already has.
+
+Detection resolves the Agent *before* the handler and is therefore its own function, taking the
+client identity, the environment, and the project root, and returning an Agent and the step that
+answered. Keeping it out of the handler is what lets the ladder's four steps be tested exhaustively
+without an install per case, and lets every install test state its Agent outright rather than
+contriving a signal to imply one.
 
 **Prior art is the existing CLI command tests**, which are the model to follow rather than a pattern
 to reinvent: a hand-written `fetch` stub that answers the Registry's two requests and records every
@@ -272,7 +367,22 @@ Behaviour to cover:
 - [ ] An Agent with no skills directory at the configured Scope takes the fallback branch.
 - [ ] The fallback carries the Artifact's location, the Manifest, the intended directory, and the
       `SKILL.md` body.
-- [ ] Both tools work with no Token configured.
+- [ ] Neither tool sends an authorization header on any request it makes.
+- [ ] A `SKILLSET_TOKEN` in the environment is ignored rather than picked up.
+- [ ] A missing `--registry` with no `SKILLSET_REGISTRY` refuses at startup, naming both.
+- [ ] `SKILLSET_REGISTRY` is used when `--registry` is absent, and the flag wins when both are given.
+- [ ] `--scope` defaults to project when omitted.
+- [ ] A client naming itself in `_meta` as a known Agent resolves to that Agent, case-insensitively
+      and by display name as well as id.
+- [ ] An unrecognised client identity falls through to the next step rather than failing.
+- [ ] An environment marker resolves the Agent when the client identity does not.
+- [ ] Exactly one non-universal Agent directory in the project resolves to that Agent.
+- [ ] Two such directories do not resolve, and resolution continues to the canonical fallback.
+- [ ] With no signal at all, the install goes to the canonical directory and links nothing.
+- [ ] The canonical fallback produces the same files a universal Agent's install would.
+- [ ] Every install result names the detected Agent, the step that resolved it, and the path written.
+- [ ] `--agent` overrides detection even when a signal would have resolved differently.
+- [ ] An `--agent` naming no row in the table refuses, listing the Agents that exist.
 - [ ] An install records exactly one Install, against the `mcp` source.
 - [ ] `skillset add` still installs exactly as it did, now atomically.
 

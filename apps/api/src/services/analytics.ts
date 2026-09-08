@@ -4,7 +4,7 @@ import { resourceAnalytics, resourceInstallEvents } from "../db/schemas/index.js
 import type { Logger } from "../logger.js";
 
 /** Where a recorded Install came from — see `resourceInstallSourceEnum` (ADR-0012). */
-export type InstallSource = "web" | "cli";
+export type InstallSource = "web" | "cli" | "mcp";
 
 /** One day's Install count, as returned by `getInstallTimeseries`. */
 export interface InstallTrendPoint {
@@ -24,9 +24,9 @@ export class AnalyticsService {
   ) {}
 
   /**
-   * Records one Install of a Skill — a Download of its Artifact today, and
-   * eventually a `skillset add` too (ticket 09 would call this same method
-   * with `source: "cli"`).
+   * Records one Install of a Skill — a Download of its Artifact, whether
+   * from the web interface, `skillset add`, or the MCP server, distinguished
+   * by `source` (`"web"`, `"cli"`, or `"mcp"`).
    *
    * @remarks
    * Best-effort by design: a bookkeeping failure must never stand between a

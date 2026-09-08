@@ -97,6 +97,9 @@ export type AgentId = (typeof AGENT_TABLE)[number]["id"];
 
 export const AGENTS: readonly AgentEntry[] = AGENT_TABLE;
 
+/** Every Agent's id, in {@link AGENTS}'s order — the one place this projection is derived. */
+export const AGENT_IDS: readonly AgentId[] = AGENTS.map((agent) => agent.id);
+
 /**
  * Looks up one Agent's entry in {@link AGENTS}.
  *

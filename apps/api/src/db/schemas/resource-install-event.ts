@@ -4,12 +4,12 @@ import { resources } from "./resource";
 
 /**
  * Where a recorded Install came from (ADR-0012): a web Download for a Kind
- * with an Artifact, or `skillset add` (ticket 09). The Postgres type is
- * still named `skill_install_source` — nothing about "where an Install came
- * from" is Skill-specific, but renaming it is out of this ticket's scope
- * (spec: `.scratch/generic-resources/spec.md`).
+ * with an Artifact, `skillset add` (ticket 09), or the MCP server (ticket
+ * 48). The Postgres type is still named `skill_install_source` — nothing
+ * about "where an Install came from" is Skill-specific, but renaming it is
+ * out of this ticket's scope (spec: `.scratch/generic-resources/spec.md`).
  */
-export const resourceInstallSourceEnum = pgEnum("skill_install_source", ["web", "cli"]);
+export const resourceInstallSourceEnum = pgEnum("skill_install_source", ["web", "cli", "mcp"]);
 
 /**
  * The Install event log (ADR-0012, ADR-0028, spec: `.scratch/skill-analytics/spec.md`)

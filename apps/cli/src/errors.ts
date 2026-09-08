@@ -1,12 +1,12 @@
-import { SkillValidationError } from "@skillset/shared";
+import { formatSkillValidationError, SkillValidationError } from "@skillset/shared";
 
 /**
  * Turns a shared-rules validation failure into the one-line, rule-naming message the CLI
- * prints, and passes anything else through untouched.
+ * prints (via `formatSkillValidationError`, shared with every other surface that catches one),
+ * and passes anything else through untouched.
  *
  * Both the local check `publish` runs and the Artifact inspection `add` runs raise
- * `SkillValidationError`, and both owe the User the rule's name rather than a bare
- * sentence — this is the single place that formatting lives.
+ * `SkillValidationError`, and both owe the User the rule's name rather than a bare sentence.
  *
  * @param error - Whatever was caught.
  * @returns Never; it always throws. Declared `never` so a `try`/`catch` around an
@@ -26,7 +26,7 @@ import { SkillValidationError } from "@skillset/shared";
  */
 export function rethrowValidationError(error: unknown): never {
   if (error instanceof SkillValidationError) {
-    throw new Error(`${error.rule}: ${error.message}${error.field ? ` (${error.field})` : ""}`);
+    throw new Error(formatSkillValidationError(error));
   }
   throw error;
 }

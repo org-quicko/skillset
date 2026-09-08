@@ -1,0 +1,1 @@
+ALTER TYPE "public"."skill_install_source" ADD VALUE 'mcp';

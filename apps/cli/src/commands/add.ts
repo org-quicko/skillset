@@ -1,7 +1,7 @@
-import { AGENTS, extractSkillFiles, SkillSchema, type AgentId, type Scope } from "@skillset/shared";
+import { AGENT_IDS, AGENTS, extractSkillFiles, SkillSchema, type AgentId, type Scope } from "@skillset/shared";
+import { installSkill, type WriteReport } from "@skillset/installer";
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch } from "../http.js";
-import { installSkill, type WriteReport } from "../install.js";
 import { openReadClient, type SessionDeps } from "../session.js";
 
 /** One selectable Agent, as the searchable prompt shows it. */
@@ -36,9 +36,6 @@ export interface AddOptions {
 }
 
 const SCOPES: readonly Scope[] = ["project", "user"];
-
-/** Every Agent `add` can install for, in the order the prompt and the `--agent` help list them. */
-export const AGENT_IDS: readonly AgentId[] = AGENTS.map((agent) => agent.id);
 
 /** The full Agent list handed to the searchable prompt. */
 export const AGENT_CHOICES: readonly AgentChoice[] = AGENTS.map((agent) => ({ id: agent.id, displayName: agent.displayName }));
@@ -97,7 +94,7 @@ export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteR
   const flagAgent = options.agent ? parseAgentId(options.agent) : null;
 
   const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(options.name)}`, SkillSchema);
-  const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact`);
+  const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact?source=cli`);
 
   let files;
   try {

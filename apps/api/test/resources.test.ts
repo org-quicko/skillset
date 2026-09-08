@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { extractSkillFiles, type Role } from "@skillset/shared";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { setPasswordCredential } from "../src/auth/credential.js";
 import { hashPassword } from "../src/auth/password.js";
 import { resourceInstallEvents, resources, users } from "../src/db/schemas/index.js";
@@ -1248,6 +1248,39 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
       .from(resourceInstallEvents)
       .where(eq(resourceInstallEvents.resource_id, publishedSkill.id));
     expect(events.length).toBe(2);
+  });
+
+  it("records the Install's source from `?source=`, defaulting to 'web' when absent or unrecognised (ticket 48)", async () => {
+    const published = await publish(context, writer, "sourced-skill", {
+      description: "Has an Artifact.",
+      body: "Body.\n",
+    });
+    const { skill: publishedSkill } = (await published.json()) as ApiPublished;
+    await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n" });
+
+    const cases: { query: string; expected: "web" | "cli" | "mcp" }[] = [
+      { query: "", expected: "web" },
+      { query: "?source=web", expected: "web" },
+      { query: "?source=cli", expected: "cli" },
+      { query: "?source=mcp", expected: "mcp" },
+      { query: "?source=carrier-pigeon", expected: "web" },
+    ];
+
+    for (const { query } of cases) {
+      const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact${query}`, {
+        headers: { cookie: reader.cookie },
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const events = await context.db
+      .select()
+      .from(resourceInstallEvents)
+      .where(eq(resourceInstallEvents.resource_id, publishedSkill.id))
+      // uuidv7 ids sort in insertion order, unlike `created_at`, which can
+      // tie at this resolution for requests issued back-to-back.
+      .orderBy(asc(resourceInstallEvents.id));
+    expect(events.map((event) => event.source)).toEqual(cases.map((c) => c.expected));
   });
 
   it("serves an unauthenticated request", async () => {

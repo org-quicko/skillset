@@ -1,6 +1,7 @@
-import { cp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { cp, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { platform } from "node:os";
-import { dirname, join, normalize, relative } from "node:path";
+import { basename, dirname, join, normalize, relative } from "node:path";
 import {
   agentSkillsDir,
   agentsSharingDirectory,
@@ -77,13 +78,56 @@ export function sanitizeSkillDirectoryName(name: string): string {
   return sanitized;
 }
 
+/**
+ * Writes `files` into a staging directory beside `targetDir` — under its own parent, so every
+ * move below is a same-filesystem rename rather than a cross-filesystem copy — then swaps it
+ * onto `targetDir`: the previous directory, if any, is renamed aside rather than deleted, the
+ * staged one is renamed into its place, and only then is the previous directory discarded. If
+ * that second rename fails, the previous directory is renamed back rather than left missing —
+ * without this, a rename failing right after the old directory was removed (a transient
+ * Windows lock from an antivirus scan or the search indexer is the ordinary case) would leave
+ * neither the old Skill nor the new one at the target.
+ *
+ * Both temporary directories are prefixed with `.`, which the Skill name sanitiser
+ * ({@link sanitizeSkillDirectoryName}) never produces, so a leftover from an interrupted run
+ * cannot collide with, or be mistaken for, a real Skill directory.
+ *
+ * @throws Error when a file cannot be written, or when the swap itself fails; `targetDir` is
+ * left exactly as it was found, and both temporary directories are removed before the error
+ * propagates.
+ */
 async function writeSkillFiles(targetDir: string, files: SkillFile[]): Promise<void> {
-  await rm(targetDir, { recursive: true, force: true });
-  await mkdir(targetDir, { recursive: true });
-  for (const file of files) {
-    const filePath = join(targetDir, ...file.path.split("/"));
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, file.bytes);
+  const parent = dirname(targetDir);
+  const stagingDir = join(parent, `.skillset-staging-${basename(targetDir)}-${randomUUID()}`);
+  const trashDir = join(parent, `.skillset-trash-${basename(targetDir)}-${randomUUID()}`);
+
+  try {
+    await mkdir(stagingDir, { recursive: true });
+    for (const file of files) {
+      const filePath = join(stagingDir, ...file.path.split("/"));
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, file.bytes);
+    }
+
+    const hadPrevious = await rename(targetDir, trashDir).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+        return false;
+      },
+    );
+
+    try {
+      await rename(stagingDir, targetDir);
+    } catch (error) {
+      if (hadPrevious) {
+        await rename(trashDir, targetDir).catch(() => {});
+      }
+      throw error;
+    }
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true });
+    await rm(trashDir, { recursive: true, force: true });
   }
 }
 
@@ -113,6 +157,55 @@ async function symlinkInto(linkPath: string, canonicalTarget: string): Promise<v
 async function copyInto(linkPath: string, canonicalTarget: string): Promise<void> {
   await clearTarget(linkPath);
   await cp(canonicalTarget, linkPath, { recursive: true });
+}
+
+export interface ResolvedInstallTarget {
+  /** The Skill's name, sanitised into a single safe directory name. */
+  directoryName: string;
+  /** The canonical `.agents/skills` directory at `scope`, before `directoryName` is appended. */
+  canonicalDir: string;
+  /** Where the Skill's files would be written — always `<canonicalDir>/<directoryName>`. */
+  canonicalTarget: string;
+  /** The configured Agent's own directory at `scope`, or `null` when it has none there. */
+  agentDir: string | null;
+}
+
+/**
+ * Resolves where a Skill's files would land, without touching the filesystem — the one
+ * computation `installSkill` and a caller that needs to check for an existing install (the
+ * MCP server's `add_skills`, which refuses rather than overwriting by default) both need, so
+ * neither reimplements it.
+ *
+ * @param ctx - Project root, environment, and home directory to resolve directories against.
+ * `ctx.env` supplies an Agent's own configuration-directory override.
+ * @param skillName - The Skill's name as the Registry reported it; sanitised here via
+ * {@link sanitizeSkillDirectoryName} before it becomes a directory name.
+ * @param scope - "project" to resolve under `ctx.cwd`, "user" for the per-User canonical
+ * directory and the Agent's per-User directory.
+ * @param agentId - The Agent to resolve a target for.
+ * @returns The sanitised directory name, the canonical directory and target it resolves to,
+ * and the configured Agent's own directory at `scope` (`null` when it has none there).
+ * @throws Error when `skillName` sanitises to nothing (via {@link sanitizeSkillDirectoryName}),
+ * or when `agentId` names no Agent.
+ *
+ * @example
+ * ```ts
+ * resolveInstallTarget({ cwd, env: {}, homeDir }, "code-review", "project", "claude-code");
+ * // -> { directoryName: "code-review", canonicalDir: "<cwd>/.agents/skills",
+ * //      canonicalTarget: "<cwd>/.agents/skills/code-review", agentDir: "<cwd>/.claude/skills" }
+ * ```
+ */
+export function resolveInstallTarget(ctx: InstallContext, skillName: string, scope: Scope, agentId: AgentId): ResolvedInstallTarget {
+  const directoryName = sanitizeSkillDirectoryName(skillName);
+  const resolveCtx = { env: ctx.env, homeDir: ctx.homeDir, projectRoot: ctx.cwd };
+
+  // shared's paths are POSIX-style strings, possibly mixed with the host's own separator
+  // once joined onto cwd — `normalize` understands both on every platform Node runs on.
+  const canonicalDir = normalize(canonicalSkillsDir(scope, resolveCtx));
+  const canonicalTarget = join(canonicalDir, directoryName);
+  const agentDir = agentSkillsDir(agentId, scope, resolveCtx);
+
+  return { directoryName, canonicalDir, canonicalTarget, agentDir };
 }
 
 /**
@@ -155,19 +248,13 @@ export async function installSkill(
   agentId: AgentId,
   options: InstallOptions,
 ): Promise<WriteReport> {
-  const directoryName = sanitizeSkillDirectoryName(skillName);
   const resolveCtx = { env: ctx.env, homeDir: ctx.homeDir, projectRoot: ctx.cwd };
-
-  const agentDir = agentSkillsDir(agentId, scope, resolveCtx);
+  const { directoryName, canonicalDir, canonicalTarget, agentDir } = resolveInstallTarget(ctx, skillName, scope, agentId);
   if (agentDir === null) {
     throw new Error(`${getAgent(agentId).displayName} has no user-level skills directory — install it at project scope instead.`);
   }
   const alsoServes = agentsSharingDirectory(agentId, scope, resolveCtx);
 
-  // shared's paths are POSIX-style strings, possibly mixed with the host's own separator
-  // once joined onto cwd — `normalize` understands both on every platform Node runs on.
-  const canonicalDir = normalize(canonicalSkillsDir(scope, resolveCtx));
-  const canonicalTarget = join(canonicalDir, directoryName);
   await writeSkillFiles(canonicalTarget, files);
 
   if (normalize(agentDir) === canonicalDir) {

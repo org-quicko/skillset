@@ -33,7 +33,7 @@ import {
 } from "../http/errors.js";
 import type { ResourceDirectoryQuery } from "../http/resource-directory-query.js";
 import type { Logger } from "../logger.js";
-import type { AnalyticsService, InstallTrendPoint } from "./analytics.js";
+import type { AnalyticsService, InstallSource, InstallTrendPoint } from "./analytics.js";
 import type { TagsService, TagSummary } from "./tags.js";
 import {
   ARTIFACT_UPLOAD_CONTENT_TYPE,
@@ -743,6 +743,8 @@ export class ResourcesService {
    * a failure never inflates the count.
    *
    * @param id - The Resource's id.
+   * @param source - Where this download was requested from — recorded as
+   * the Install's `source` (ADR-0012).
    * @returns The Resource's name, for the download filename, and the zip.
    * @throws ResourceNotFoundError if `id` is not a well-formed UUID, or no
    * Resource exists by it.
@@ -753,10 +755,10 @@ export class ResourcesService {
    * the sizes its publisher declared, which is the drift ADR-0001 accepts.
    * @example
    * ```ts
-   * const { name, bytes } = await resourcesService.buildArtifactArchive(id);
+   * const { name, bytes } = await resourcesService.buildArtifactArchive(id, "web");
    * ```
    */
-  async buildArtifactArchive(id: string): Promise<ArtifactArchive> {
+  async buildArtifactArchive(id: string, source: InstallSource): Promise<ArtifactArchive> {
     const name = await this.getNameOrThrow(id);
     const manifest = await this.readManifest(id);
 
@@ -772,7 +774,7 @@ export class ResourcesService {
     );
 
     const bytes = buildArtifact(files);
-    await this.analytics.recordInstall(id, "web");
+    await this.analytics.recordInstall(id, source);
 
     return { name, bytes };
   }

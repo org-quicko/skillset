@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { access, lstat, mkdtemp, readFile, readlink, rm } from "node:fs/promises";
+import { access, lstat, mkdtemp, readdir, readFile, readlink, rm } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { installSkill, sanitizeSkillDirectoryName } from "../src/install.js";
+import { installSkill, sanitizeSkillDirectoryName } from "../src/index.js";
 
 const encoder = new TextEncoder();
 
@@ -178,6 +178,67 @@ describe("installSkill — housekeeping", () => {
       const linkPath = join(cwd, ".claude", "skills", "code-review");
       expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
       expect(report.link).toEqual({ kind: "symlink", path: linkPath });
+    });
+  });
+});
+
+describe("installSkill — atomic install via staging (ticket 47)", () => {
+  it("leaves no staging directory beside the target after a successful install", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", {
+        copy: false,
+      });
+
+      const canonicalDir = join(cwd, ".agents", "skills");
+      const entries = await readdir(canonicalDir);
+      expect(entries).toEqual(["code-review"]);
+      expect(report.skillDirectory).toBe(join(canonicalDir, "code-review"));
+    });
+  });
+
+  it("never creates a staging directory in the system temp directory", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const before = new Set(await readdir(tmpdir()));
+
+      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", { copy: false });
+
+      const after = await readdir(tmpdir());
+      const newEntries = after.filter((entry) => !before.has(entry));
+      expect(newEntries.every((entry) => !entry.includes("skillset-staging"))).toBe(true);
+    });
+  });
+
+  it("leaves the previous install untouched, and no staging directory behind, when a write fails mid-install", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", { copy: false });
+
+      // "conflict" is written as a file, then "conflict/nested" needs it to be a directory —
+      // the second write fails partway through staging, before anything touches the target.
+      const conflictingFiles = [
+        { path: "conflict", bytes: encoder.encode("file") },
+        { path: "conflict/nested", bytes: encoder.encode("nested") },
+      ];
+
+      await expect(
+        installSkill({ cwd, env: {}, homeDir }, "code-review", conflictingFiles, "project", "codex", { copy: false }),
+      ).rejects.toThrow();
+
+      const canonicalDir = join(cwd, ".agents", "skills");
+      // The previous install is exactly as it was — none of the failed install's files landed.
+      expect(await readFile(join(canonicalDir, "code-review", "SKILL.md"), "utf8")).toContain("code-review");
+      expect(await exists(join(canonicalDir, "code-review", "conflict"))).toBe(false);
+      // And nothing staged is left lying around beside it.
+      expect(await readdir(canonicalDir)).toEqual(["code-review"]);
+    });
+  });
+
+  it("leaves no trash directory beside the target after overwriting a previous install", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", { copy: false });
+      await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", "codex", { copy: false });
+
+      const canonicalDir = join(cwd, ".agents", "skills");
+      expect(await readdir(canonicalDir)).toEqual(["code-review"]);
     });
   });
 });

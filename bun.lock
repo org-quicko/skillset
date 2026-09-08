@@ -45,6 +45,7 @@
       },
       "dependencies": {
         "@clack/prompts": "^1.2.0",
+        "@skillset/installer": "workspace:*",
         "commander": "^13.1.0",
         "fflate": "^0.8.3",
         "picocolors": "^1.1.1",
@@ -54,6 +55,24 @@
       "devDependencies": {
         "@skillset/shared": "workspace:*",
         "@types/bun": "^1.4.0",
+        "typescript": "^5.7.2",
+      },
+    },
+    "apps/mcp": {
+      "name": "@skillset/mcp",
+      "version": "0.0.0",
+      "bin": {
+        "skillset-mcp": "./dist/cli.js",
+      },
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.30.0",
+        "@skillset/installer": "workspace:*",
+        "@skillset/shared": "workspace:*",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.0",
+        "fflate": "^0.8.3",
         "typescript": "^5.7.2",
       },
     },
@@ -91,6 +110,17 @@
         "shadcn": "^4.18.0",
         "typescript": "~6.0.2",
         "vite": "^8.2.0",
+      },
+    },
+    "packages/installer": {
+      "name": "@skillset/installer",
+      "version": "0.0.0",
+      "dependencies": {
+        "@skillset/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.0",
+        "typescript": "^5.7.2",
       },
     },
     "packages/shared": {
@@ -509,6 +539,10 @@
     "@skillset/api": ["@skillset/api@workspace:apps/api"],
 
     "@skillset/cli": ["@skillset/cli@workspace:apps/cli"],
+
+    "@skillset/installer": ["@skillset/installer@workspace:packages/installer"],
+
+    "@skillset/mcp": ["@skillset/mcp@workspace:apps/mcp"],
 
     "@skillset/shared": ["@skillset/shared@workspace:packages/shared"],
 

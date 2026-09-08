@@ -79,6 +79,22 @@ export class SkillValidationError extends Error {
 }
 
 /**
+ * Formats a {@link SkillValidationError} into the one-line, rule-naming message every surface
+ * that catches one owes its caller — rather than a bare sentence.
+ *
+ * @param error - The validation failure to format.
+ * @returns `"<rule>: <message>"`, with `" (<field>)"` appended when `error.field` is set.
+ * @example
+ * ```ts
+ * formatSkillValidationError(new SkillValidationError("name_invalid", "...", "name"));
+ * // -> "name_invalid: ... (name)"
+ * ```
+ */
+export function formatSkillValidationError(error: SkillValidationError): string {
+  return `${error.rule}: ${error.message}${error.field ? ` (${error.field})` : ""}`;
+}
+
+/**
  * Validates a Skill's name against the required shape.
  *
  * @param value - The candidate name, typically read straight from
