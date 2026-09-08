@@ -9,7 +9,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun build ./src/cli.ts --outdir dist --target node --format esm --external @clack/prompts --external commander --external picocolors --external zod --external yaml --external fflate",
+    "build": "bun run src/build.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test"
   },
