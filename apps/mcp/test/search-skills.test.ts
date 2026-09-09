@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { searchSkills } from "../src/search-skills.js";
+import { searchSkills } from "../src/tools/search-skills.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
 
 function fakeEntry(overrides: Partial<Record<string, unknown>> = {}) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { access, lstat, mkdtemp, readdir, readFile, readlink, rm } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { installSkill, sanitizeSkillDirectoryName } from "../src/index.js";
+import { installSkill, resolveInstallTarget, sanitizeSkillDirectoryName } from "../src/index.js";
 
 const encoder = new TextEncoder();
 
@@ -55,6 +55,30 @@ describe("installSkill — canonical directory (ADR-0022)", () => {
       expect(report.link).toEqual({ kind: "canonical" });
       expect(await exists(join(cwd, ".codex"))).toBe(false);
     });
+  });
+});
+
+describe("installSkill — no Agent (canonical fallback)", () => {
+  it("writes the canonical directory, links nothing, and reports agent: null", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const report = await installSkill({ cwd, env: {}, homeDir }, "code-review", files, "project", null, {
+        copy: false,
+      });
+
+      const canonical = join(cwd, ".agents", "skills", "code-review");
+      expect(report.skillDirectory).toBe(canonical);
+      expect(report.agent).toBeNull();
+      expect(report.link).toEqual({ kind: "canonical" });
+      expect(report.alsoServes).toEqual([]);
+      expect(await readFile(join(canonical, "SKILL.md"), "utf8")).toContain("code-review");
+      // No Agent-specific directory was created anywhere.
+      expect(await exists(join(cwd, ".claude"))).toBe(false);
+    });
+  });
+
+  it("resolveInstallTarget points agentDir at the canonical directory for a null Agent", () => {
+    const target = resolveInstallTarget({ cwd: "/repo", env: {}, homeDir: "/home/dev" }, "code-review", "project", null);
+    expect(target.agentDir).toBe(target.canonicalDir);
   });
 });
 

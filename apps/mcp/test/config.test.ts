@@ -1,13 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { ConfigError, parseConfig } from "../src/config.js";
 
-const AGENT_FLAGS = ["--agent", "claude-code"];
-
 describe("parseConfig", () => {
   it("errors naming both --registry and SKILLSET_REGISTRY when neither is given", () => {
-    expect(() => parseConfig(AGENT_FLAGS, {})).toThrow(ConfigError);
+    expect(() => parseConfig([], {})).toThrow(ConfigError);
     try {
-      parseConfig(AGENT_FLAGS, {});
+      parseConfig([], {});
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(ConfigError);
@@ -17,54 +15,47 @@ describe("parseConfig", () => {
   });
 
   it("falls back to SKILLSET_REGISTRY when --registry is absent", () => {
-    const config = parseConfig(AGENT_FLAGS, { SKILLSET_REGISTRY: "https://registry.example" });
+    const config = parseConfig([], { SKILLSET_REGISTRY: "https://registry.example" });
     expect(config.registry).toBe("https://registry.example");
   });
 
   it("prefers --registry when both are given", () => {
-    const config = parseConfig(["--registry", "https://flag.example", ...AGENT_FLAGS], {
+    const config = parseConfig(["--registry", "https://flag.example"], {
       SKILLSET_REGISTRY: "https://env.example",
     });
     expect(config.registry).toBe("https://flag.example");
   });
 
   it("defaults --scope to project when omitted", () => {
-    const config = parseConfig(["--registry", "https://registry.example", ...AGENT_FLAGS], {});
+    const config = parseConfig(["--registry", "https://registry.example"], {});
     expect(config.scope).toBe("project");
   });
 
   it("parses an explicit --scope", () => {
-    const config = parseConfig(["--registry", "https://registry.example", "--scope", "user", ...AGENT_FLAGS], {});
+    const config = parseConfig(["--registry", "https://registry.example", "--scope", "user"], {});
     expect(config.scope).toBe("user");
   });
 
   it("rejects a --scope outside project/user", () => {
-    expect(() =>
-      parseConfig(["--registry", "https://registry.example", "--scope", "global", ...AGENT_FLAGS], {}),
-    ).toThrow(ConfigError);
+    expect(() => parseConfig(["--registry", "https://registry.example", "--scope", "global"], {})).toThrow(ConfigError);
   });
 
   it("defaults --log-level to warn when omitted", () => {
-    const config = parseConfig(["--registry", "https://registry.example", ...AGENT_FLAGS], {});
+    const config = parseConfig(["--registry", "https://registry.example"], {});
     expect(config.logLevel).toBe("warn");
   });
 
   it("parses an explicit --log-level", () => {
-    const config = parseConfig(["--registry", "https://registry.example", "--log-level", "debug", ...AGENT_FLAGS], {});
+    const config = parseConfig(["--registry", "https://registry.example", "--log-level", "debug"], {});
     expect(config.logLevel).toBe("debug");
   });
 
-  it("errors naming --agent when it is omitted", () => {
-    try {
-      parseConfig(["--registry", "https://registry.example"], {});
-      expect.unreachable();
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      expect((error as Error).message).toContain("--agent");
-    }
+  it("leaves agentId undefined when --agent is omitted — the Agent is detected, not required", () => {
+    const config = parseConfig(["--registry", "https://registry.example"], {});
+    expect(config.agentId).toBeUndefined();
   });
 
-  it("parses an explicit --agent", () => {
+  it("parses an explicit --agent as the override", () => {
     const config = parseConfig(["--registry", "https://registry.example", "--agent", "windsurf"], {});
     expect(config.agentId).toBe("windsurf");
   });
@@ -92,13 +83,13 @@ describe("parseConfig", () => {
       },
     ) as NodeJS.ProcessEnv;
 
-    parseConfig(AGENT_FLAGS, env);
+    parseConfig([], env);
 
     expect(readToken).toBe(false);
   });
 
   it("defines no --token flag: an unrecognized flag is simply ignored, not read as a credential", () => {
-    const config = parseConfig(["--registry", "https://registry.example", "--token", "secret", ...AGENT_FLAGS], {});
+    const config = parseConfig(["--registry", "https://registry.example", "--token", "secret"], {});
     expect(config).not.toHaveProperty("token");
   });
 });

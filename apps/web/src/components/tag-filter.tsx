@@ -31,19 +31,15 @@ export function TagFilter({
     onChange(selected.includes(tagId) ? selected.filter((id) => id !== tagId) : [...selected, tagId]);
   }
 
-  const selectedTags = tags.filter((tag) => selected.includes(tag.id));
-
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="justify-between">
-          <span className="flex flex-wrap items-center gap-1">
-            {selectedTags.length === 0 && "Tags"}
-            {selectedTags.map((tag) => (
-              <Badge key={tag.id} variant="secondary">
-                {tag.name}
-              </Badge>
-            ))}
+          <span className="flex items-center gap-1.5">
+            {selected.length === 1
+              ? (tags.find((tag) => tag.id === selected[0])?.name ?? "Tags")
+              : "Tags"}
+            {selected.length > 1 && <Badge variant="secondary">{selected.length}</Badge>}
           </span>
           <ChevronsUpDownIcon className="opacity-50" />
         </Button>

@@ -1,5 +1,5 @@
 import type { SkillInstallTrendPoint } from "@skillset/shared";
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 const CHART_WIDTH = 300;
 const CHART_HEIGHT = 48;
@@ -41,8 +41,9 @@ function parseLocalDate(date: string): Date {
  */
 export function InstallTrendChart({ points }: { points: SkillInstallTrendPoint[] }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-
-  if (points.length === 0) return null;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [tooltipLeft, setTooltipLeft] = useState(0);
 
   const lastIndex = points.length - 1;
   const maxCount = Math.max(1, ...points.map((point) => point.count));
@@ -51,11 +52,29 @@ export function InstallTrendChart({ points }: { points: SkillInstallTrendPoint[]
   const yAt = (count: number) => PLOT_BOTTOM - ((PLOT_BOTTOM - PLOT_TOP) * count) / maxCount;
 
   const coords = points.map((point, index) => ({ x: xAt(index), y: yAt(point.count) }));
+  const hoveredCoord = hoveredIndex !== null ? coords[hoveredIndex] : undefined;
+
+  // Keeps the tooltip inside the chart's own bounds instead of centering it
+  // on the hovered point unconditionally — near the left/right edges a
+  // centered tooltip overhangs the panel, which clips it (Panel is
+  // `overflow-hidden` for its rounded corners). Runs unconditionally (ahead
+  // of the `points.length === 0` early return below) to keep this hook's
+  // call count stable across renders.
+  useLayoutEffect(() => {
+    if (!hoveredCoord || !containerRef.current || !tooltipRef.current) return;
+    const containerWidth = containerRef.current.clientWidth;
+    const half = tooltipRef.current.offsetWidth / 2;
+    const desired = (hoveredCoord.x / CHART_WIDTH) * containerWidth;
+    setTooltipLeft(Math.min(Math.max(desired, half), containerWidth - half));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on the coordinate's primitives, not the recreated-per-render `coords` object
+  }, [hoveredCoord?.x]);
+
+  if (points.length === 0) return null;
+
   const linePath = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x},${c.y}`).join(" ");
   const areaPath = `${linePath} L${coords[lastIndex]!.x},${PLOT_BOTTOM} L${coords[0]!.x},${PLOT_BOTTOM} Z`;
 
   const hovered = hoveredIndex !== null ? points[hoveredIndex] : undefined;
-  const hoveredCoord = hoveredIndex !== null ? coords[hoveredIndex] : undefined;
 
   function indexFromClientX(svg: SVGSVGElement, clientX: number): number {
     const rect = svg.getBoundingClientRect();
@@ -70,7 +89,7 @@ export function InstallTrendChart({ points }: { points: SkillInstallTrendPoint[]
   }
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <svg
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
         preserveAspectRatio="none"
@@ -125,8 +144,9 @@ export function InstallTrendChart({ points }: { points: SkillInstallTrendPoint[]
       </svg>
       {hovered && hoveredCoord && (
         <div
+          ref={tooltipRef}
           className="pointer-events-none absolute bottom-full mb-1.5 -translate-x-1/2 rounded-md bg-foreground px-2 py-1 text-xs whitespace-nowrap text-background shadow-md"
-          style={{ left: `${(hoveredCoord.x / CHART_WIDTH) * 100}%` }}
+          style={{ left: `${tooltipLeft}px` }}
         >
           <span className="font-medium tabular-nums">{hovered.count}</span>{" "}
           {hovered.count === 1 ? "install" : "installs"} · {dayLabelFormatter.format(parseLocalDate(hovered.date))}

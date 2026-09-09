@@ -32,6 +32,8 @@ export * from "./skill-source-folder.js";
 export * from "./skill-discovery.js";
 export * from "./extract.js";
 export * from "./agents/table.js";
+export * from "./agents/detect.js";
 export * from "./identity-provider.js";
 export * from "./connection.js";
 export * from "./integration.js";
+export * from "./repository.js";

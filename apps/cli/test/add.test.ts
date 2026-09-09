@@ -121,7 +121,7 @@ describe("runAdd", () => {
     });
   });
 
-  it("errors immediately when scope/agent are missing and there's no terminal, before any network call", async () => {
+  it("errors immediately when --scope is missing and there's no terminal, before any network call", async () => {
     await withTempDirs(async ({ configDir }) => {
       const configPath = join(configDir, "config.json");
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
@@ -131,6 +131,46 @@ describe("runAdd", () => {
         runAdd(baseDeps({ fetch: fetchImpl, configPath, isTTY: false }), { name: "code-review" }),
       ).rejects.toThrow(/Not a terminal/);
       expect(calls).toHaveLength(0);
+    });
+  });
+
+  it("detects the Agent when --agent is omitted and there's no terminal", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const configPath = join(configDir, "config.json");
+      await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
+      const { fetch: fetchImpl } = stubRegistry();
+
+      const report = await runAdd(
+        baseDeps({
+          fetch: fetchImpl,
+          configPath,
+          cwd,
+          homeDir: cwd,
+          isTTY: false,
+          env: { CLAUDECODE: "1" },
+        }),
+        { name: "code-review", scope: "project" },
+      );
+
+      expect(report.agent).toBe("claude-code");
+      expect(report.link).toEqual({ kind: "symlink", path: join(cwd, ".claude", "skills", "code-review") });
+    });
+  });
+
+  it("installs canonically with no link when nothing identifies an Agent (no terminal, no --agent)", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const configPath = join(configDir, "config.json");
+      await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
+      const { fetch: fetchImpl } = stubRegistry();
+
+      const report = await runAdd(
+        baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd, isTTY: false }),
+        { name: "code-review", scope: "project" },
+      );
+
+      expect(report.agent).toBeNull();
+      expect(report.link).toEqual({ kind: "canonical" });
+      expect(await readFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "utf8")).toContain("code-review");
     });
   });
 

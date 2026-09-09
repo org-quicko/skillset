@@ -21,7 +21,9 @@ async function main(): Promise<void> {
   const ctx = { cwd: process.cwd(), env: process.env, homeDir: homedir() };
   const server = createServer(config, fetch, logger, ctx);
   await server.connect(new StdioServerTransport());
-  logger.info(`skillset-mcp connected, registry=${config.registry} scope=${config.scope} agent=${config.agentId}`);
+  logger.info(
+    `skillset-mcp connected, registry=${config.registry} scope=${config.scope} agent-override=${config.agentId ?? "none (detected)"}`,
+  );
 }
 
 await main();

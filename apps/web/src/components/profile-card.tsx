@@ -55,7 +55,7 @@ export function ProfileCard({ user }: { user: User }) {
   }, [user.first_name, user.last_name]);
 
   return (
-    <div className="flex max-w-xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <Panel contentClassName="p-0">
         <div className="divide-y">
           <InfoRow title="First name">

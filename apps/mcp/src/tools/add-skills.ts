@@ -3,9 +3,10 @@ import {
   extractSkillFiles,
   formatSkillValidationError,
   ArtifactManifestSchema,
+  type AgentDetection,
+  type AgentId,
   SkillSchema,
   SkillValidationError,
-  type AgentId,
   type ArtifactManifest,
   type Scope,
   type Skill,
@@ -20,9 +21,16 @@ export interface AddSkillsDeps {
   registry: string;
   ctx: AddSkillsContext;
   scope: Scope;
-  agentId: AgentId;
+  /** The resolved Agent and the rung that resolved it — `agentId: null` installs canonically and links nothing. */
+  detection: AgentDetection;
   /** Replace an already-installed Skill completely, rather than refusing. */
   overwrite: boolean;
+}
+
+/** {@link addSkills}'s result: the Agent detection that governed the batch, and one outcome per Skill. */
+export interface AddSkillsResult {
+  detection: AgentDetection;
+  outcomes: AddSkillOutcome[];
 }
 
 /** One Skill's outcome from {@link addSkills}. */
@@ -125,7 +133,8 @@ export function buildFallbackOutcome(
  * unresolvable Skill never reaches the network for its Artifact.
  */
 async function addOneSkill(deps: AddSkillsDeps, name: string): Promise<AddSkillOutcome> {
-  const { fetchImpl, registry, ctx, scope, agentId, overwrite } = deps;
+  const { fetchImpl, registry, ctx, scope, overwrite } = deps;
+  const agentId = deps.detection.agentId;
 
   let skill: Skill;
   try {
@@ -194,33 +203,35 @@ async function addOneSkill(deps: AddSkillsDeps, name: string): Promise<AddSkillO
  * reports where it would have gone instead of failing.
  *
  * @param deps - The injected `fetch`, the Registry's URL, the project root/environment/home
- * directory to resolve and write paths against, the Scope and Agent to install for, and
- * whether an existing install may be overwritten.
+ * directory to resolve and write paths against, the Scope, the resolved Agent `detection`,
+ * and whether an existing install may be overwritten.
  * @param names - The Skill names to install, exactly as given to the tool.
- * @returns One {@link AddSkillOutcome} per entry in `names`, in the same order. One Skill
- * failing — an unknown name, a refused download, a bad Artifact — never stops the rest of
- * the batch.
+ * @returns The governing Agent `detection` and one {@link AddSkillOutcome} per entry in
+ * `names`, in the same order. One Skill failing — an unknown name, a refused download, a bad
+ * Artifact — never stops the rest of the batch.
  *
  * @remarks
  * Sends no `authorization` header on any request: this server holds no credential
  * (ADR-0013). Every downloaded Artifact is validated by `extractSkillFiles` before a single
  * byte is written (ADR-0001). An existing install is left alone unless `deps.overwrite` is
  * set — a divergence from `skillset add`'s silent overwrite that lives here, in the tool
- * handler, rather than in the shared installer.
+ * handler, rather than in the shared installer. The `detection` is echoed back so the caller
+ * can report which Agent was chosen and which rung of the ladder chose it.
  *
  * @example
  * ```ts
- * const outcomes = await addSkills(
- *   { fetchImpl: fetch, registry: "https://registry.example", ctx, scope: "project", agentId: "claude-code", overwrite: false },
+ * const { detection, outcomes } = await addSkills(
+ *   { fetchImpl: fetch, registry: "https://registry.example", ctx, scope: "project",
+ *     detection: { agentId: "claude-code", step: "client-identity" }, overwrite: false },
  *   ["code-review", "typo-name"],
  * );
- * // -> [{ name: "code-review", status: "installed", ... }, { name: "typo-name", status: "error", ... }]
+ * // -> outcomes: [{ name: "code-review", status: "installed", ... }, { name: "typo-name", status: "error", ... }]
  * ```
  */
-export async function addSkills(deps: AddSkillsDeps, names: readonly string[]): Promise<AddSkillOutcome[]> {
+export async function addSkills(deps: AddSkillsDeps, names: readonly string[]): Promise<AddSkillsResult> {
   const outcomes: AddSkillOutcome[] = [];
   for (const name of names) {
     outcomes.push(await addOneSkill(deps, name));
   }
-  return outcomes;
+  return { detection: deps.detection, outcomes };
 }

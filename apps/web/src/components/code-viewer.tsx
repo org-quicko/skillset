@@ -18,13 +18,6 @@ import { loader } from "@monaco-editor/react";
 loader.config({ monaco });
 defineMonacoThemes();
 
-/**
- * The tallest a `fitContent` editor may grow before it scrolls on its own.
- * Frontmatter is a handful of keys, but a `description` is a paragraph and
- * `metadata` is open-ended, so the block needs a ceiling.
- */
-const FIT_CONTENT_MAX_HEIGHT = 240;
-
 /** Whether the OS is asking for dark, for the `system` theme setting. */
 function prefersDark(): boolean {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -52,9 +45,9 @@ function prefersDark(): boolean {
  * @param language - A Monaco language id to highlight as instead of the one
  * the path implies, for a fragment whose language its file's does not name —
  * a `SKILL.md`'s YAML frontmatter, say.
- * @param fitContent - Sizes the editor to its text (up to
- * `FIT_CONTENT_MAX_HEIGHT`) rather than to its container, for an editor shown
- * inline among other content instead of filling a pane.
+ * @param fitContent - Sizes the editor to its full text height rather than to
+ * its container — never scrolling on its own — for an editor shown inline
+ * among other content instead of filling a pane.
  * @example
  * ```tsx
  * <CodeViewer path="references/java.md" value={source} />
@@ -93,9 +86,7 @@ export default function CodeViewer({
       key={path}
       language={language ?? monacoLanguageForPath(path)}
       value={value}
-      {...(fitContent
-        ? { height: Math.min(contentHeight ?? 0, FIT_CONTENT_MAX_HEIGHT), onMount: trackContentHeight }
-        : {})}
+      {...(fitContent ? { height: contentHeight ?? 0, onMount: trackContentHeight } : {})}
       theme={isDark ? MONACO_DARK_THEME : MONACO_LIGHT_THEME}
       loading={<Spinner className="size-5" />}
       options={{

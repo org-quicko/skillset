@@ -1,4 +1,4 @@
-import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader } from "@/components/form-dialog";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader } from "@/components/ui/dialog";
 import { useDeleteIntegration } from "@/hooks/use-integrations";
 import { apiErrorMessage } from "@/lib/api";
 

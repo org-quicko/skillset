@@ -22,8 +22,8 @@ export type LinkResult =
 export interface WriteReport {
   /** Where the Skill's files were written — always `<canonical .agents/skills>/<name>` (ADR-0022). */
   skillDirectory: string;
-  /** The Agent that was chosen. */
-  agent: AgentId;
+  /** The Agent that was chosen, or `null` when none was — a canonical-only install that links nothing. */
+  agent: AgentId | null;
   /** Whether that Agent reads the canonical directory directly, or via a symlink/copy. */
   link: LinkResult;
   /**
@@ -166,7 +166,11 @@ export interface ResolvedInstallTarget {
   canonicalDir: string;
   /** Where the Skill's files would be written — always `<canonicalDir>/<directoryName>`. */
   canonicalTarget: string;
-  /** The configured Agent's own directory at `scope`, or `null` when it has none there. */
+  /**
+   * The configured Agent's own directory at `scope` — `null` when the Agent has none there, and
+   * equal to `canonicalDir` when `agentId` was `null` (a canonical-only install that links
+   * nothing).
+   */
   agentDir: string | null;
 }
 
@@ -182,7 +186,8 @@ export interface ResolvedInstallTarget {
  * {@link sanitizeSkillDirectoryName} before it becomes a directory name.
  * @param scope - "project" to resolve under `ctx.cwd`, "user" for the per-User canonical
  * directory and the Agent's per-User directory.
- * @param agentId - The Agent to resolve a target for.
+ * @param agentId - The Agent to resolve a target for, or `null` for a canonical-only install
+ * that links nothing (the detection ladder's fallback) — then `agentDir` is `canonicalDir`.
  * @returns The sanitised directory name, the canonical directory and target it resolves to,
  * and the configured Agent's own directory at `scope` (`null` when it has none there).
  * @throws Error when `skillName` sanitises to nothing (via {@link sanitizeSkillDirectoryName}),
@@ -195,7 +200,12 @@ export interface ResolvedInstallTarget {
  * //      canonicalTarget: "<cwd>/.agents/skills/code-review", agentDir: "<cwd>/.claude/skills" }
  * ```
  */
-export function resolveInstallTarget(ctx: InstallContext, skillName: string, scope: Scope, agentId: AgentId): ResolvedInstallTarget {
+export function resolveInstallTarget(
+  ctx: InstallContext,
+  skillName: string,
+  scope: Scope,
+  agentId: AgentId | null,
+): ResolvedInstallTarget {
   const directoryName = sanitizeSkillDirectoryName(skillName);
   const resolveCtx = { env: ctx.env, homeDir: ctx.homeDir, projectRoot: ctx.cwd };
 
@@ -203,7 +213,9 @@ export function resolveInstallTarget(ctx: InstallContext, skillName: string, sco
   // once joined onto cwd — `normalize` understands both on every platform Node runs on.
   const canonicalDir = normalize(canonicalSkillsDir(scope, resolveCtx));
   const canonicalTarget = join(canonicalDir, directoryName);
-  const agentDir = agentSkillsDir(agentId, scope, resolveCtx);
+  // `null` means "no Agent detected": write the canonical copy and link nothing, which the
+  // `agentDir === canonicalDir` branch in `installSkill` already does.
+  const agentDir = agentId === null ? canonicalDir : agentSkillsDir(agentId, scope, resolveCtx);
 
   return { directoryName, canonicalDir, canonicalTarget, agentDir };
 }
@@ -220,7 +232,9 @@ export function resolveInstallTarget(ctx: InstallContext, skillName: string, sco
  * @param files - The Skill's files, already validated by `extractSkillFiles`.
  * @param scope - "project" to install under `ctx.cwd`, "user" for the per-User canonical
  * directory and the Agent's per-User directory.
- * @param agentId - The Agent to install for.
+ * @param agentId - The Agent to install for, or `null` when detection identified none — the
+ * files are written to the canonical directory and nothing is linked (`link.kind` is
+ * `"canonical"`, `agent` is `null`, `alsoServes` is empty).
  * @param options - `copy: true` writes a real copy into the Agent's directory instead of a
  * symlink.
  * @returns Where the Skill's files live, the Agent chosen, how that Agent's directory was
@@ -245,15 +259,16 @@ export async function installSkill(
   skillName: string,
   files: SkillFile[],
   scope: Scope,
-  agentId: AgentId,
+  agentId: AgentId | null,
   options: InstallOptions,
 ): Promise<WriteReport> {
   const resolveCtx = { env: ctx.env, homeDir: ctx.homeDir, projectRoot: ctx.cwd };
   const { directoryName, canonicalDir, canonicalTarget, agentDir } = resolveInstallTarget(ctx, skillName, scope, agentId);
   if (agentDir === null) {
-    throw new Error(`${getAgent(agentId).displayName} has no user-level skills directory — install it at project scope instead.`);
+    // agentId is non-null here: a `null` agentId resolves agentDir to canonicalDir, never null.
+    throw new Error(`${getAgent(agentId as AgentId).displayName} has no user-level skills directory — install it at project scope instead.`);
   }
-  const alsoServes = agentsSharingDirectory(agentId, scope, resolveCtx);
+  const alsoServes = agentId === null ? [] : agentsSharingDirectory(agentId, scope, resolveCtx);
 
   await writeSkillFiles(canonicalTarget, files);
 

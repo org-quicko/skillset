@@ -80,14 +80,12 @@ export function SkillDetail({
   name,
   canDelete,
   canEditTags,
-  canRenameTags,
   onBack,
   onDeleted,
 }: {
   name: string;
   canDelete: boolean;
   canEditTags: boolean;
-  canRenameTags: boolean;
   onBack: () => void;
   onDeleted: () => void;
 }) {
@@ -103,7 +101,7 @@ export function SkillDetail({
   const data = skill.data;
 
   return (
-    <div className="flex flex-col gap-3.5">
+    <div className="flex h-full min-h-0 flex-col gap-3.5">
       <Reveal delayMs={0} className="flex items-center gap-2 text-xs text-muted-foreground">
         <nav className="flex items-center gap-2">
           <button type="button" onClick={onBack} className="cursor-pointer hover:text-foreground">
@@ -165,21 +163,18 @@ export function SkillDetail({
         </Reveal>
       )}
 
-      <Reveal delayMs={150} className="mt-2 grid gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="flex min-w-0 flex-col gap-4">
+      <Reveal delayMs={150} className="mt-2 grid min-h-0 flex-1 gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="flex min-h-0 min-w-0 flex-col gap-4">
           <SkillInstallCard name={data.name} />
 
           <SkillFilesPanel id={data.id} body={data.body} />
         </div>
 
-        <div className="flex flex-col gap-4">
-          <Panel title="Analytics">
+        <div className="flex flex-col gap-4 overflow-y-auto">
+          <Panel title="Installs">
             <span className="text-[44px] leading-none font-semibold">{data.installs.toLocaleString()}</span>
-            <span className="mt-1.5 block text-xs text-muted-foreground">
-              {data.installs === 1 ? "install" : "installs"} recorded
-            </span>
             {trend.data && trend.data.points.length > 0 && (
-              <div className="mt-3.5 border-t pt-3.5">
+              <div className="mt-1">
                 <InstallTrendChart points={trend.data.points} />
                 <span className="mt-1.5 block text-[11px] text-muted-foreground">
                   Last {trend.data.points.length} days
@@ -216,7 +211,6 @@ export function SkillDetail({
           id={data.id}
           name={data.name}
           tags={data.tags}
-          canRenameTags={canRenameTags}
           open={editTagsOpen}
           onOpenChange={setEditTagsOpen}
         />

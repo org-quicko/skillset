@@ -21,6 +21,22 @@ import { useTags } from "@/hooks/use-tags";
 const SEARCH_DEBOUNCE_MS = 300;
 
 /**
+ * Whether the current device is a Mac, for choosing between the "Cmd" and
+ * "Ctrl" shortcut hints.
+ *
+ * @remarks
+ * `navigator.platform` is deprecated but still the most broadly supported
+ * signal; `userAgentData.platform` is preferred where available. Defaults to
+ * `false` (i.e. "Ctrl") when neither is present, such as during SSR.
+ */
+function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const uaDataPlatform = (navigator as { userAgentData?: { platform?: string } }).userAgentData
+    ?.platform;
+  return /mac/i.test(uaDataPlatform ?? navigator.platform ?? navigator.userAgent ?? "");
+}
+
+/**
  * The masked dot grid behind the hero (1px dots, 20px grid, fading in
  * left-to-right). Dot colour is a per-theme token (`--hero-dot`) so it stays
  * faint on the light band and doesn't turn into hard black specks.
@@ -71,6 +87,8 @@ export function SkillsHome({
   const statsQuery = useSkillStats();
   const stats = statsQuery.data;
   const searchRef = useRef<HTMLInputElement>(null);
+  // Computed once per mount — the platform doesn't change under the user.
+  const [isMac] = useState(isMacPlatform);
 
   // What the field shows, which is not yet what the list is filtered by. The
   // URL still owns the applied term; this is only the keystrokes ahead of it.
@@ -183,7 +201,9 @@ export function SkillsHome({
               </button>
             )}
             <span className="hidden shrink-0 gap-1 sm:flex">
-              <kbd className="rounded border bg-muted px-1.5 text-[11px] text-muted-foreground">⌘</kbd>
+              <kbd className="rounded border bg-muted px-1.5 text-[11px] text-muted-foreground">
+                {isMac ? "Cmd" : "Ctrl"}
+              </kbd>
               <kbd className="rounded border bg-muted px-1.5 text-[11px] text-muted-foreground">K</kbd>
             </span>
           </Reveal>

@@ -278,7 +278,7 @@ describe("Connections (ADR-0024)", () => {
       const res = await callback(writerCookie, "installation_id=42&setup_action=update");
 
       expect(res.status).toBe(302);
-      expect(res.headers.get("location")).toContain("/settings?repositories=github");
+      expect(res.headers.get("location")).toContain("/settings/connected-accounts?repositories=github");
       expect(await context.db.select().from(connections)).toEqual([]);
     });
 

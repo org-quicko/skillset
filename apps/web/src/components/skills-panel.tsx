@@ -10,7 +10,7 @@ import { useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
 import { LOGIN_PATH, SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
@@ -70,12 +70,11 @@ export function SkillsPanel({ role }: { role: Role | null }) {
   if (pathname.startsWith(SKILL_PATH_PREFIX)) {
     const name = decodeURIComponent(pathname.slice(SKILL_PATH_PREFIX.length));
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-7 pt-6 pb-10">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1200px] flex-col px-7 pt-6 pb-10">
         <SkillDetail
           name={name}
           canDelete={role !== null && roleMeets(role, "admin")}
           canEditTags={role !== null && roleMeets(role, "writer")}
-          canRenameTags={role !== null && roleMeets(role, "admin")}
           onBack={() => navigate("/")}
           onDeleted={() => navigate("/")}
         />
@@ -92,21 +91,20 @@ export function SkillsPanel({ role }: { role: Role | null }) {
         onSelect={(name) => navigate(skillPath(name))}
         onPublish={() => (isSignedOut ? navigate(LOGIN_PATH) : setPublishOpen(true))}
       />
-      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Publish a Skill</DialogTitle>
-            <DialogDescription>Drop the Skill&apos;s folder here, or choose it from a dialog.</DialogDescription>
-          </DialogHeader>
+      <FormDialog open={publishOpen} onOpenChange={setPublishOpen} className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl">
+        <FormDialogHeader
+          title="Publish a Skill"
+          description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
+        />
+        <FormDialogBody>
           <PublishSkillForm
             onPublished={(name) => {
               setPublishOpen(false);
               navigate(skillPath(name));
             }}
-            onCancel={() => setPublishOpen(false)}
           />
-        </DialogContent>
-      </Dialog>
+        </FormDialogBody>
+      </FormDialog>
     </>
   );
 }

@@ -103,6 +103,16 @@ export const connectionsQueryKey = ["connections"] as const;
 /** Every configured Integration — an Admin's view. There is no public counterpart. */
 export const integrationsQueryKey = ["integrations"] as const;
 
+/**
+ * Every repository a writer's Connection to a Git Provider can see — the
+ * picker behind "browse repositories" on the publish screen.
+ *
+ * @param provider - The Git Provider to list from.
+ */
+export function repositoriesQueryKey(provider: string) {
+  return ["repositories", provider] as const;
+}
+
 /** Every configured Identity Provider — an Admin's view, including disabled ones. */
 export const identityProvidersQueryKey = ["identity-providers"] as const;
 

@@ -37,6 +37,19 @@ export interface AgentEntry {
    * @param homeDir - The User's home directory, used when no override applies.
    */
   userSkillsDir(env: Env, homeDir: string): string | null;
+  /**
+   * Environment variables whose presence (any one, non-blank) marks this Agent as the one
+   * currently running — the "environment" rung of {@link detectAgent}'s ladder. Absent for an
+   * Agent with no known marker.
+   *
+   * @remarks
+   * Every entry is cross-checked against Vercel's `@vercel/detect-agent` `agents.json`
+   * (https://github.com/vercel/detect-agent) and the Agent's own documentation. An unverified
+   * marker is worse than an absent one — it resolves detection to the wrong Agent silently
+   * (ADR-0031's principle for this table, applied to markers). Markers that need a filesystem
+   * probe (`devin`) or a value match rather than mere presence (`kiro-cli`) are deferred.
+   */
+  envMarkers?: readonly string[];
 }
 
 /** Strips a value to `undefined` when it is missing or holds nothing but whitespace. */
@@ -67,25 +80,25 @@ const envOrHomeRelative = (envKey: string, fallbackDir: string, suffix: string) 
  */
 const AGENT_TABLE = [
   { id: "amp", displayName: "Amp", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: xdgConfigRelative("agents/skills") },
-  { id: "augment", displayName: "Augment", projectSkillsDir: ".augment/skills", userSkillsDir: homeRelative(".augment/skills") },
-  { id: "claude-code", displayName: "Claude Code", projectSkillsDir: ".claude/skills", userSkillsDir: envOrHomeRelative("CLAUDE_CONFIG_DIR", ".claude", "skills") },
-  { id: "cline", displayName: "Cline", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".agents/skills") },
-  { id: "codex", displayName: "Codex", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: envOrHomeRelative("CODEX_HOME", ".codex", "skills") },
+  { id: "augment", displayName: "Augment", projectSkillsDir: ".augment/skills", userSkillsDir: homeRelative(".augment/skills"), envMarkers: ["AUGMENT_AGENT"] },
+  { id: "claude-code", displayName: "Claude Code", projectSkillsDir: ".claude/skills", userSkillsDir: envOrHomeRelative("CLAUDE_CONFIG_DIR", ".claude", "skills"), envMarkers: ["CLAUDECODE", "CLAUDE_CODE"] },
+  { id: "cline", displayName: "Cline", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".agents/skills"), envMarkers: ["CLINE_ACTIVE"] },
+  { id: "codex", displayName: "Codex", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: envOrHomeRelative("CODEX_HOME", ".codex", "skills"), envMarkers: ["CODEX_SANDBOX", "CODEX_THREAD_ID", "CODEX_SANDBOX_NETWORK_DISABLED"] },
   { id: "continue", displayName: "Continue", projectSkillsDir: ".continue/skills", userSkillsDir: homeRelative(".continue/skills") },
-  { id: "cursor", displayName: "Cursor", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".cursor/skills") },
+  { id: "cursor", displayName: "Cursor", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".cursor/skills"), envMarkers: ["CURSOR_TRACE_ID", "CURSOR_AGENT"] },
   { id: "devin", displayName: "Devin for Terminal", projectSkillsDir: ".devin/skills", userSkillsDir: xdgConfigRelative("devin/skills") },
   { id: "droid", displayName: "Droid", projectSkillsDir: ".factory/skills", userSkillsDir: homeRelative(".factory/skills") },
-  { id: "gemini-cli", displayName: "Gemini CLI", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".gemini/skills") },
+  { id: "gemini-cli", displayName: "Gemini CLI", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".gemini/skills"), envMarkers: ["GEMINI_CLI"] },
   { id: "github-copilot", displayName: "GitHub Copilot", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".copilot/skills") },
-  { id: "goose", displayName: "Goose", projectSkillsDir: ".goose/skills", userSkillsDir: xdgConfigRelative("goose/skills") },
-  { id: "grok", displayName: "Grok Build", projectSkillsDir: ".grok/skills", userSkillsDir: envOrHomeRelative("GROK_HOME", ".grok", "skills") },
-  { id: "junie", displayName: "Junie", projectSkillsDir: ".junie/skills", userSkillsDir: homeRelative(".junie/skills") },
+  { id: "goose", displayName: "Goose", projectSkillsDir: ".goose/skills", userSkillsDir: xdgConfigRelative("goose/skills"), envMarkers: ["GOOSE_PROVIDER"] },
+  { id: "grok", displayName: "Grok Build", projectSkillsDir: ".grok/skills", userSkillsDir: envOrHomeRelative("GROK_HOME", ".grok", "skills"), envMarkers: ["GROK_PLUGIN_ROOT", "GROK_PLUGIN_DATA"] },
+  { id: "junie", displayName: "Junie", projectSkillsDir: ".junie/skills", userSkillsDir: homeRelative(".junie/skills"), envMarkers: ["JUNIE_DATA", "JUNIE_SHIM_PATH"] },
   { id: "kilo", displayName: "Kilo Code", projectSkillsDir: ".kilocode/skills", userSkillsDir: homeRelative(".kilocode/skills") },
   { id: "kiro-cli", displayName: "Kiro CLI", projectSkillsDir: ".kiro/skills", userSkillsDir: homeRelative(".kiro/skills") },
-  { id: "opencode", displayName: "OpenCode", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: xdgConfigRelative("opencode/skills") },
+  { id: "opencode", displayName: "OpenCode", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: xdgConfigRelative("opencode/skills"), envMarkers: ["OPENCODE", "OPENCODE_CLIENT"] },
   { id: "openhands", displayName: "OpenHands", projectSkillsDir: ".openhands/skills", userSkillsDir: homeRelative(".openhands/skills") },
   { id: "qwen-code", displayName: "Qwen Code", projectSkillsDir: ".qwen/skills", userSkillsDir: homeRelative(".qwen/skills") },
-  { id: "replit", displayName: "Replit", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: xdgConfigRelative("agents/skills") },
+  { id: "replit", displayName: "Replit", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: xdgConfigRelative("agents/skills"), envMarkers: ["REPL_ID"] },
   { id: "roo", displayName: "Roo Code", projectSkillsDir: ".roo/skills", userSkillsDir: homeRelative(".roo/skills") },
   { id: "trae", displayName: "Trae", projectSkillsDir: ".trae/skills", userSkillsDir: homeRelative(".trae/skills") },
   { id: "warp", displayName: "Warp", projectSkillsDir: CANONICAL_SKILLS_DIR, userSkillsDir: homeRelative(".agents/skills") },
@@ -211,4 +224,32 @@ export function agentsSharingDirectory(agentId: AgentId, scope: Scope, ctx: Reso
   return AGENTS.filter((agent) => agent.id !== agentId && agentSkillsDir(agent.id, scope, ctx) === target).map(
     (agent) => agent.id,
   );
+}
+
+/**
+ * Every non-universal Agent paired with the project-Scope directory it reads Skills from — the
+ * set a caller stats on disk to answer the "project-directory" rung of the detection ladder
+ * (see `detectAgent`).
+ *
+ * @param ctx - The environment, home directory, and project root to resolve paths against.
+ * @returns One `{ agentId, dir }` per Agent whose `projectSkillsDir` is *not* the canonical
+ * `.agents/skills` — the universal Agents are omitted because a directory shared by ten Agents
+ * identifies none of them.
+ *
+ * @remarks
+ * Pure and string-only: this module is bundled for the browser, so the caller — not this
+ * function — is the one that touches the filesystem.
+ *
+ * @example
+ * ```ts
+ * nonUniversalProjectSkillsDirs({ env: {}, homeDir: "/home/dev", projectRoot: "/repo" })
+ *   .find((e) => e.agentId === "claude-code"); // { agentId: "claude-code", dir: "/repo/.claude/skills" }
+ * ```
+ */
+export function nonUniversalProjectSkillsDirs(ctx: ResolveContext): { agentId: AgentId; dir: string }[] {
+  return AGENTS.filter((agent) => !isUniversalAgent(agent.id)).map((agent) => ({
+    agentId: agent.id,
+    // Non-universal Agents always have a project directory, so this is never null.
+    dir: agentSkillsDir(agent.id, "project", ctx) as string,
+  }));
 }

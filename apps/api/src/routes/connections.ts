@@ -21,7 +21,7 @@ export type ConnectionRouteDependencies = AuthDependencies & {
 const STATE_COOKIE = "skillset_connection_state";
 
 /** Where a writer lands once the callback is done, successfully or not. */
-const SETTINGS_PATH = "/settings";
+const SETTINGS_PATH = "/settings/connected-accounts";
 
 /**
  * Registers the `/connections` routes: a writer's own grants of repository

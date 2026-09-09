@@ -1,7 +1,7 @@
-import { ConnectionListSchema } from "@skillset/shared";
+import { ConnectionListSchema, RepositoryListSchema } from "@skillset/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import { connectionsQueryKey } from "@/lib/query-keys";
+import { connectionsQueryKey, repositoriesQueryKey } from "@/lib/query-keys";
 
 /**
  * The caller's own Connections, and the Git Providers they could connect.
@@ -68,4 +68,24 @@ export function useDisconnect() {
 export function connectHref(provider: string, integrationId?: string): string {
   const query = integrationId ? `?integration_id=${integrationId}` : "";
   return `/api/connections/${provider}/start${query}`;
+}
+
+/**
+ * Every repository a writer's Connection to a Git Provider can see — the
+ * picker behind "browse repositories" on the publish screen, so a writer
+ * never has to know a project's URL by heart.
+ *
+ * @param provider - The Git Provider to list from.
+ * @param enabled - Whether to run the query at all. Pass `false` while the
+ * writer has not yet been shown to hold a Connection — asking otherwise would
+ * spend a request on a `not_connected` refusal the caller already knows to
+ * expect from `useConnections`.
+ * @returns The TanStack Query result for `{ items }`.
+ */
+export function useRepositories(provider: string, enabled: boolean) {
+  return useQuery({
+    queryKey: repositoriesQueryKey(provider),
+    queryFn: () => apiFetch(`/imports/${provider}/repositories`, RepositoryListSchema),
+    enabled,
+  });
 }

@@ -16,10 +16,11 @@ export interface McpConfig {
   registry: string;
   scope: Scope;
   /**
-   * The Agent to install for. Required for now — spec's detection ladder (ticket 51) does not
-   * exist yet, so there is nothing to fall back to when this is omitted.
+   * The `--agent` override, or `undefined` to let the server detect the Agent (spec,
+   * "Detecting the Agent"). An escape hatch for a wrong or missing detection — it stays out of
+   * the ordinary setup snippet.
    */
-  agentId: AgentId;
+  agentId: AgentId | undefined;
   logLevel: LogLevel;
 }
 
@@ -54,17 +55,17 @@ function readFlag(argv: readonly string[], flag: string): string | undefined {
  *
  * @param argv - The flags to parse, e.g. `process.argv.slice(2)`.
  * @param env - The environment to read fallbacks from, e.g. `process.env`.
- * @returns The resolved `registry`, `scope`, `agentId`, and `logLevel`.
+ * @returns The resolved `registry`, `scope`, `agentId` (`undefined` unless `--agent` was
+ * given), and `logLevel`.
  * @throws ConfigError if `--registry` is absent and `SKILLSET_REGISTRY` is not set, if
- * `--scope` or `--log-level` is given a value outside their accepted sets, if `--agent` is
- * absent, or if it names no Agent in the table.
+ * `--scope` or `--log-level` is given a value outside their accepted sets, or if `--agent` is
+ * given but names no Agent in the table.
  *
  * @remarks
  * `--registry` wins over `SKILLSET_REGISTRY` when both are present. There is deliberately
  * no `--token` flag and `SKILLSET_TOKEN` is never read: this server holds no credential at
- * all (reads need none, per ADR-0013). `--agent` is required for now rather than defaulted:
- * the spec's detection ladder is ticket 51, and until it exists there is nothing to fall
- * back to.
+ * all (reads need none, per ADR-0013). `--agent` is optional — when omitted, the server
+ * detects the Agent (spec, "Detecting the Agent"); the flag only overrides that.
  *
  * @example
  * ```ts
@@ -88,10 +89,7 @@ export function parseConfig(argv: readonly string[], env: NodeJS.ProcessEnv): Mc
   }
 
   const rawAgent = readFlag(argv, "--agent");
-  if (!rawAgent) {
-    throw new ConfigError("An Agent is required for now: pass --agent <id>.");
-  }
-  if (!isAgentId(rawAgent)) {
+  if (rawAgent !== undefined && !isAgentId(rawAgent)) {
     throw new ConfigError(`--agent must be one of: ${AGENT_IDS.join(", ")}.`);
   }
 

@@ -8,6 +8,10 @@ import { cn } from "@/lib/utils";
  * @param title - The header label; when omitted (and no `action`), no header rule is drawn.
  * @param action - Right-aligned controls in the header, e.g. a tab switch.
  * @param contentClassName - Overrides the default body padding (e.g. `"p-0"` for a flush list).
+ * @remarks
+ * The body is `flex-1 min-h-0`, so a Panel placed in a sized flex parent
+ * stretches to fill it instead of sizing to its content — the mechanism
+ * {@link SkillFilesPanel} relies on to take the page's remaining height.
  */
 export function Panel({
   title,
@@ -26,7 +30,7 @@ export function Panel({
   contentClassName?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-xl border bg-card", className)}>
+    <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card", className)}>
       {(title || action) && (
         <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
           {title && (
@@ -36,7 +40,7 @@ export function Panel({
         </div>
       )}
       {description && <p className="border-b px-5 py-3 text-sm text-muted-foreground">{description}</p>}
-      <div className={cn("p-5", contentClassName)}>{children}</div>
+      <div className={cn("min-h-0 flex-1 p-5", contentClassName)}>{children}</div>
     </div>
   );
 }

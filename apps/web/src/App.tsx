@@ -27,9 +27,9 @@ function CenteredPage({ children }: { children: ReactNode }) {
 function SiteShell({ user, children }: { user: User | null; children: ReactNode }) {
   const { navigate } = useRouter();
   return (
-    <div className="flex min-h-svh flex-col">
+    <div className="flex h-svh flex-col">
       <Header user={user} onOpenSettings={() => navigate(SETTINGS_PATH)} />
-      <main className="flex-1">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   );
 }
@@ -87,7 +87,7 @@ function App() {
     if (!isSignedIn || !me.data) return <CenteredPage>{null}</CenteredPage>;
     return (
       <SiteShell user={me.data}>
-        <div className="mx-auto w-full max-w-4xl px-7 pt-6 pb-10">
+        <div className="mx-auto w-full max-w-[1200px] px-7 pt-6 pb-10">
           <SettingsPage user={me.data} />
         </div>
       </SiteShell>

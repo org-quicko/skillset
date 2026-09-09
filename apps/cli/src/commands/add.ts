@@ -1,4 +1,14 @@
-import { AGENT_IDS, AGENTS, extractSkillFiles, SkillSchema, type AgentId, type Scope } from "@skillset/shared";
+import { existsSync } from "node:fs";
+import {
+  AGENT_IDS,
+  AGENTS,
+  detectAgent,
+  extractSkillFiles,
+  nonUniversalProjectSkillsDirs,
+  SkillSchema,
+  type AgentId,
+  type Scope,
+} from "@skillset/shared";
 import { installSkill, type WriteReport } from "@skillset/installer";
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch } from "../http.js";
@@ -56,6 +66,23 @@ const parseScope = (value: string): Scope => parseChoice(value, SCOPES, "scope")
 const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "Agent");
 
 /**
+ * Detects which Agent to install for from the environment and the project's Agent
+ * directories — the non-TTY path, where there is no prompt and `--agent` was not given.
+ *
+ * @param deps - Supplies the environment, project root, and home directory to resolve and
+ * stat Agent directories against.
+ * @returns The detected {@link AgentId}, or `null` when nothing resolved one — then the
+ * install goes to `.agents/skills` and links nothing.
+ */
+function detectAgentId(deps: Pick<AddDeps, "env" | "cwd" | "homeDir">): AgentId | null {
+  const resolveCtx = { env: deps.env, homeDir: deps.homeDir, projectRoot: deps.cwd };
+  const agentDirsPresent = nonUniversalProjectSkillsDirs(resolveCtx)
+    .filter(({ dir }) => existsSync(dir))
+    .map(({ agentId }) => agentId);
+  return detectAgent({ env: deps.env, agentDirsPresent }).agentId;
+}
+
+/**
  * Downloads a Skill and installs it, always into the canonical `.agents/skills` directory,
  * symlinking the chosen Agent's own directory to it where they differ (ADR-0022).
  *
@@ -64,10 +91,10 @@ const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "
  * @param options - The Skill's name, plus `--agent`, `--scope`, and `--copy` when given.
  * @returns Where the Skill's files were written, the Agent chosen, and how its directory
  * was linked.
- * @throws Error when no Registry is configured; when `--agent` or `--scope` is missing and
- * no terminal is attached, so there is nothing to prompt and nothing to default to; when
- * either flag names something unknown; or, naming the rule, when the downloaded Artifact
- * fails inspection.
+ * @throws Error when no Registry is configured; when `--scope` is missing and no terminal is
+ * attached, so there is nothing to prompt and nothing to default to; when `--agent` or
+ * `--scope` names something unknown; or, naming the rule, when the downloaded Artifact fails
+ * inspection.
  * @throws ApiError when the Registry has no Skill by that name, or refuses the download.
  * @throws RegistryUnreachableError when the Registry cannot be reached.
  *
@@ -76,7 +103,10 @@ const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "
  * logged in to. Everything that can fail without the network — the terminal check and both
  * flags — is checked first, matching publish's local-validation-first behaviour. The
  * Artifact is inspected before a single byte is written, because this is the only place a
- * hostile one is stopped (ADR-0001).
+ * hostile one is stopped (ADR-0001). When `--agent` is omitted and no terminal is attached,
+ * the Agent is detected from the environment and the project's Agent directories (the same
+ * ladder the MCP server uses); an unresolved detection installs into `.agents/skills` and
+ * links nothing.
  *
  * @example
  * ```ts
@@ -86,8 +116,8 @@ const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "
 export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteReport> {
   const client = await openReadClient(deps);
 
-  if ((!options.scope || !options.agent) && !deps.isTTY) {
-    throw new Error("Not a terminal — pass --scope and --agent.");
+  if (!options.scope && !deps.isTTY) {
+    throw new Error("Not a terminal — pass --scope.");
   }
 
   const flagScope = options.scope ? parseScope(options.scope) : null;
@@ -103,8 +133,9 @@ export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteR
     rethrowValidationError(error);
   }
 
-  // Agent before Scope, matching the ticket's prompt order.
-  const agentId = flagAgent ?? parseAgentId(await deps.promptAgent(AGENT_CHOICES));
+  // Agent before Scope, matching the ticket's prompt order. With no flag and no terminal, the
+  // Agent is detected rather than prompted for.
+  const agentId: AgentId | null = flagAgent ?? (deps.isTTY ? parseAgentId(await deps.promptAgent(AGENT_CHOICES)) : detectAgentId(deps));
   const scope = flagScope ?? parseScope(await deps.promptChoice("Install for which scope?", SCOPES));
 
   return installSkill({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skill.name, files, scope, agentId, {

@@ -17,12 +17,14 @@ import { cn, formatBytes } from "@/lib/utils";
 const CodeViewer = lazy(() => import("@/components/code-viewer"));
 
 /**
- * The panel's own height, fixed so that switching between a one-line file and
- * a long one never resizes the page under the reader. Every child below sizes
- * itself from this rather than from its content — hence the `min-h-0` and
- * `flex-1` pairs, which are what let a flex child scroll instead of growing.
+ * The panel's own height: it fills whatever the page's flex layout leaves for
+ * it (see {@link Panel}'s `flex-1` body), so switching between a one-line
+ * file and a long one never resizes the page under the reader — only the
+ * panel's own contents scroll. Every child below sizes itself from this
+ * rather than from its content — hence the `min-h-0` and `flex-1` pairs,
+ * which are what let a flex child scroll instead of growing.
  */
-const PANEL_HEIGHT = "h-[34rem]";
+const PANEL_HEIGHT = "h-full";
 
 /** One directory of an Artifact and the files directly in it. `""` is the Skill's root. */
 interface FileGroup {
@@ -140,11 +142,11 @@ function FileTree({
 }
 
 /** A markdown file's two readings, since a Skill's documentation is written to be read, not inspected. */
-type MarkdownView = "rendered" | "source";
+type MarkdownView = "preview" | "code";
 
 const VIEW_CONTROLS = [
-  { view: "rendered", label: "Rendered", Icon: EyeIcon },
-  { view: "source", label: "Source", Icon: CodeIcon },
+  { view: "preview", label: "Preview", Icon: EyeIcon },
+  { view: "code", label: "Code", Icon: CodeIcon },
 ] as const;
 
 function ViewToggle({ view, onChange }: { view: MarkdownView; onChange: (view: MarkdownView) => void }) {
@@ -280,7 +282,7 @@ function FileViewer({ id, file, view }: { id: string; file: ArtifactFile; view: 
     );
   }
 
-  if (isMarkdownPath(file.path) && view === "rendered") return <MarkdownView path={file.path} source={content.data} />;
+  if (isMarkdownPath(file.path) && view === "preview") return <MarkdownView path={file.path} source={content.data} />;
 
   return (
     <div className="min-h-0 flex-1">
@@ -330,7 +332,7 @@ function isMarkdownPath(path: string): boolean {
 export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
   const listing = useArtifactFiles(id);
   const [selected, setSelected] = useState<string>();
-  const [view, setView] = useState<MarkdownView>("rendered");
+  const [view, setView] = useState<MarkdownView>("preview");
 
   if (listing.isPending) {
     return (
@@ -345,7 +347,7 @@ export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
   // beside a file tree with nothing in it.
   if (listing.isError) {
     return (
-      <Panel title={SKILL_FILE_NAME} contentClassName="p-0">
+      <Panel title={SKILL_FILE_NAME} className="min-h-0 flex-1" contentClassName="p-0">
         <div className={cn("flex flex-col", PANEL_HEIGHT)}>
           <MarkdownView path={SKILL_FILE_NAME} source={body} />
         </div>
@@ -360,15 +362,7 @@ export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
   if (!file) return null;
 
   return (
-    <Panel
-      title="Contents"
-      contentClassName="p-0"
-      action={
-        <span className="text-[11px] text-muted-foreground">
-          {files.length} {files.length === 1 ? "file" : "files"}
-        </span>
-      }
-    >
+    <Panel title={`Contents (${files.length})`} className="min-h-0 flex-1" contentClassName="p-0">
       <div className={cn("grid grid-rows-[minmax(0,9rem)_minmax(0,1fr)] sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] sm:grid-rows-1", PANEL_HEIGHT)}>
         <div className="min-h-0 border-b bg-muted/20 sm:border-r sm:border-b-0">
           <FileTree files={files} selected={file.path} onSelect={setSelected} />

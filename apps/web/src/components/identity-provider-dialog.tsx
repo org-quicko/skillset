@@ -6,7 +6,7 @@ import {
 } from "@skillset/shared";
 import { InfoIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
-import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

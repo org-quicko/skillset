@@ -372,17 +372,19 @@ Behaviour to cover:
 - [ ] A missing `--registry` with no `SKILLSET_REGISTRY` refuses at startup, naming both.
 - [ ] `SKILLSET_REGISTRY` is used when `--registry` is absent, and the flag wins when both are given.
 - [ ] `--scope` defaults to project when omitted.
-- [ ] A client naming itself in `_meta` as a known Agent resolves to that Agent, case-insensitively
-      and by display name as well as id.
-- [ ] An unrecognised client identity falls through to the next step rather than failing.
-- [ ] An environment marker resolves the Agent when the client identity does not.
-- [ ] Exactly one non-universal Agent directory in the project resolves to that Agent.
-- [ ] Two such directories do not resolve, and resolution continues to the canonical fallback.
-- [ ] With no signal at all, the install goes to the canonical directory and links nothing.
-- [ ] The canonical fallback produces the same files a universal Agent's install would.
-- [ ] Every install result names the detected Agent, the step that resolved it, and the path written.
-- [ ] `--agent` overrides detection even when a signal would have resolved differently.
-- [ ] An `--agent` naming no row in the table refuses, listing the Agents that exist.
+- [x] A client naming itself as a known Agent resolves to that Agent, case-insensitively and by
+      display name as well as id. (Via `clientInfo.name` from the `initialize` handshake, not the
+      per-request `_meta` — see ADR-0034.)
+- [x] An unrecognised client identity falls through to the next step rather than failing.
+- [x] An environment marker resolves the Agent when the client identity does not. (Markers curated
+      on the Agent table's `envMarkers`; `devin`/`kiro-cli` deferred — ADR-0034.)
+- [x] Exactly one non-universal Agent directory in the project resolves to that Agent.
+- [x] Two such directories do not resolve, and resolution continues to the canonical fallback.
+- [x] With no signal at all, the install goes to the canonical directory and links nothing.
+- [x] The canonical fallback produces the same files a universal Agent's install would.
+- [x] Every install result names the detected Agent, the step that resolved it, and the path written.
+- [x] `--agent` overrides detection even when a signal would have resolved differently.
+- [x] An `--agent` naming no row in the table refuses, listing the Agents that exist.
 - [ ] An install records exactly one Install, against the `mcp` source.
 - [ ] `skillset add` still installs exactly as it did, now atomically.
 

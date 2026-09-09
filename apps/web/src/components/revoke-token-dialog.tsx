@@ -1,4 +1,4 @@
-import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader } from "@/components/form-dialog";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader } from "@/components/ui/dialog";
 import { useRevokeToken } from "@/hooks/use-tokens";
 import { apiErrorMessage } from "@/lib/api";
 

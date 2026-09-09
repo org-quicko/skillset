@@ -1,9 +1,4 @@
-import {
-  ASSIGNABLE_ROLES,
-  type AssignableRole,
-  type User,
-  type UserListItem,
-} from "@skillset/shared";
+import { ASSIGNABLE_ROLES, type AssignableRole, type User } from "@skillset/shared";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CreateUserDialog } from "@/components/create-user-dialog";
@@ -19,13 +14,12 @@ import { apiErrorMessage } from "@/lib/api";
 
 const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
-// Fixed column widths (with `table-fixed`) so a long name, email, or list of
-// Connections truncates within the row instead of stretching the table past
+// Fixed column widths (with `table-fixed`) so a long name or email
+// truncates within the row instead of stretching the table past
 // the Panel and clipping the Remove column off the edge.
 const NAME_COL = `${HEAD_CLASS} w-[30%]`;
 const EMAIL_COL = `${HEAD_CLASS} w-[30%]`;
 const ROLE_COL = `${HEAD_CLASS} w-[140px]`;
-const CONNECTIONS_COL = `${HEAD_CLASS} w-[130px]`;
 const ACTIONS_COL = `${HEAD_CLASS} w-[110px]`;
 
 /** Placeholder user table while `useUsers` is in flight. */
@@ -38,7 +32,6 @@ function UsersTableSkeleton() {
             <TableHead className={NAME_COL}>Name</TableHead>
             <TableHead className={EMAIL_COL}>Email</TableHead>
             <TableHead className={ROLE_COL}>Role</TableHead>
-            <TableHead className={CONNECTIONS_COL}>Connections</TableHead>
             <TableHead className={ACTIONS_COL} />
           </TableRow>
         </TableHeader>
@@ -57,9 +50,6 @@ function UsersTableSkeleton() {
               <TableCell>
                 <Skeleton className="h-7 w-24 rounded-md" />
               </TableCell>
-              <TableCell>
-                <Skeleton className="h-3.5 w-10" />
-              </TableCell>
               <TableCell />
             </TableRow>
           ))}
@@ -71,36 +61,6 @@ function UsersTableSkeleton() {
 
 function initials(user: User): string {
   return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
-}
-
-/**
- * Which Git Providers this User has granted repository access to.
- *
- * @remarks
- * Here so an Admin can answer "who has granted this Registry access to our
- * repositories" without opening a database client (ADR-0024). The provider
- * name and nothing else — not the connected account, and certainly not a
- * token: an Admin needs to know a grant exists so they can ask about it.
- *
- * A reader can hold none, so an em dash is the common and correct answer.
- */
-function ConnectionCell({ user }: { user: UserListItem }) {
-  if (user.connected_providers.length === 0) {
-    return <span className="text-sm text-muted-foreground">—</span>;
-  }
-
-  return (
-    <div className="flex flex-wrap gap-1">
-      {user.connected_providers.map((provider) => (
-        <span
-          key={provider}
-          className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground capitalize"
-        >
-          {provider}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 /**
@@ -154,7 +114,6 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                 <TableHead className={NAME_COL}>Name</TableHead>
                 <TableHead className={EMAIL_COL}>Email</TableHead>
                 <TableHead className={ROLE_COL}>Role</TableHead>
-                <TableHead className={CONNECTIONS_COL}>Connections</TableHead>
                 <TableHead className={ACTIONS_COL} />
               </TableRow>
             </TableHeader>
@@ -201,9 +160,6 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                           </SelectContent>
                         </Select>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <ConnectionCell user={user} />
                     </TableCell>
                     <TableCell className="text-right">
                       {!isProtected && (

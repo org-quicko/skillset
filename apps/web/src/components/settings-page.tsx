@@ -3,17 +3,26 @@ import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { IntegrationsCard } from "@/components/integrations-card";
 import { ProfileCard } from "@/components/profile-card";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
 import { TokensCard } from "@/components/tokens-card";
 import { UsersCard } from "@/components/users-card";
 import { useRouter } from "@/lib/use-router";
-import { cn } from "@/lib/utils";
 
 const PROFILE_PATH = "/settings";
 const USERS_PATH = "/settings/users";
 const TOKENS_PATH = "/settings/tokens";
 const LOGIN_PATH = "/settings/login";
 const INTEGRATIONS_PATH = "/settings/integrations";
-const CONNECTIONS_PATH = "/settings/connections";
+const CONNECTIONS_PATH = "/settings/connected-accounts";
 
 type Section = "profile" | "users" | "login" | "integrations" | "connections" | "tokens";
 
@@ -57,29 +66,31 @@ export function SettingsPage({ user }: { user: User }) {
     <div className="flex flex-col gap-5">
       <h1 className="text-3xl font-medium tracking-tight">Settings</h1>
 
-      <nav className="flex gap-6 border-b">
-        {tabs.map((tab) => (
-          <button
-            key={tab.section}
-            type="button"
-            onClick={() => navigate(tab.path)}
-            aria-current={section === tab.section}
-            className={cn(
-              "-mb-px cursor-pointer border-b-2 pb-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-              section === tab.section
-                ? "border-foreground text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <SidebarProvider className="min-h-0 items-start gap-8">
+        <Sidebar collapsible="none" className="w-48 shrink-0 bg-transparent">
+          <SidebarContent>
+            <SidebarGroup className="p-0">
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {tabs.map((tab) => (
+                    <SidebarMenuItem key={tab.section}>
+                      <SidebarMenuButton
+                        isActive={section === tab.section}
+                        onClick={() => navigate(tab.path)}
+                      >
+                        {tab.label}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+        </Sidebar>
 
-      <div className="pt-1">
         <div
           key={section}
-          className="fill-mode-both animate-in fade-in-0 slide-in-from-bottom-1 duration-200 [animation-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:animate-none"
+          className="min-w-0 flex-1 fill-mode-both animate-in fade-in-0 slide-in-from-bottom-1 duration-200 [animation-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:animate-none"
         >
           {section === "profile" && <ProfileCard user={user} />}
           {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
@@ -88,7 +99,7 @@ export function SettingsPage({ user }: { user: User }) {
           {section === "connections" && canImport && <ConnectionCard />}
           {section === "tokens" && <TokensCard />}
         </div>
-      </div>
+      </SidebarProvider>
     </div>
   );
 }

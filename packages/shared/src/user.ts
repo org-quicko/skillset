@@ -24,29 +24,9 @@ export const PASSWORD_MIN_LENGTH = 12;
 /** Users are listed 50 to a page, most recently created first. */
 export const USER_PAGE_SIZE = 50;
 
-/**
- * A User as the Admin's list reports them: everything `UserSchema` carries,
- * plus which Git Providers they hold a Connection to.
- *
- * @remarks
- * Deliberately a separate shape rather than a field on `UserSchema`. A
- * Connection is not part of being a User, and `/users/me` has no business
- * carrying one — an empty array there would read as "not connected" for a
- * writer who is, which is worse than not saying.
- *
- * Provider names, not a boolean, because *which* provider is the useful half.
- * Never a token, and never the connected account's login: an Admin needs to
- * know a grant exists so they can ask about it, not to read the credential
- * (ADR-0024).
- */
-export const UserListItemSchema = UserSchema.extend({
-  connected_providers: z.array(z.string()),
-});
-export type UserListItem = z.infer<typeof UserListItemSchema>;
-
 /** GET /users response. */
 export const UserPageSchema = z.object({
-  items: z.array(UserListItemSchema),
+  items: z.array(UserSchema),
   page: z.number().int(),
   page_size: z.literal(USER_PAGE_SIZE),
   total: z.number().int(),

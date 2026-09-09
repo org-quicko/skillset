@@ -1,6 +1,6 @@
 import { PASSWORD_MIN_LENGTH } from "@skillset/shared";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/form-dialog";
+import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
 import { LabeledField } from "@/components/labeled-field";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";

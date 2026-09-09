@@ -86,7 +86,7 @@ export function TokensCard() {
   }
 
   return (
-    <div className="flex max-w-xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <form onSubmit={handleSubmit}>
         <Panel title="New Token" contentClassName="p-0">
           <InfoRow title="Name">

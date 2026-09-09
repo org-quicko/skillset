@@ -602,6 +602,123 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
       expect([409, 502]).toContain(res.status);
     });
   });
+
+  /**
+   * `GET /imports/:provider/repositories` — the picker behind "browse
+   * repositories" on the publish screen. It shares `fetchSkillFiles`'s
+   * preconditions (both spend the same Connection through the same service),
+   * so what is worth proving here is its own shape: it walks every
+   * installation, paginates, and turns a refusal into the same errors a
+   * writer already knows from importing.
+   */
+  describe("Listing repositories (GET /imports/:provider/repositories)", () => {
+    const REPOSITORIES_PATH = "/api/imports/github/repositories";
+    const repo = (full_name: string, overrides: Record<string, unknown> = {}) => {
+      const [owner, name] = full_name.split("/");
+      return {
+        full_name,
+        name,
+        owner: { login: owner },
+        private: false,
+        html_url: `https://github.com/${full_name}`,
+        description: null,
+        ...overrides,
+      };
+    };
+
+    function get(cookie: string, path = REPOSITORIES_PATH) {
+      return context.app.request(path, { headers: { cookie } });
+    }
+
+    it("lists every repository across every installation the connection sees", async () => {
+      await ready();
+      const provider = stub({
+        [INSTALLATIONS]: { installations: [{ id: 7, account: { login: "acme" } }, { id: 9, account: { login: "ada" } }] },
+        "https://api.github.com/user/installations/7/repositories?per_page=100&page=1": {
+          repositories: [repo("acme/skills"), repo("acme/tools")],
+        },
+        "https://api.github.com/user/installations/9/repositories?per_page=100&page=1": {
+          repositories: [repo("ada/notes")],
+        },
+      });
+
+      const repositories = await imports.listRepositories(writer.id, "github", provider.fetch);
+      expect(repositories.map((entry) => entry.full_name).sort()).toEqual(["acme/skills", "acme/tools", "ada/notes"]);
+      expect(repositories[0]).toMatchObject({ name: "skills", owner: "acme", private: false });
+    });
+
+    it("pages a single installation past a hundred repositories", async () => {
+      await ready();
+      const fullPage = { repositories: Array.from({ length: 100 }, (_, index) => repo(`acme/repo-${index}`)) };
+      const provider = stub({
+        [INSTALLATIONS]: { installations: [{ id: 7, account: { login: "acme" } }] },
+        "https://api.github.com/user/installations/7/repositories?per_page=100&page=1": fullPage,
+        "https://api.github.com/user/installations/7/repositories?per_page=100&page=2": { repositories: [repo("acme/last")] },
+      });
+
+      const repositories = await imports.listRepositories(writer.id, "github", provider.fetch);
+      expect(repositories).toHaveLength(101);
+      expect(repositories.at(-1)?.full_name).toBe("acme/last");
+    });
+
+    it("skips a repository the provider answered without the fields a picker needs", async () => {
+      await ready();
+      const provider = stub({
+        [INSTALLATIONS]: { installations: [{ id: 7, account: { login: "acme" } }] },
+        "https://api.github.com/user/installations/7/repositories?per_page=100&page=1": {
+          repositories: [repo("acme/skills"), { full_name: "acme/broken" }],
+        },
+      });
+
+      const repositories = await imports.listRepositories(writer.id, "github", provider.fetch);
+      expect(repositories.map((entry) => entry.full_name)).toEqual(["acme/skills"]);
+    });
+
+    it("refuses when no Integration is configured, before looking for a Connection", async () => {
+      await clearAll();
+      const res = await get(writerCookie);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ApiError).error.code).toBe("integration_not_configured");
+    });
+
+    it("refuses a writer who holds no Connection", async () => {
+      await clearAll();
+      await seedIntegration();
+      const res = await get(writerCookie);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ApiError).error.code).toBe("not_connected");
+    });
+
+    it("says reconnect when the grant is refused", async () => {
+      await ready();
+      const provider = stub({ [INSTALLATIONS]: new Response("nope", { status: 401 }) });
+      await expect(imports.listRepositories(writer.id, "github", provider.fetch)).rejects.toMatchObject({
+        code: "connection_expired",
+      });
+    });
+
+    it("passes on a rate limit as itself", async () => {
+      await ready();
+      const provider = stub({
+        [INSTALLATIONS]: new Response("slow down", { status: 403, headers: { "x-ratelimit-remaining": "0" } }),
+      });
+      await expect(imports.listRepositories(writer.id, "github", provider.fetch)).rejects.toMatchObject({
+        code: "import_failed",
+        status: 502,
+      });
+    });
+
+    it("refuses a reader, and an unauthenticated caller", async () => {
+      await ready();
+      expect((await get(readerCookie)).status).toBe(403);
+      expect((await context.app.request(REPOSITORIES_PATH)).status).toBe(401);
+    });
+
+    it("rejects an unknown Git Provider in the path as a client error", async () => {
+      await ready();
+      expect((await get(writerCookie, "/api/imports/bitbucket/repositories")).status).toBe(400);
+    });
+  });
 });
 
 /** The location the stubs above are written for. */

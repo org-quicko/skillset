@@ -3,6 +3,7 @@ import {
   gitProviderConfig,
   readSkillFolder,
   SkillFolderError,
+  type Repository,
   type SkillFile,
   type SkillSourceLocation,
 } from "@skillset/shared";
@@ -57,8 +58,23 @@ const REJECTION_MESSAGES: Record<"empty_folder" | "too_many_entries" | "uncompre
 
 /** What `GET /user/installations` reports, in the part this reads. */
 interface Installations {
-  installations?: { account?: { login?: string } }[];
+  installations?: { id?: number; account?: { login?: string } }[];
 }
+
+/** What `GET /user/installations/{id}/repositories` reports, in the part this reads. */
+interface InstallationRepositories {
+  repositories?: {
+    full_name?: string;
+    name?: string;
+    private?: boolean;
+    html_url?: string;
+    description?: string | null;
+    owner?: { login?: string };
+  }[];
+}
+
+/** A hundred repositories a page, up to this many pages per installation — far past what a writer browsing by hand will ever need. */
+const MAX_REPOSITORY_PAGES = 10;
 
 /**
  * Reading a Skill's files out of a project the caller's Connection can see,
@@ -243,6 +259,142 @@ export class ImportsService {
       "discovered skill folders",
     );
     return found;
+  }
+
+  /**
+   * Every repository the caller's Connection can see, across every account
+   * the Registry's app is installed on for them — the picker behind "browse
+   * repositories" on the publish screen, so a writer never has to know a
+   * project's URL by heart.
+   *
+   * @remarks
+   * Only a provider with an installation to walk can reach this: a
+   * credential-less GitLab Connection cannot exist in the first place, since
+   * that provider has no credentialed flow at all (ADR-0024).
+   *
+   * Reads `GET /user/installations` for the accounts the app is installed on
+   * — the same request `appIsInstalledOn` already makes — then
+   * `GET /user/installations/{id}/repositories` for each, a hundred at a
+   * time up to {@link MAX_REPOSITORY_PAGES} pages.
+   *
+   * @param userId - The writer browsing, whose Connection is spent.
+   * @param provider - The Git Provider to list from.
+   * @param fetchImpl - The `fetch` to reach the provider with. Defaults to
+   * the global one; tests pass a fake so a request never leaves the process.
+   * @returns Every repository visible to the Connection.
+   * @throws IntegrationNotConfiguredError if no Integration is configured for
+   * that Git Provider.
+   * @throws NotConnectedError if the caller holds no Connection to it.
+   * @throws ConnectionExpiredError if the grant can no longer be refreshed, or
+   * the provider refuses it outright.
+   * @throws ImportFailedError if the provider refuses for any other reason,
+   * rate-limits the request, or cannot be reached.
+   * @example
+   * ```ts
+   * const repositories = await imports.listRepositories(user.id, "github");
+   * ```
+   */
+  async listRepositories(userId: string, provider: string, fetchImpl?: typeof fetch): Promise<Repository[]> {
+    const configured = await this.integrations.listByProvider(provider);
+    if (configured.length === 0) {
+      this.logger.info(
+        { user_id: userId, provider },
+        "refused a repository listing because no integration is configured for that git provider",
+      );
+      throw new IntegrationNotConfiguredError(provider);
+    }
+
+    const fetcher = fetchImpl ?? globalThis.fetch;
+    const token = await this.connections.accessTokenFor(userId, provider, fetchImpl);
+    const apiBase = gitProviderConfig(provider).api_base;
+
+    const installations = await this.providerRequest<Installations>(
+      `${apiBase}/user/installations`,
+      provider,
+      token,
+      fetcher,
+    );
+
+    const repositories: Repository[] = [];
+    for (const installation of installations.installations ?? []) {
+      if (installation.id === undefined) continue;
+      repositories.push(...(await this.installationRepositories(apiBase, installation.id, provider, token, fetcher)));
+    }
+
+    this.logger.info(
+      { user_id: userId, provider, repositories: repositories.length },
+      "listed repositories",
+    );
+    return repositories;
+  }
+
+  /** One installation's repositories, paginated a hundred at a time. */
+  private async installationRepositories(
+    apiBase: string,
+    installationId: number,
+    provider: string,
+    token: string,
+    fetchImpl: typeof fetch,
+  ): Promise<Repository[]> {
+    const repositories: Repository[] = [];
+    for (let page = 1; page <= MAX_REPOSITORY_PAGES; page++) {
+      const body = await this.providerRequest<InstallationRepositories>(
+        `${apiBase}/user/installations/${installationId}/repositories?per_page=100&page=${page}`,
+        provider,
+        token,
+        fetchImpl,
+      );
+      const batch = body.repositories ?? [];
+      for (const repository of batch) {
+        if (!repository.full_name || !repository.name || !repository.html_url || !repository.owner?.login) continue;
+        repositories.push({
+          full_name: repository.full_name,
+          name: repository.name,
+          owner: repository.owner.login,
+          private: repository.private ?? false,
+          html_url: repository.html_url,
+          description: repository.description ?? null,
+        });
+      }
+      if (batch.length < 100) break;
+    }
+    return repositories;
+  }
+
+  /**
+   * A `GET` against the provider, decoded as JSON — the shared request path
+   * for {@link listRepositories}, kept apart from the folder walk's own
+   * request-making because it answers with a plain JSON body rather than the
+   * Contents API shape `readSkillFolder`/`discoverSkillFolders` understand.
+   *
+   * @throws ConnectionExpiredError on a 401 — the token was only just minted
+   * or refreshed by `accessTokenFor`, so a provider that still refuses it has
+   * refused the grant itself, not let it merely expire mid-request.
+   * @throws ImportFailedError on a rate limit, any other non-2xx response, an
+   * unreachable provider, or a 2xx body that is not valid JSON.
+   */
+  private async providerRequest<T>(url: string, provider: string, token: string, fetchImpl: typeof fetch): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetchImpl(url, {
+        headers: { accept: "application/json", authorization: `Bearer ${token}`, "user-agent": "skillset" },
+        redirect: "manual",
+      });
+    } catch {
+      throw new ImportFailedError(UPSTREAM_MESSAGES.request_failed);
+    }
+
+    if (res.status === 401) throw new ConnectionExpiredError(provider);
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+      throw new ImportFailedError(UPSTREAM_MESSAGES.rate_limited);
+    }
+    if (!res.ok) throw new ImportFailedError(UPSTREAM_MESSAGES.request_failed);
+
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw new ImportFailedError(UPSTREAM_MESSAGES.request_failed);
+    }
   }
 
   /**

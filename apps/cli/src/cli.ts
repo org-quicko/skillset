@@ -151,6 +151,10 @@ program
       } else if (report.link.kind === "copy") {
         const why = report.link.reason === "symlink-failed" ? " (symlink unavailable on this system)" : "";
         p.log.message(pc.dim(`${report.agent}: copied into ${report.link.path}${why}`));
+      } else if (report.agent === null) {
+        p.log.message(
+          pc.dim("No Agent detected — installed into .agents/skills. Pass --agent to link it into a specific Agent's directory."),
+        );
       } else {
         p.log.message(pc.dim(`${report.agent} reads .agents/skills directly`));
       }

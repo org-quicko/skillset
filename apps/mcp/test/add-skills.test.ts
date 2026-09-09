@@ -3,8 +3,8 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
-import { SkillSchema } from "@skillset/shared";
-import { addSkills, buildFallbackOutcome, type AddSkillsDeps } from "../src/add-skills.js";
+import { type AgentId, SkillSchema } from "@skillset/shared";
+import { addSkills, buildFallbackOutcome, type AddSkillOutcome, type AddSkillsDeps } from "../src/tools/add-skills.js";
 import { jsonResponse, stubFetch, type RecordedCall } from "./helpers.js";
 
 const encoder = new TextEncoder();
@@ -64,14 +64,27 @@ async function withTempRoots<T>(run: (roots: { cwd: string; homeDir: string }) =
   }
 }
 
-function baseDeps(overrides: Partial<AddSkillsDeps> & { fetchImpl: typeof fetch; ctx: AddSkillsDeps["ctx"] }): AddSkillsDeps {
+function baseDeps(
+  overrides: Partial<Omit<AddSkillsDeps, "detection">> & {
+    fetchImpl: typeof fetch;
+    ctx: AddSkillsDeps["ctx"];
+    /** Convenience: the resolved Agent, wrapped into a `detection` for the deps. */
+    agentId?: AgentId | null;
+  },
+): AddSkillsDeps {
+  const { agentId = "claude-code", ...rest } = overrides;
   return {
     registry: REGISTRY,
     scope: "project",
-    agentId: "claude-code",
+    detection: { agentId, step: "override" },
     overwrite: false,
-    ...overrides,
+    ...rest,
   };
+}
+
+/** Runs {@link addSkills} and returns just the per-Skill outcomes — the shape most tests assert on. */
+async function addSkillsOutcomes(deps: AddSkillsDeps, names: readonly string[]): Promise<AddSkillOutcome[]> {
+  return (await addSkills(deps, names)).outcomes;
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -88,7 +101,7 @@ describe("addSkills — a normal install", () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: fetchImpl } = stubRegistry();
 
-      const [outcome] = await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      const [outcome] = await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       expect(outcome).toMatchObject({ name: "code-review", status: "installed" });
       if (outcome?.status !== "installed") throw new Error("expected installed");
@@ -104,7 +117,7 @@ describe("addSkills — a normal install", () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: fetchImpl } = stubRegistry();
 
-      const [outcome] = await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir }, agentId: "codex" }), [
+      const [outcome] = await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir }, agentId: "codex" }), [
         "code-review",
       ]);
 
@@ -118,7 +131,7 @@ describe("addSkills — a normal install", () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: fetchImpl, calls } = stubRegistry();
 
-      await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       const artifactCall = calls.find((call) => call.url.includes("/artifact"));
       expect(artifactCall?.url).toBe(`${REGISTRY}/api/resources/skill-1/artifact?source=mcp`);
@@ -129,7 +142,7 @@ describe("addSkills — a normal install", () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: fetchImpl, calls } = stubRegistry();
 
-      await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       expect(calls.length).toBeGreaterThan(0);
       for (const call of calls as RecordedCall[]) {
@@ -152,7 +165,7 @@ describe("addSkills — batching", () => {
         throw new Error(`Unexpected request to ${url}`);
       });
 
-      const outcomes = await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["skill-a", "skill-b"]);
+      const outcomes = await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["skill-a", "skill-b"]);
 
       expect(outcomes.map((o) => o.name)).toEqual(["skill-a", "skill-b"]);
       expect(outcomes.every((o) => o.status === "installed")).toBe(true);
@@ -168,7 +181,7 @@ describe("addSkills — batching", () => {
         throw new Error(`Unexpected request to ${url}`);
       });
 
-      const outcomes = await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), [
+      const outcomes = await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), [
         "typo-name",
         "code-review",
       ]);
@@ -183,10 +196,10 @@ describe("addSkills — an already-installed Skill", () => {
   it("refuses when the target exists and overwrite was not requested, naming the Skill", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: fetchImpl } = stubRegistry();
-      await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       const { fetch: secondFetch, calls } = stubRegistry();
-      const outcomes = await addSkills(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      const outcomes = await addSkillsOutcomes(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       expect(outcomes[0]).toEqual({ name: "code-review", status: "refused", existing: "code-review" });
       // Refused before any download: only the by-name lookup was made.
@@ -197,11 +210,11 @@ describe("addSkills — an already-installed Skill", () => {
   it("leaves the existing directory byte-for-byte unchanged when refused", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: firstFetch } = stubRegistry();
-      await addSkills(baseDeps({ fetchImpl: firstFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await addSkillsOutcomes(baseDeps({ fetchImpl: firstFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
       const before = await readFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "utf8");
 
       const { fetch: secondFetch } = stubRegistry({ artifact: validArtifactZip("Different body.\n") });
-      await addSkills(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await addSkillsOutcomes(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       const after = await readFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "utf8");
       expect(after).toBe(before);
@@ -215,11 +228,11 @@ describe("addSkills — an already-installed Skill", () => {
         "old-only.txt": encoder.encode("stale"),
       });
       const { fetch: firstFetch } = stubRegistry({ artifact: firstZip });
-      await addSkills(baseDeps({ fetchImpl: firstFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await addSkillsOutcomes(baseDeps({ fetchImpl: firstFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
       expect(await exists(join(cwd, ".agents", "skills", "code-review", "old-only.txt"))).toBe(true);
 
       const { fetch: secondFetch } = stubRegistry({ artifact: validArtifactZip("New body.\n") });
-      const outcomes = await addSkills(
+      const outcomes = await addSkillsOutcomes(
         baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir }, overwrite: true }),
         ["code-review"],
       );
@@ -236,7 +249,7 @@ describe("addSkills — a failed download or a bad Artifact", () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
       const { fetch: fetchImpl } = stubRegistry({ artifactStatus: 500 });
 
-      const [outcome] = await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      const [outcome] = await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       expect(outcome?.status).toBe("error");
       expect(await exists(join(cwd, ".agents", "skills", "code-review"))).toBe(false);
@@ -248,7 +261,7 @@ describe("addSkills — a failed download or a bad Artifact", () => {
       const badZip = zipSync({ "../../escape.txt": encoder.encode("hostile") });
       const { fetch: fetchImpl } = stubRegistry({ artifact: badZip });
 
-      const [outcome] = await addSkills(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      const [outcome] = await addSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
       expect(outcome?.status).toBe("error");
       if (outcome?.status !== "error") throw new Error("expected error");
@@ -278,6 +291,38 @@ describe("addSkills — an Agent with no directory at this Scope", () => {
       manifest,
       intendedDirectory: "/repo/.agents/skills/code-review",
       skillMdBody: "Body.\n",
+    });
+  });
+});
+
+describe("addSkills — no Agent detected (canonical fallback)", () => {
+  it("writes the canonical directory and links nothing", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const { fetch: fetchImpl } = stubRegistry();
+
+      const [outcome] = await addSkillsOutcomes(
+        baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir }, agentId: null }),
+        ["code-review"],
+      );
+
+      if (outcome?.status !== "installed") throw new Error("expected installed");
+      expect(outcome.skillDirectory).toBe(join(cwd, ".agents", "skills", "code-review"));
+      expect(outcome.link).toEqual({ kind: "canonical" });
+      expect(outcome.alsoServes).toEqual([]);
+      expect(await exists(join(cwd, ".claude", "skills", "code-review"))).toBe(false);
+    });
+  });
+
+  it("echoes the detection back on the batch result", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const { fetch: fetchImpl } = stubRegistry();
+      const deps = baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir }, agentId: null });
+      deps.detection = { agentId: null, step: "canonical-fallback" };
+
+      const result = await addSkills(deps, ["code-review"]);
+
+      expect(result.detection).toEqual({ agentId: null, step: "canonical-fallback" });
+      expect(result.outcomes).toHaveLength(1);
     });
   });
 });
