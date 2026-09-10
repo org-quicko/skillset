@@ -11,10 +11,10 @@ const noopLogger: Logger = {
   error: () => {},
 };
 
-describe("Skillset MCP prompt", () => {
-  it("exposes /skillset with instructions to search and add Skills", async () => {
+describe("Skillset MCP server instructions", () => {
+  it("tells the client the Registry is remote and unlisted, so it searches instead of using its own catalog", async () => {
     const server = createServer(
-      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn" },
+      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined },
       fetch,
       noopLogger,
       { cwd: process.cwd(), env: {}, homeDir: process.cwd() },
@@ -26,19 +26,34 @@ describe("Skillset MCP prompt", () => {
     await client.connect(clientTransport);
 
     try {
-      const { prompts } = await client.listPrompts();
-      expect(prompts).toContainEqual(
-        expect.objectContaining({
-          name: "skillset",
-          title: "Use Skillset",
-        }),
-      );
+      const instructions = client.getInstructions() ?? "";
+      expect(instructions).toContain("search_skills");
+      expect(instructions).toContain("built-in Skill catalog");
+      expect(instructions).toMatch(/remote Skill Registry/i);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
 
-      const prompt = await client.getPrompt({ name: "skillset" });
-      const text = prompt.messages[0]?.content.type === "text" ? prompt.messages[0].content.text : "";
-      expect(text).toContain("Explicitly use the Skillset MCP");
-      expect(text).toContain("search_skills");
-      expect(text).toContain("add_skills");
+  it("distinguishes search_skills from the client's own Skill catalog in its description", async () => {
+    const server = createServer(
+      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined },
+      fetch,
+      noopLogger,
+      { cwd: process.cwd(), env: {}, homeDir: process.cwd() },
+    );
+    const client = new Client({ name: "test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    try {
+      const { tools } = await client.listTools();
+      const search = tools.find((tool) => tool.name === "search_skills");
+      expect(search?.description).toContain("REMOTE Skill Registry");
+      expect(search?.description).toContain("built-in Skill catalog");
     } finally {
       await client.close();
       await server.close();

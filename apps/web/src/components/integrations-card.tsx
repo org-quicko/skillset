@@ -6,7 +6,6 @@ import { IntegrationDialog } from "@/components/integration-dialog";
 import { Panel } from "@/components/panel";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,12 +21,10 @@ function IntegrationTilesSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: 3 }).map((_, index) => (
-        <Card key={index}>
-          <CardHeader>
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="mt-1.5 h-3 w-40" />
-          </CardHeader>
-        </Card>
+        <Panel key={index}>
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="mt-1.5 h-3 w-40" />
+        </Panel>
       ))}
     </div>
   );
@@ -57,12 +54,12 @@ function IntegrationTile({
   const ProviderIcon = GIT_PROVIDER_ICONS[integration.provider];
 
   return (
-    <Card>
-      <CardHeader className="flex items-start justify-between gap-3">
+    <Panel>
+      <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
-          <CardTitle className="truncate">{integration.display_name}</CardTitle>
+          <span className="truncate text-sm font-medium">{integration.display_name}</span>
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            {ProviderIcon && <ProviderIcon className="size-4 shrink-0" aria-hidden />}
+            {ProviderIcon && <ProviderIcon className="size-[26px] shrink-0" aria-hidden />}
             <span className="truncate">{providerName}</span>
           </div>
         </div>
@@ -84,13 +81,9 @@ function IntegrationTile({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </CardHeader>
-      {integration.description && (
-        <CardContent>
-          <p className="text-sm text-muted-foreground">{integration.description}</p>
-        </CardContent>
-      )}
-    </Card>
+      </div>
+      {integration.description && <p className="mt-3 text-sm text-muted-foreground">{integration.description}</p>}
+    </Panel>
   );
 }
 
@@ -134,7 +127,7 @@ export function IntegrationsCard() {
         </div>
         <Button size="sm" onClick={() => openDialog(null)}>
           <PlusIcon />
-          Add integration
+          Add Integration
         </Button>
       </div>
 

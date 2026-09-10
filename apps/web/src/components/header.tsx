@@ -1,8 +1,11 @@
-import type { User } from "@skillset/shared";
-import { LogOutIcon, SettingsIcon } from "lucide-react";
+import { roleMeets, type User } from "@skillset/shared";
+import { LogOutIcon, SettingsIcon, UploadIcon } from "lucide-react";
+import { useState } from "react";
+import { PublishSkillForm } from "@/components/publish-skill-form";
 import { ThemeSegmentedControl, ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLogout } from "@/hooks/use-auth";
-import { LOGIN_PATH } from "@/lib/routes";
+import { LOGIN_PATH, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 
 function initials(user: User): string {
@@ -21,9 +24,9 @@ function initials(user: User): string {
 }
 
 /**
- * The site's top navigation: the wordmark, and either a Sign in link (with a
- * standalone theme toggle) or the signed-in User's menu, which folds the
- * theme control into itself.
+ * The site's top navigation: the wordmark, the Publish a skill action (shown to every
+ * visitor able to publish, signed in or not), and either a Sign in link (with a standalone
+ * theme toggle) or the signed-in User's menu, which folds the theme control into itself.
  *
  * @param user - The signed-in User, or `null`/`undefined` for a signed-out visitor.
  * @param onOpenSettings - Called when the User picks Edit personal info or Settings from their menu.
@@ -31,6 +34,12 @@ function initials(user: User): string {
 export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSettings?: () => void }) {
   const logout = useLogout();
   const { navigate } = useRouter();
+  const [publishOpen, setPublishOpen] = useState(false);
+
+  // Shown to every visitor, signed out or not: clicking it while signed out asks for a
+  // login instead of hiding the option outright (reads never require a session, but
+  // publishing does).
+  const canPublish = !user || roleMeets(user.role, "writer");
 
   return (
     <header className="w-full border-b bg-background">
@@ -43,7 +52,13 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
           SKILLSET
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          {canPublish && (
+            <Button variant="outline" onClick={() => (user ? setPublishOpen(true) : navigate(LOGIN_PATH))}>
+              <UploadIcon />
+              Publish<span className="hidden sm:inline"> a skill</span>
+            </Button>
+          )}
           {!user && <ThemeToggle />}
           {user ? (
             <DropdownMenu>
@@ -64,13 +79,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                       </span>
                       <span className="text-xs text-muted-foreground">{user.email}</span>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full rounded-full"
-                      onClick={onOpenSettings}
-                    >
+                    <Button variant="outline" className="w-full" onClick={onOpenSettings}>
                       Edit personal info
                     </Button>
                   </DropdownMenuLabel>
@@ -90,17 +99,27 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-full"
-              onClick={() => navigate(LOGIN_PATH)}
-            >
+            <Button size="sm" onClick={() => navigate(LOGIN_PATH)}>
               Sign in
             </Button>
           )}
         </div>
       </div>
+
+      <FormDialog open={publishOpen} onOpenChange={setPublishOpen} className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl">
+        <FormDialogHeader
+          title="Publish a Skill"
+          description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
+        />
+        <FormDialogBody>
+          <PublishSkillForm
+            onPublished={(name) => {
+              setPublishOpen(false);
+              navigate(skillPath(name));
+            }}
+          />
+        </FormDialogBody>
+      </FormDialog>
     </header>
   );
 }

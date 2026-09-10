@@ -7,18 +7,24 @@ import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TABLE_HEAD_LABEL_CLASS,
+} from "@/components/ui/table";
 import { useIdentityProviders, useUpdateIdentityProvider } from "@/hooks/use-identity-providers";
 import { apiErrorMessage } from "@/lib/api";
-
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
 // Fixed column widths (with `table-fixed`) so a long provider name or list of
 // permitted organisations truncates/wraps within the row instead of
 // stretching the table past the Panel and clipping the actions off the edge.
-const PROVIDER_COL = `${HEAD_CLASS} w-[38%]`;
-const ORGS_COL = `${HEAD_CLASS} w-[36%]`;
-const ACTIONS_COL = `${HEAD_CLASS} w-[190px]`;
+const PROVIDER_COL = `${TABLE_HEAD_LABEL_CLASS} w-[38%]`;
+const ORGS_COL = `${TABLE_HEAD_LABEL_CLASS} w-[36%]`;
+const ACTIONS_COL = `${TABLE_HEAD_LABEL_CLASS} w-[190px]`;
 
 /** Placeholder provider table while `useIdentityProviders` is in flight. */
 function ProvidersTableSkeleton() {
@@ -37,7 +43,7 @@ function ProvidersTableSkeleton() {
             <TableRow key={index} className="hover:bg-transparent">
               <TableCell>
                 <div className="flex items-center gap-2">
-                  <Skeleton className="size-4 shrink-0 rounded-full" />
+                  <Skeleton className="size-[26px] shrink-0" />
                   <Skeleton className="h-3.5 w-24" />
                   <Skeleton className="h-5 w-16 rounded-full" />
                 </div>
@@ -85,7 +91,7 @@ export function IdentityProvidersCard() {
     <div className="flex flex-col gap-3.5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="text-sm font-medium">External login</h2>
+          <h2 className="text-sm font-medium">OIDC</h2>
           <p className="max-w-2xl text-xs text-muted-foreground">
             Anyone whose account is in one of a Provider&apos;s permitted organisations can sign in, and gets a
             reader account on their first login. Promote them from Users. A Provider with no organisations listed
@@ -129,7 +135,7 @@ export function IdentityProvidersCard() {
                   <TableRow key={provider.id} className="hover:bg-transparent">
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
-                        <Icon className="size-4 shrink-0" />
+                        <Icon className="size-[26px] shrink-0" />
                         <span className="truncate font-medium">{provider.display_name}</span>
                         <Badge variant={provider.enabled ? "default" : "secondary"} className="shrink-0">
                           {provider.enabled ? "Enabled" : "Disabled"}

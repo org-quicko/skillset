@@ -43,7 +43,7 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
             value={currentPassword}
             onChange={(event) => setCurrentPassword(event.target.value)}
             required
-            className="h-10"
+            className="h-9"
           />
         </LabeledField>
         <LabeledField label="New password" htmlFor="new_password" hint="At least 12 characters.">
@@ -55,7 +55,7 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             required
-            className="h-10"
+            className="h-9"
           />
         </LabeledField>
         {replacePassword.isError && (

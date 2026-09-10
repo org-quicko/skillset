@@ -8,19 +8,25 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TABLE_HEAD_LABEL_CLASS,
+} from "@/components/ui/table";
 import { useUpdateUserRole, useUsers } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
-
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
 // Fixed column widths (with `table-fixed`) so a long name or email
 // truncates within the row instead of stretching the table past
 // the Panel and clipping the Remove column off the edge.
-const NAME_COL = `${HEAD_CLASS} w-[30%]`;
-const EMAIL_COL = `${HEAD_CLASS} w-[30%]`;
-const ROLE_COL = `${HEAD_CLASS} w-[140px]`;
-const ACTIONS_COL = `${HEAD_CLASS} w-[110px]`;
+const NAME_COL = `${TABLE_HEAD_LABEL_CLASS} w-[30%]`;
+const EMAIL_COL = `${TABLE_HEAD_LABEL_CLASS} w-[30%]`;
+const ROLE_COL = `${TABLE_HEAD_LABEL_CLASS} w-[140px]`;
+const ACTIONS_COL = `${TABLE_HEAD_LABEL_CLASS} w-[110px]`;
 
 /** Placeholder user table while `useUsers` is in flight. */
 function UsersTableSkeleton() {
@@ -92,8 +98,8 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
     <div className="flex flex-col gap-3.5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="text-sm font-medium">Users</h2>
-          <p className="max-w-xl text-xs text-muted-foreground">Create, promote, demote, and remove Users.</p>
+          <h2 className="text-sm font-medium">Team</h2>
+          <p className="max-w-2xl text-xs text-muted-foreground">Create, promote, demote, and remove Users.</p>
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
           <PlusIcon />

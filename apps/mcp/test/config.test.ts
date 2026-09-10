@@ -71,25 +71,22 @@ describe("parseConfig", () => {
     }
   });
 
-  it("never reads SKILLSET_TOKEN — this server holds no credential", () => {
-    let readToken = false;
-    const env = new Proxy(
-      { SKILLSET_REGISTRY: "https://registry.example" },
-      {
-        get(target, prop) {
-          if (prop === "SKILLSET_TOKEN") readToken = true;
-          return Reflect.get(target, prop);
-        },
-      },
-    ) as NodeJS.ProcessEnv;
-
-    parseConfig([], env);
-
-    expect(readToken).toBe(false);
+  it("leaves token undefined when neither --token nor SKILLSET_TOKEN is given", () => {
+    const config = parseConfig(["--registry", "https://registry.example"], {});
+    expect(config.token).toBeUndefined();
   });
 
-  it("defines no --token flag: an unrecognized flag is simply ignored, not read as a credential", () => {
-    const config = parseConfig(["--registry", "https://registry.example", "--token", "secret"], {});
-    expect(config).not.toHaveProperty("token");
+  it("falls back to SKILLSET_TOKEN when --token is absent", () => {
+    const config = parseConfig(["--registry", "https://registry.example"], {
+      SKILLSET_TOKEN: "env-token",
+    });
+    expect(config.token).toBe("env-token");
+  });
+
+  it("prefers --token when both are given", () => {
+    const config = parseConfig(["--registry", "https://registry.example", "--token", "flag-token"], {
+      SKILLSET_TOKEN: "env-token",
+    });
+    expect(config.token).toBe("flag-token");
   });
 });

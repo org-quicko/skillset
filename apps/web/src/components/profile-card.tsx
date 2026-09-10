@@ -55,7 +55,12 @@ export function ProfileCard({ user }: { user: User }) {
   }, [user.first_name, user.last_name]);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3.5">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-medium">Personal Info</h2>
+        <p className="max-w-2xl text-xs text-muted-foreground">Your name and password.</p>
+      </div>
+
       <Panel contentClassName="p-0">
         <div className="divide-y">
           <InfoRow title="First name">

@@ -22,7 +22,8 @@ async function main(): Promise<void> {
   const server = createServer(config, fetch, logger, ctx);
   await server.connect(new StdioServerTransport());
   logger.info(
-    `skillset-mcp connected, registry=${config.registry} scope=${config.scope} agent-override=${config.agentId ?? "none (detected)"}`,
+    `skillset-mcp connected, registry=${config.registry} scope=${config.scope} agent-override=${config.agentId ?? "none (detected)"} ` +
+      `token=${config.token ? "configured" : "none (publish_skill will refuse)"}`,
   );
 }
 

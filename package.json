@@ -15,7 +15,8 @@
     "build:web": "bun --filter @skillset/web build",
     "build:api": "bun --filter @skillset/api build",
     "build:cli": "bun --filter @skillset/cli build",
-    "build": "bun run build:web && bun run build:api && bun run build:cli",
+    "build:mcp": "bun --filter @skillset/mcp build",
+    "build": "bun run build:web && bun run build:api && bun run build:cli && bun run build:mcp",
     "test": "bun run --filter @skillset/shared --filter @skillset/installer --filter @skillset/api --filter @skillset/cli --filter @skillset/mcp test",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint ."

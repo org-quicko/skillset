@@ -22,6 +22,11 @@ export interface McpConfig {
    */
   agentId: AgentId | undefined;
   logLevel: LogLevel;
+  /**
+   * The writer's Token, or `undefined` when none was configured. Absent for every tool but
+   * `publish_skill` (ADR-0035) — reads still send no `authorization` header at all (ADR-0013).
+   */
+  token: string | undefined;
 }
 
 /** Raised by {@link parseConfig} when `argv`/`env` cannot be turned into a valid {@link McpConfig}. */
@@ -56,16 +61,19 @@ function readFlag(argv: readonly string[], flag: string): string | undefined {
  * @param argv - The flags to parse, e.g. `process.argv.slice(2)`.
  * @param env - The environment to read fallbacks from, e.g. `process.env`.
  * @returns The resolved `registry`, `scope`, `agentId` (`undefined` unless `--agent` was
- * given), and `logLevel`.
+ * given), `logLevel`, and `token` (`undefined` unless `--token` or `SKILLSET_TOKEN` was given).
  * @throws ConfigError if `--registry` is absent and `SKILLSET_REGISTRY` is not set, if
  * `--scope` or `--log-level` is given a value outside their accepted sets, or if `--agent` is
  * given but names no Agent in the table.
  *
  * @remarks
- * `--registry` wins over `SKILLSET_REGISTRY` when both are present. There is deliberately
- * no `--token` flag and `SKILLSET_TOKEN` is never read: this server holds no credential at
- * all (reads need none, per ADR-0013). `--agent` is optional — when omitted, the server
- * detects the Agent (spec, "Detecting the Agent"); the flag only overrides that.
+ * `--registry` wins over `SKILLSET_REGISTRY` when both are present, and `--token` wins over
+ * `SKILLSET_TOKEN` the same way. Every tool but `publish_skill` still sends no `authorization`
+ * header at all (ADR-0013) — a configured Token is read but otherwise ignored unless that one
+ * tool is called (ADR-0035 reopens ADR-0033's "holds no credential" specifically for
+ * publishing, which needs a writer Token; reads still need none). `--agent` is optional — when
+ * omitted, the server detects the Agent (spec, "Detecting the Agent"); the flag only overrides
+ * that.
  *
  * @example
  * ```ts
@@ -93,7 +101,9 @@ export function parseConfig(argv: readonly string[], env: NodeJS.ProcessEnv): Mc
     throw new ConfigError(`--agent must be one of: ${AGENT_IDS.join(", ")}.`);
   }
 
-  return { registry, scope: rawScope, agentId: rawAgent, logLevel: rawLogLevel };
+  const token = readFlag(argv, "--token") ?? env.SKILLSET_TOKEN;
+
+  return { registry, scope: rawScope, agentId: rawAgent, logLevel: rawLogLevel, token };
 }
 
 function isScope(value: string): value is Scope {

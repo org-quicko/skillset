@@ -6,13 +6,10 @@ import {
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
 } from "@skillset/shared";
-import { useState } from "react";
-import { PublishSkillForm } from "@/components/publish-skill-form";
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
-import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
-import { LOGIN_PATH, SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
+import { SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 
 const DEFAULT_SORT_BY: SkillDirectorySortField = "installs";
@@ -51,14 +48,8 @@ function searchFromFilters(filters: SkillDirectoryFilters): string {
 /** `role` is `null` for a signed-out visitor — they can browse and search, but no write action is offered. */
 export function SkillsPanel({ role }: { role: Role | null }) {
   const { pathname, search, navigate, replace } = useRouter();
-  const [publishOpen, setPublishOpen] = useState(false);
 
   const filters = filtersFromSearch(search);
-  const isSignedOut = role === null;
-  // Shown to every visitor, signed out or not: clicking it while signed out
-  // asks for a login instead of hiding the option outright (reads never
-  // require a session, but publishing does).
-  const canPublish = role === null || roleMeets(role, "writer");
 
   // Replace, not navigate: every keystroke, Tag toggle, or sort click is a
   // refinement of the same view, not a transition the back button should
@@ -83,28 +74,10 @@ export function SkillsPanel({ role }: { role: Role | null }) {
   }
 
   return (
-    <>
-      <SkillsHome
-        canPublish={canPublish}
-        filters={filters}
-        onFiltersChange={handleFiltersChange}
-        onSelect={(name) => navigate(skillPath(name))}
-        onPublish={() => (isSignedOut ? navigate(LOGIN_PATH) : setPublishOpen(true))}
-      />
-      <FormDialog open={publishOpen} onOpenChange={setPublishOpen} className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl">
-        <FormDialogHeader
-          title="Publish a Skill"
-          description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
-        />
-        <FormDialogBody>
-          <PublishSkillForm
-            onPublished={(name) => {
-              setPublishOpen(false);
-              navigate(skillPath(name));
-            }}
-          />
-        </FormDialogBody>
-      </FormDialog>
-    </>
+    <SkillsHome
+      filters={filters}
+      onFiltersChange={handleFiltersChange}
+      onSelect={(name) => navigate(skillPath(name))}
+    />
   );
 }

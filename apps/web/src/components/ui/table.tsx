@@ -6,7 +6,7 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className="relative w-full overflow-x-auto scrollbar-hidden"
     >
       <table
         data-slot="table"
@@ -105,6 +105,9 @@ function TableCaption({
     />
   )
 }
+
+/** `TableHead` className for a Settings table's plain-label header row (no uppercase weight, muted). */
+export const TABLE_HEAD_LABEL_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground"
 
 export {
   Table,

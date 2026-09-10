@@ -17,7 +17,7 @@ function TokenRowsSkeleton() {
   return (
     <div className="flex flex-col">
       {Array.from({ length: 3 }).map((_, index) => (
-        <div key={index} className="flex items-center justify-between gap-3 border-b px-6 py-3.5 last:border-b-0">
+        <div key={index} className="flex items-center justify-between gap-4 border-b px-5 py-3 last:border-b-0">
           <div className="flex flex-col gap-1.5">
             <Skeleton className="h-3.5 w-28" />
             <Skeleton className="h-3 w-52" />
@@ -86,7 +86,14 @@ export function TokensCard() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3.5">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-medium">Tokens</h2>
+        <p className="max-w-2xl text-xs text-muted-foreground">
+          Access Tokens authenticate the CLI and API in your place. Anyone holding one can act as you.
+        </p>
+      </div>
+
       <form onSubmit={handleSubmit}>
         <Panel title="New Token" contentClassName="p-0">
           <InfoRow title="Name">
@@ -118,7 +125,7 @@ export function TokensCard() {
         {tokens.data?.map((token) => (
           <div
             key={token.id}
-            className="flex items-center justify-between gap-3 border-b px-6 py-3.5 last:border-b-0"
+            className="flex items-center justify-between gap-4 border-b px-5 py-3 last:border-b-0"
           >
             <div className="flex min-w-0 flex-col">
               <span className="truncate text-sm font-medium">{token.name}</span>

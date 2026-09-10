@@ -2,16 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "app",
-      "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "-d", "--build"],
-      "port": 3000
-    },
-    {
       "name": "web",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "dev"],
-      "cwd": "apps/web",
+      "runtimeArgs": ["--filter", "@skillset/web", "dev"],
       "port": 5173
     }
   ]

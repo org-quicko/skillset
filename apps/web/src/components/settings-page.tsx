@@ -1,8 +1,10 @@
 import { roleMeets, type User } from "@skillset/shared";
+import { ArrowLeftIcon } from "lucide-react";
 import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { IntegrationsCard } from "@/components/integrations-card";
 import { ProfileCard } from "@/components/profile-card";
+import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -64,7 +66,21 @@ export function SettingsPage({ user }: { user: User }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <h1 className="text-3xl font-medium tracking-tight">Settings</h1>
+      <div className="flex items-center">
+        {/* `-ml-7` cancels the button's own `size-7` width, so it sits inside
+            the page's left padding gutter instead of pushing the heading —
+            the heading's text still starts flush with the header's wordmark. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="-ml-7"
+          aria-label="Back to skills"
+          onClick={() => navigate("/")}
+        >
+          <ArrowLeftIcon className="size-5" />
+        </Button>
+        <h1 className="text-3xl font-medium tracking-tight">Settings</h1>
+      </div>
 
       <SidebarProvider className="min-h-0 items-start gap-8">
         <Sidebar collapsible="none" className="w-48 shrink-0 bg-transparent">

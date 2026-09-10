@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { SearchIcon, UploadIcon, XIcon } from "lucide-react";
+import { SearchIcon, XIcon } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { Reveal } from "@/components/reveal";
 import { SkillList } from "@/components/skill-list";
 import { TagFilter } from "@/components/tag-filter";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSkillStats, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useTags } from "@/hooks/use-tags";
@@ -74,14 +73,10 @@ export function SkillsHome({
   filters,
   onFiltersChange,
   onSelect,
-  canPublish,
-  onPublish,
 }: {
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
   onSelect: (name: string) => void;
-  canPublish: boolean;
-  onPublish: () => void;
 }) {
   const tags = useTags();
   const statsQuery = useSkillStats();
@@ -145,14 +140,6 @@ export function SkillsHome({
               >
                 <p>Browse and install skills for research, coding, design, automation, and more.</p>
               </Reveal>
-              {canPublish && (
-                <Reveal delayMs={120} className="w-fit">
-                  <Button className="rounded-full" onClick={onPublish}>
-                    <UploadIcon />
-                    Publish a skill
-                  </Button>
-                </Reveal>
-              )}
             </div>
             <Reveal delayMs={120} className="shrink-0">
               {stats ? (
