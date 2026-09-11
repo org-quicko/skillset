@@ -17,7 +17,7 @@ export function artifactPrefix(resourceId: string): string {
  *
  * @remarks
  * `path` must already have been through `validateArtifactPath`
- * (`@skillset/shared`) — this only concatenates, so a path with a `..`
+ * (`@in-org-quicko/skillset-shared`) — this only concatenates, so a path with a `..`
  * segment or a leading slash would address an object outside the Resource's
  * prefix. The API validates every declared path at publish time and every
  * requested path on read, which is what makes concatenation safe here
@@ -55,7 +55,7 @@ export function artifactPathFromKey(resourceId: string, key: string): string | n
  * for a type guessed from its extension would make a publisher's upload fail
  * on any disagreement — and the API has no bytes to check the guess against
  * (ADR-0001). It stores them opaquely instead and labels them properly on
- * the way out, where `artifactMediaType` (`@skillset/shared`) answers
+ * the way out, where `artifactMediaType` (`@in-org-quicko/skillset-shared`) answers
  * from the path.
  */
 export const ARTIFACT_UPLOAD_CONTENT_TYPE = "application/octet-stream";

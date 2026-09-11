@@ -1,5 +1,5 @@
 {
-  "name": "@skillset/installer",
+  "name": "@in-org-quicko/skillset-installer",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@skillset/shared": "workspace:*"
+    "@in-org-quicko/skillset-shared": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

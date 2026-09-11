@@ -11,7 +11,7 @@ import {
   type AgentId,
   type Scope,
   type SkillFile,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 
 /** How the chosen Agent's own directory was pointed at the canonical `.agents/skills` copy. */
 export type LinkResult =

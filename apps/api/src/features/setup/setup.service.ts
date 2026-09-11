@@ -1,5 +1,5 @@
 import { count, sql } from "drizzle-orm";
-import type { SetupInit } from "@skillset/shared";
+import type { SetupInit } from "@in-org-quicko/skillset-shared";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
 import { advisoryLockKey } from "../../db/advisory-lock.js";

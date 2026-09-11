@@ -1,4 +1,4 @@
-import { roleMeets, type User } from "@skillset/shared";
+import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
 import { ArrowLeftIcon } from "lucide-react";
 import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";

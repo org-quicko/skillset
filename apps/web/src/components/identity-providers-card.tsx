@@ -1,4 +1,4 @@
-import { isUngated, type IdentityProvider } from "@skillset/shared";
+import { isUngated, type IdentityProvider } from "@in-org-quicko/skillset-shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";
@@ -93,9 +93,8 @@ export function IdentityProvidersCard() {
         <div className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">OIDC</h2>
           <p className="max-w-2xl text-xs text-muted-foreground">
-            Anyone whose account is in one of a Provider&apos;s permitted organisations can sign in, and gets a
-            reader account on their first login. Promote them from Users. A Provider with no organisations listed
-            admits everyone that provider will authenticate.
+            Anyone in a Provider&apos;s permitted organisations can sign in and automatically gets a reader
+            account. You can change their access from the Team tab. Leave empty to let anyone using it sign in.
           </p>
         </div>
         <Button size="sm" onClick={() => openDialog(null)}>

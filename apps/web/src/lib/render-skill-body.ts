@@ -1,4 +1,4 @@
-import { splitFrontmatter } from "@skillset/shared";
+import { splitFrontmatter } from "@in-org-quicko/skillset-shared";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 

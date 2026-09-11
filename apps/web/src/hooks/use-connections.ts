@@ -1,4 +1,4 @@
-import { ConnectionListSchema, RepositoryListSchema } from "@skillset/shared";
+import { ConnectionListSchema, RepositoryListSchema } from "@in-org-quicko/skillset-shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { connectionsQueryKey, repositoriesQueryKey } from "@/lib/query-keys";

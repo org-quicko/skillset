@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, type Role } from "@skillset/shared";
+import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, type Role } from "@in-org-quicko/skillset-shared";
 import { asc, eq } from "drizzle-orm";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";

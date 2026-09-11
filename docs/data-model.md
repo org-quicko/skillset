@@ -10,7 +10,7 @@ Git Provider, Integration, Connection, Import.
 
 Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
 TypeScript type — there is no separate camelCase domain shape or conversion boundary. Types are
-`z.infer`red from the Zod schemas in `@skillset/shared`, so a Drizzle row, a wire payload,
+`z.infer`red from the Zod schemas in `@in-org-quicko/skillset-shared`, so a Drizzle row, a wire payload,
 and a TypeScript type all agree on the same field names by construction. A column name appearing
 in a wire payload is therefore expected, not a leak.
 
@@ -123,7 +123,7 @@ generated once, on first insert, and never changes across republishes of the sam
 (the conflict-update path never sets it).
 
 `kind` is plain text, validated in the service against the `KINDS` map in
-`@skillset/shared` — the same treatment `integrations.provider` gets against
+`@in-org-quicko/skillset-shared` — the same treatment `integrations.provider` gets against
 `GIT_PROVIDERS` (ADR-0024) — rather than a Postgres enum, so registering a new Kind is an insert,
 not a migration.
 
@@ -142,7 +142,7 @@ supplies one, though Skill's own shared validation still requires it. Rendered t
 allowlist sanitiser, never trusted as markup.
 
 **`payload`** carries the Kind's own fields, validated by `ResourcePayloadSchema`'s discriminated
-union in `@skillset/shared` (ADR-0026). For `skill`, this is the four optional Agent Skills
+union in `@in-org-quicko/skillset-shared` (ADR-0026). For `skill`, this is the four optional Agent Skills
 spec fields the table used to carry as flat columns — `license`, `compatibility`, `metadata`, and
 `allowed_tools` — each `null` until a publish sets it. A value that fails validation rejects the
 whole publish rather than being stored or dropped silently (ADR-0009). Publishing always writes
@@ -457,7 +457,7 @@ it.
 
 `provider` is **plain text, not an enum**, so registering a new Git Provider is an insert rather
 than a migration (ADR-0024). The values it may take are the keys of `GIT_PROVIDERS` in
-`@skillset/shared`, checked in the service. Since ADR-0025, `provider` carries no uniqueness
+`@in-org-quicko/skillset-shared`, checked in the service. Since ADR-0025, `provider` carries no uniqueness
 constraint and no incoming foreign key: `connections.integration_id` references this table's `id`
 instead, recording which specific app a grant was issued through, while `connections.provider`
 stays denormalized for the provider-keyed read paths that never needed to change.

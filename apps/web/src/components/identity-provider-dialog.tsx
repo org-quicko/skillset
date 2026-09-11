@@ -3,7 +3,7 @@ import {
   IDENTITY_PROVIDER_KINDS,
   type IdentityProvider,
   type IdentityProviderKind,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { InfoIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";

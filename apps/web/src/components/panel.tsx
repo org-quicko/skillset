@@ -34,7 +34,7 @@ export function Panel({
       {(title || action) && (
         <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
           {title && (
-            <span className="text-xs tracking-[0.08em] text-muted-foreground">{title}</span>
+            <span className="text-xs tracking-[0.08em] text-muted-foreground uppercase">{title}</span>
           )}
           {action}
         </div>

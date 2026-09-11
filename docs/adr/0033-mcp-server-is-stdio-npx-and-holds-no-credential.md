@@ -1,6 +1,6 @@
 # The MCP Server Is Stdio, Distributed by `npx`, and Holds No Credential
 
-A new workspace, `@skillset/mcp`, serves the Registry over the Model Context Protocol so a coding
+A new workspace, `@in-org-quicko/skillset-mcp`, serves the Registry over the Model Context Protocol so a coding
 Agent can search for a Skill without its User running `skillset` or a terminal at all. It runs over
 **stdio**, on the User's own machine, fetched fresh by `npx` on every cold start rather than
 installed — and it carries **no credential of any kind**: no `--token` flag, no `SKILLSET_TOKEN`, no
@@ -20,11 +20,11 @@ costs nothing today and is the only choice that still works once installing exis
 **A `skillset` subcommand**, e.g. `skillset mcp`. Rejected: `npx` would fetch the whole CLI — its
 prompt library, its argument parser, its colour library — to run a server with no terminal attached,
 on every cold start. A separate package keeps the dependency set to the MCP SDK, `zod`, and
-`@skillset/shared`.
+`@in-org-quicko/skillset-shared`.
 
 **Installed once, rather than fetched by `npx` each run.** Rejected as the thing that makes this
 usable by the non-technical User the feature exists for: an install step is exactly the friction
-`npx -y @skillset/mcp@latest` removes. It also means every session runs a current version without
+`npx -y @in-org-quicko/skillset-mcp@latest` removes. It also means every session runs a current version without
 anyone managing an upgrade.
 
 **A `--token` flag with reads used to be authenticated, and it turns out this deployment needs
@@ -63,5 +63,5 @@ and a role; keeping this server read-only is what lets it be configured with a U
 
 **`search_skills` is a projection of the existing catalog listing**, filtered to the `skill` Kind
 and passing `q`, `tag_id`, and `page_size` through to `GET /resources` — no new read path, and no new
-schema: it reuses `@skillset/shared`'s `SkillDirectoryPageSchema`, the same shape `GET /resources`
+schema: it reuses `@in-org-quicko/skillset-shared`'s `SkillDirectoryPageSchema`, the same shape `GET /resources`
 already returns.

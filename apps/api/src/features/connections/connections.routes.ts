@@ -1,4 +1,4 @@
-import { ConnectionListSchema } from "@skillset/shared";
+import { ConnectionListSchema } from "@in-org-quicko/skillset-shared";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import { createRouter } from "../../lib/factory.js";

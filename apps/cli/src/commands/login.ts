@@ -1,4 +1,4 @@
-import { UserSchema, type Role } from "@skillset/shared";
+import { UserSchema, type Role } from "@in-org-quicko/skillset-shared";
 import { writeConfig, type Config } from "../config.js";
 import { ApiError, registryFetch, type RegistryClient } from "../http.js";
 

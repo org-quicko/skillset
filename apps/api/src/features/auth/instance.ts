@@ -1,4 +1,4 @@
-import { ORGANISATION_CLAIM, isUngated, type IdentityProviderKind } from "@skillset/shared";
+import { ORGANISATION_CLAIM, isUngated, type IdentityProviderKind } from "@in-org-quicko/skillset-shared";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq, max } from "drizzle-orm";

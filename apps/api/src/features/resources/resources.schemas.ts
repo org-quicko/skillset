@@ -10,7 +10,7 @@ import {
   validateSkillMetadata,
   validateSkillName,
   validateTagNames,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { z } from "zod";
 import { ruleSchema } from "../../lib/validator.js";
 

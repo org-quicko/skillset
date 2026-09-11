@@ -1,4 +1,4 @@
-import { INTEGRATION_DESCRIPTION_MAX_LENGTH, type Integration } from "@skillset/shared";
+import { INTEGRATION_DESCRIPTION_MAX_LENGTH, type Integration } from "@in-org-quicko/skillset-shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
@@ -11,7 +11,7 @@ import { apiErrorMessage } from "@/lib/api";
 const GithubIcon = PROVIDER_ICONS.github;
 
 /**
- * Configures an Integration — a GitHub App registered with this Registry —
+ * Configures an Integration — a GitHub App registered with Skillset —
  * either a new one or an existing one.
  *
  * @remarks
@@ -97,7 +97,7 @@ export function IntegrationDialog({
       <FormDialogHeader
         icon={GithubIcon}
         title={isEdit ? `Edit ${integration.display_name}` : "Add GitHub app"}
-        description="An app you've already registered on GitHub. Its permissions and repository access are set there — this Registry only stores how to reach it."
+        description="A Github app created for Skillset to access repositories."
       />
 
       <FormDialogBody>
@@ -136,7 +136,7 @@ export function IntegrationDialog({
             id="integration_app_slug"
             value={appSlug}
             onChange={(event) => setAppSlug(event.target.value)}
-            placeholder="Eg. acme-skill-registry"
+            placeholder="Eg. acme-skillset"
             disabled={pending}
           />
         </FormField>

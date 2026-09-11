@@ -4,7 +4,7 @@ import {
   PublicIdentityProviderListSchema,
   type IdentityProviderCreate,
   type IdentityProviderUpdate,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { identityProvidersQueryKey, loginProvidersQueryKey } from "@/lib/query-keys";

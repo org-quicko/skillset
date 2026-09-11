@@ -1,4 +1,4 @@
-import type { ConnectableProvider, Connection } from "@skillset/shared";
+import type { ConnectableProvider, Connection } from "@in-org-quicko/skillset-shared";
 import { EllipsisIcon, ExternalLinkIcon, Link2OffIcon } from "lucide-react";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Panel } from "@/components/panel";
@@ -119,12 +119,12 @@ function ConnectedAccountRow({
  * a credential they could never use would be worse than useless.
  *
  * The card is also absent when nothing is connectable, which is the state of
- * a Registry whose Admin has configured no Integration. There is nothing to
- * connect to, so a Connect button could only fail when pressed.
+ * a Skillset instance whose Admin has configured no Integration. There is
+ * nothing to connect to, so a Connect button could only fail when pressed.
  *
- * Disconnecting is Registry-local: it stops this Registry using the grant and
- * does not withdraw it at the provider — that is done from the provider's own
- * account settings.
+ * Disconnecting is local to this Skillset instance: it stops Skillset using
+ * the grant and does not withdraw it at the provider — that is done from the
+ * provider's own account settings.
  */
 export function ConnectionCard() {
   const connections = useConnections();
@@ -140,9 +140,7 @@ export function ConnectionCard() {
       <div className="flex flex-col gap-1">
         <h2 className="text-sm font-medium">Connected Accounts</h2>
         <p className="max-w-2xl text-xs text-muted-foreground">
-          Accounts you&apos;ve connected so this Registry can read Skills out of a private repository, as
-          you. Disconnecting only stops this Registry using the grant — revoke it at the provider
-          separately.
+          Accounts you&apos;ve connected so Skillset can read content from your private repositories.
         </p>
       </div>
 
@@ -153,8 +151,7 @@ export function ConnectionCard() {
       {connections.isSuccess && connectable.length === 0 && (
         <Panel>
           <p className="text-sm text-muted-foreground">
-            No Git Provider is set up for importing on this Registry. An administrator configures one
-            under Integrations.
+            No Git Provider is set up for importing yet. An administrator sets one up under Integrations.
           </p>
         </Panel>
       )}

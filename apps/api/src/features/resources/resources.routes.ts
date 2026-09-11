@@ -6,7 +6,7 @@ import {
   SkillPublishedSchema,
   SkillSchema,
   SkillTagsSchema,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
 import { uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";

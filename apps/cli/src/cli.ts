@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
-import { getAgent } from "@skillset/shared";
+import { getAgent } from "@in-org-quicko/skillset-shared";
 import { Command } from "commander";
 import { homedir } from "node:os";
 import pc from "picocolors";

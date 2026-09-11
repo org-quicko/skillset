@@ -10,8 +10,8 @@ import {
   type ArtifactManifest,
   type Scope,
   type Skill,
-} from "@skillset/shared";
-import { installSkill, resolveInstallTarget, type InstallContext, type LinkResult } from "@skillset/installer";
+} from "@in-org-quicko/skillset-shared";
+import { installSkill, resolveInstallTarget, type InstallContext, type LinkResult } from "@in-org-quicko/skillset-installer";
 
 /** The project root, environment, and home directory an install is resolved and written against. */
 export type AddSkillsContext = InstallContext;

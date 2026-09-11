@@ -3,7 +3,7 @@ import {
   SkillValidationError,
   type SkillFile,
   type SkillSourceLocation,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { CircleAlertIcon, CircleCheckIcon, UploadIcon } from "lucide-react";
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { connectHref, useConnections, useRepositories } from "@/hooks/use-connections";
@@ -637,7 +637,10 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
                                     key={repository.full_name}
                                     value={repository.full_name}
                                     disabled={isBusy}
-                                    onSelect={() => runImport(repository.html_url)}
+                                    onSelect={() => {
+                                      setQuery(repository.html_url);
+                                      runImport(repository.html_url);
+                                    }}
                                     className="rounded-md"
                                   >
                                     <span className="truncate">{repository.full_name}</span>
@@ -680,22 +683,32 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
                           <span className="tabular-nums">{step.found.length}</span> Skills found in{" "}
                           {sourceTitle(step.source)}
                         </p>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className={cn(ROW_HIT_AREA, "shrink-0")}
-                          disabled={isBusy}
-                          onClick={() =>
-                            setSelectedPaths(
-                              selectedPaths.size === step.found.length
-                                ? new Set()
-                                : new Set(step.found.map((location) => location.path)),
-                            )
-                          }
+                        <label
+                          className={cn(
+                            ROW_HIT_AREA,
+                            "flex shrink-0 items-center gap-2 rounded-md pl-2",
+                            "has-focus-visible:ring-3 has-focus-visible:ring-ring/50",
+                            isBusy ? "opacity-50" : "cursor-pointer",
+                          )}
                         >
-                          {selectedPaths.size === step.found.length ? "Clear" : "Select all"}
-                        </Button>
+                          <Checkbox
+                            checked={
+                              selectedPaths.size === 0
+                                ? false
+                                : selectedPaths.size === step.found.length
+                                  ? true
+                                  : "indeterminate"
+                            }
+                            disabled={isBusy}
+                            onCheckedChange={(next) =>
+                              setSelectedPaths(
+                                next === true ? new Set(step.found.map((location) => location.path)) : new Set(),
+                              )
+                            }
+                            className="focus-visible:border-input focus-visible:ring-0"
+                          />
+                          <span className="text-xs text-muted-foreground">Select all</span>
+                        </label>
                       </div>
                       <ul className="flex flex-col p-1">
                         {step.found.map((location) => (
@@ -754,18 +767,20 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
         )}
 
         {step.kind === "publishing" && (
-          <SourcePanel>
+          <SourcePanel className="flex-1">
             <SourceHeader source={step.source} trailing={<Spinner className="size-4" />} />
-            <p className="px-6 py-7 text-center text-sm text-muted-foreground">
-              {step.total === 1 ? (
-                "Publishing…"
-              ) : (
-                <>
-                  Publishing <span className="tabular-nums">{step.done + 1}</span> of{" "}
-                  <span className="tabular-nums">{step.total}</span>…
-                </>
-              )}
-            </p>
+            <div className="flex flex-1 items-center justify-center px-6">
+              <p className="text-center text-sm text-muted-foreground">
+                {step.total === 1 ? (
+                  "Publishing…"
+                ) : (
+                  <>
+                    Publishing <span className="tabular-nums">{step.done + 1}</span> of{" "}
+                    <span className="tabular-nums">{step.total}</span>…
+                  </>
+                )}
+              </p>
+            </div>
           </SourcePanel>
         )}
 

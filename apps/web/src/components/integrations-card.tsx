@@ -1,4 +1,4 @@
-import { GIT_PROVIDERS, type Integration } from "@skillset/shared";
+import { GIT_PROVIDERS, type Integration } from "@in-org-quicko/skillset-shared";
 import { EllipsisIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { DeleteIntegrationDialog } from "@/components/delete-integration-dialog";
@@ -58,9 +58,9 @@ function IntegrationTile({
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <span className="truncate text-sm font-medium">{integration.display_name}</span>
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <div className="flex items-center gap-1.5">
             {ProviderIcon && <ProviderIcon className="size-[26px] shrink-0" aria-hidden />}
-            <span className="truncate">{providerName}</span>
+            <span className="truncate text-sm text-muted-foreground">{providerName}</span>
           </div>
         </div>
         <DropdownMenu>
@@ -88,7 +88,7 @@ function IntegrationTile({
 }
 
 /**
- * An Admin's view of the Registry's registrations with Git Providers
+ * An Admin's view of Skillset's registrations with Git Providers
  * (ADR-0024, ADR-0025).
  *
  * @remarks
@@ -99,7 +99,7 @@ function IntegrationTile({
  * wrong one.
  *
  * An Integration's existence is the only switch importing has — there is no
- * enable flag — so an operator who wants this Registry to hold no repository
+ * enable flag — so an operator who wants Skillset to hold no repository
  * credentials for anybody simply registers nothing. More than one Integration
  * may exist for the same provider, each its own tile.
  */
@@ -122,7 +122,7 @@ export function IntegrationsCard() {
         <div className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">Integrations</h2>
           <p className="max-w-2xl text-xs text-muted-foreground">
-            Apps this Registry uses to read Skills out of private repositories.
+            Apps that let Skillset read content from repositories.
           </p>
         </div>
         <Button size="sm" onClick={() => openDialog(null)}>

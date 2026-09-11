@@ -4,7 +4,7 @@ import {
   isGitProvider,
   type ConnectableProvider,
   type GitProviderOAuth,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { deriveKeys, openClientSecret, openSecret, sealSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";

@@ -1,4 +1,4 @@
-import { ASSIGNABLE_ROLES, type AssignableRole } from "@skillset/shared";
+import { ASSIGNABLE_ROLES, type AssignableRole } from "@in-org-quicko/skillset-shared";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
@@ -58,8 +58,8 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
         title={created ? `Password for ${created.email}` : "Add a User"}
         description={
           created
-            ? "This password is shown once and cannot be retrieved again."
-            : "The Registry generates an initial password. The new User must replace it before doing anything else."
+            ? "This password is shown once and can't be retrieved again."
+            : "Skillset generates an initial password for them. They must replace it before doing anything else."
         }
       />
 

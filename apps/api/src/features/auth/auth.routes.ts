@@ -1,4 +1,4 @@
-import { PublicIdentityProviderListSchema } from "@skillset/shared";
+import { PublicIdentityProviderListSchema } from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
 
 /**

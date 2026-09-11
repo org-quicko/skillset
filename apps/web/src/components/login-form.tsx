@@ -1,4 +1,4 @@
-import { loginRefusalMessage, type PublicIdentityProvider } from "@skillset/shared";
+import { loginRefusalMessage, type PublicIdentityProvider } from "@in-org-quicko/skillset-shared";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { PROVIDER_ICONS } from "@/components/provider-icons";

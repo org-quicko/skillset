@@ -9,7 +9,7 @@ import {
   type Page,
   type SkillFile,
   type SkillPayload,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
 import { firstRow } from "../../db/rows.js";

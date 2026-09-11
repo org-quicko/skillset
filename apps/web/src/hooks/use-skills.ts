@@ -11,7 +11,7 @@ import {
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
   type SkillFile,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiFetchText, apiUrl } from "@/lib/api";
 import {

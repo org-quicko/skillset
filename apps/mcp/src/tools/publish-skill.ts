@@ -10,7 +10,7 @@ import {
   SkillValidationError,
   type SkillBundle,
   type SkillFile,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 
 export interface PublishSkillDeps {
   fetchImpl: typeof fetch;

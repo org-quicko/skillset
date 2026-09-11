@@ -9,7 +9,7 @@ import {
   SkillValidationError,
   type SkillBundle,
   type SkillFile,
-} from "@skillset/shared";
+} from "@in-org-quicko/skillset-shared";
 import { rethrowValidationError } from "../errors.js";
 import { ApiError, registryFetch, uploadArtifactFile, type RegistryClient } from "../http.js";
 import { openAuthenticatedClient, type SessionDeps } from "../session.js";

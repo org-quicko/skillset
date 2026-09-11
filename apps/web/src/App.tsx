@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import type { User } from "@skillset/shared";
+import type { User } from "@in-org-quicko/skillset-shared";
 import { BootstrapForm } from "@/components/bootstrap-form";
 import { ChangePasswordRequired } from "@/components/change-password-required";
 import { Header } from "@/components/header";

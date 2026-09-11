@@ -1,4 +1,4 @@
-import { SkillDirectoryPageSchema } from "@skillset/shared";
+import { SkillDirectoryPageSchema } from "@in-org-quicko/skillset-shared";
 
 /** What a caller of {@link searchSkills} may narrow a search by. */
 export interface SearchSkillsParams {

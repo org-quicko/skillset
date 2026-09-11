@@ -1,4 +1,4 @@
-import { roleMeets, type User } from "@skillset/shared";
+import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
 import { LogOutIcon, SettingsIcon, UploadIcon } from "lucide-react";
 import { useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";

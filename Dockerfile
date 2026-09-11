@@ -13,7 +13,7 @@ FROM deps AS build-web
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/web apps/web
-RUN bun run --filter '@skillset/web' build
+RUN bun run --filter '@in-org-quicko/skillset-web' build
 
 FROM oven/bun:1.4.2-slim AS runtime
 WORKDIR /app
@@ -37,7 +37,7 @@ EXPOSE 3000
 # curl, and adding one to run a health check would be a larger attack surface
 # than the check is worth.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD bun --eval "const port = process.env.PORT ?? 3000; const res = await fetch(`http://127.0.0.1:${port}/api/health`); process.exit(res.ok ? 0 : 1)"
+  CMD bun --eval "const port = process.env.PORT ?? 3000; const res = await fetch('http://127.0.0.1:' + port + '/api/health'); process.exit(res.ok ? 0 : 1)"
 
 # The image ships this user; without it Bun ran as root, so a remote-code
 # path in the API would have started out as root inside the container

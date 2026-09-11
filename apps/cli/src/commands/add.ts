@@ -8,8 +8,8 @@ import {
   SkillSchema,
   type AgentId,
   type Scope,
-} from "@skillset/shared";
-import { installSkill, type WriteReport } from "@skillset/installer";
+} from "@in-org-quicko/skillset-shared";
+import { installSkill, type WriteReport } from "@in-org-quicko/skillset-installer";
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";

@@ -25,7 +25,7 @@ export function RevokeTokenDialog({
     <FormDialog open={open} onOpenChange={handleOpenChange}>
       <FormDialogHeader
         title={`Revoke "${name}"?`}
-        description="Any CLI signed in with this token loses access immediately. This can't be undone, but you can mint a new token any time."
+        description="Any CLI signed in with this token loses access immediately. This can't be undone, but you can generate a new token any time."
       />
 
       {revokeToken.isError && (

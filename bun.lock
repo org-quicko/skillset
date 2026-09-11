@@ -16,11 +16,11 @@
       },
     },
     "apps/api": {
-      "name": "@skillset/api",
+      "name": "@in-org-quicko/skillset-api",
       "version": "0.0.0",
       "dependencies": {
         "@hono/zod-validator": "0.9.1",
-        "@skillset/shared": "workspace:*",
+        "@in-org-quicko/skillset-shared": "workspace:*",
         "better-auth": "^1.7.2",
         "drizzle-orm": "^0.45.2",
         "hono": "^4.13.7",
@@ -46,8 +46,8 @@
       },
       "devDependencies": {
         "@clack/prompts": "^1.2.0",
-        "@skillset/installer": "workspace:*",
-        "@skillset/shared": "workspace:*",
+        "@in-org-quicko/skillset-installer": "workspace:*",
+        "@in-org-quicko/skillset-shared": "workspace:*",
         "@types/bun": "^1.4.0",
         "commander": "^13.1.0",
         "fflate": "^0.8.3",
@@ -64,9 +64,9 @@
         "skillset-mcp": "./dist/cli.js",
       },
       "devDependencies": {
+        "@in-org-quicko/skillset-installer": "workspace:*",
+        "@in-org-quicko/skillset-shared": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "@skillset/installer": "workspace:*",
-        "@skillset/shared": "workspace:*",
         "@types/bun": "^1.4.0",
         "fflate": "^0.8.3",
         "typescript": "^5.7.2",
@@ -74,12 +74,14 @@
       },
     },
     "apps/web": {
-      "name": "@skillset/web",
+      "name": "@in-org-quicko/skillset-web",
       "version": "0.0.0",
       "dependencies": {
         "@fontsource-variable/instrument-sans": "^5.3.0",
+        "@fontsource-variable/jetbrains-mono": "^5.3.0",
+        "@fontsource/michroma": "^5.3.0",
+        "@in-org-quicko/skillset-shared": "workspace:*",
         "@monaco-editor/react": "^4.7.0",
-        "@skillset/shared": "workspace:*",
         "@tailwindcss/vite": "^4.3.3",
         "@tanstack/react-query": "^5.101.4",
         "@tanstack/react-table": "^8",
@@ -110,10 +112,10 @@
       },
     },
     "packages/installer": {
-      "name": "@skillset/installer",
+      "name": "@in-org-quicko/skillset-installer",
       "version": "0.0.0",
       "dependencies": {
-        "@skillset/shared": "workspace:*",
+        "@in-org-quicko/skillset-shared": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.4.0",
@@ -121,7 +123,7 @@
       },
     },
     "packages/shared": {
-      "name": "@skillset/shared",
+      "name": "@in-org-quicko/skillset-shared",
       "version": "0.0.0",
       "dependencies": {
         "fflate": "^0.8.3",
@@ -307,6 +309,10 @@
 
     "@fontsource-variable/instrument-sans": ["@fontsource-variable/instrument-sans@5.3.0", "", {}, "sha512-u4gKbDBTNFGkg997tfQn3eHOhHuquWUFTRT/rwzuKtrxX5P2ekfs2x+LgBPP4P32+cC+vUwF1Cr+IdRoPQbrGw=="],
 
+    "@fontsource-variable/jetbrains-mono": ["@fontsource-variable/jetbrains-mono@5.3.0", "", {}, "sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw=="],
+
+    "@fontsource/michroma": ["@fontsource/michroma@5.3.0", "", {}, "sha512-9sbGD7ek1hGvq0TmgNPFbuI3k7qwXVdZ+zCDsTHDGRIQqfYrpYWwEYcwH2fzOtvn8uiGqzAoJ72vuFE3v/hDdg=="],
+
     "@grpc/grpc-js": ["@grpc/grpc-js@1.14.4", "", { "dependencies": { "@grpc/proto-loader": "^0.8.0", "@js-sdsl/ordered-map": "^4.4.2" } }, "sha512-k9Dj3DV/itK9D06Y8f190Qgop7/Ui+D0njFV3LHMPwPT75DpXLQohE9Wmz0QElrJnzsjB7KPWiKJbOl7IPDArQ=="],
 
     "@grpc/proto-loader": ["@grpc/proto-loader@0.7.15", "", { "dependencies": { "lodash.camelcase": "^4.3.0", "long": "^5.0.0", "protobufjs": "^7.2.5", "yargs": "^17.7.2" }, "bin": { "proto-loader-gen-types": "build/bin/proto-loader-gen-types.js" } }, "sha512-tMXdRCfYVixjuFK+Hk0Q1s38gV9zDiDJfWL3h1rv4Qc39oILCu1TRTDt7+fGUI8K4G1Fj125Hx/ru3azECWTyQ=="],
@@ -325,9 +331,17 @@
 
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
+    "@in-org-quicko/skillset-api": ["@in-org-quicko/skillset-api@workspace:apps/api"],
+
     "@in-org-quicko/skillset-cli": ["@in-org-quicko/skillset-cli@workspace:apps/cli"],
 
+    "@in-org-quicko/skillset-installer": ["@in-org-quicko/skillset-installer@workspace:packages/installer"],
+
     "@in-org-quicko/skillset-mcp": ["@in-org-quicko/skillset-mcp@workspace:apps/mcp"],
+
+    "@in-org-quicko/skillset-shared": ["@in-org-quicko/skillset-shared@workspace:packages/shared"],
+
+    "@in-org-quicko/skillset-web": ["@in-org-quicko/skillset-web@workspace:apps/web"],
 
     "@isaacs/cliui": ["@isaacs/cliui@8.0.2", "", { "dependencies": { "string-width": "^5.1.2", "string-width-cjs": "npm:string-width@^4.2.0", "strip-ansi": "^7.0.1", "strip-ansi-cjs": "npm:strip-ansi@^6.0.1", "wrap-ansi": "^8.1.0", "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0" } }, "sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA=="],
 
@@ -544,14 +558,6 @@
     "@sec-ant/readable-stream": ["@sec-ant/readable-stream@0.4.1", "", {}, "sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg=="],
 
     "@sindresorhus/merge-streams": ["@sindresorhus/merge-streams@4.0.0", "", {}, "sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ=="],
-
-    "@skillset/api": ["@skillset/api@workspace:apps/api"],
-
-    "@skillset/installer": ["@skillset/installer@workspace:packages/installer"],
-
-    "@skillset/shared": ["@skillset/shared@workspace:packages/shared"],
-
-    "@skillset/web": ["@skillset/web@workspace:apps/web"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
@@ -1775,6 +1781,8 @@
 
     "@grpc/grpc-js/@grpc/proto-loader": ["@grpc/proto-loader@0.8.1", "", { "dependencies": { "lodash.camelcase": "^4.3.0", "long": "^5.0.0", "protobufjs": "^7.5.5", "yargs": "^17.7.2" }, "bin": { "proto-loader-gen-types": "build/bin/proto-loader-gen-types.js" } }, "sha512-wtF6h+DY6M3YaDBPAmvuuA6jV8Sif9MjtOI5euKFWRgCDl5PeDpPsHR9u2l6St5ceY8AZgoNDww5+HvEsXFsGg=="],
 
+    "@in-org-quicko/skillset-web/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
     "@isaacs/cliui/string-width": ["string-width@5.1.2", "", { "dependencies": { "eastasianwidth": "^0.2.0", "emoji-regex": "^9.2.2", "strip-ansi": "^7.0.1" } }, "sha512-HnLOCR3vjcY8beoNLtcjZ5/nxn2afmME6lhrDrebokqMap+XbeW8n9TXpPDOqdGK5qcI3oT0GKTW6wC7EMiVqA=="],
 
     "@isaacs/cliui/wrap-ansi": ["wrap-ansi@8.1.0", "", { "dependencies": { "ansi-styles": "^6.1.0", "string-width": "^5.0.1", "strip-ansi": "^7.0.1" } }, "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ=="],
@@ -1784,8 +1792,6 @@
     "@microsoft/tsdoc-config/resolve": ["resolve@1.22.12", "", { "dependencies": { "es-errors": "^1.3.0", "is-core-module": "^2.16.1", "path-parse": "^1.0.7", "supports-preserve-symlinks-flag": "^1.0.0" }, "bin": { "resolve": "bin/resolve" } }, "sha512-TyeJ1zif53BPfHootBGwPRYT1RUt6oGWsaQr8UyZW/eAm9bKoijtvruSDEmZHm92CwS9nj7/fWttqPCgzep8CA=="],
 
     "@modelcontextprotocol/sdk/ajv": ["ajv@8.20.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=="],
-
-    "@skillset/web/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "@tailwindcss/node/lightningcss": ["lightningcss@1.32.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.32.0", "lightningcss-darwin-arm64": "1.32.0", "lightningcss-darwin-x64": "1.32.0", "lightningcss-freebsd-x64": "1.32.0", "lightningcss-linux-arm-gnueabihf": "1.32.0", "lightningcss-linux-arm64-gnu": "1.32.0", "lightningcss-linux-arm64-musl": "1.32.0", "lightningcss-linux-x64-gnu": "1.32.0", "lightningcss-linux-x64-musl": "1.32.0", "lightningcss-win32-arm64-msvc": "1.32.0", "lightningcss-win32-x64-msvc": "1.32.0" } }, "sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ=="],
 

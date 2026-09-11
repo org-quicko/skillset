@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
-import { type AgentId, SkillSchema } from "@skillset/shared";
+import { type AgentId, SkillSchema } from "@in-org-quicko/skillset-shared";
 import { addSkills, buildFallbackOutcome, type AddSkillOutcome, type AddSkillsDeps } from "../src/tools/add-skills.js";
 import { jsonResponse, stubFetch, type RecordedCall } from "./helpers.js";
 

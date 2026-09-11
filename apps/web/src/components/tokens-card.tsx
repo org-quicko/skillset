@@ -1,4 +1,4 @@
-import type { Token, TokenCreated } from "@skillset/shared";
+import type { Token, TokenCreated } from "@in-org-quicko/skillset-shared";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { IconSwap } from "@/components/icon-swap";
@@ -61,7 +61,7 @@ function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: ()
         </button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Copy this now — it is shown once and cannot be retrieved again.
+        Copy it now. It's shown once and can't be retrieved again.
       </p>
       <Button variant="outline" size="sm" className="w-fit" onClick={onDismiss}>
         Done

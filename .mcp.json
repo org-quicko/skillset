@@ -2,7 +2,7 @@
   "mcpServers": {
     "skillset": {
       "command": "bun",
-      "args": ["run", "apps/mcp/src/cli.ts", "--registry", "http://localhost:3000", "--agent", "claude-code"],
+      "args": ["run", "apps/mcp/src/cli.ts", "--registry", "http://localhost:3000"],
       "env": {}
     }
   }

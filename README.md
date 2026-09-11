@@ -13,6 +13,17 @@ docker compose up
 The app waits for Postgres to be ready, runs migrations, and serves the API and the
 built web interface from the same origin at `http://localhost:3000`.
 
+`docker-compose.yml` is local-dev only: it bundles Postgres and MinIO with well-known
+default credentials. For production, use `docker-compose.prod.yml`, which runs only the
+`app` image against your own managed Postgres and S3 (or S3-compatible) service:
+
+```bash
+cp .env.example .env
+# fill in .env for production: real DATABASE_URL, a generated BETTER_AUTH_SECRET,
+# your public PUBLIC_URL, and your managed STORAGE_* values
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
 ## Configuration
 
 See [`.env.example`](.env.example) for the full list of environment variables. The app
@@ -40,6 +51,6 @@ This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres), `apps/web`
 bun install
 bun run typecheck
 bun run test   # apps/api; spins up Postgres via testcontainers, needs Docker
-bun --filter @skillset/web dev
-bun --filter @skillset/api dev
+bun --filter @in-org-quicko/skillset-web dev
+bun --filter @in-org-quicko/skillset-api dev
 ```

@@ -1,4 +1,4 @@
-import { ApiError, apiErrorFrom, parseApiResponse } from "@skillset/shared";
+import { ApiError, apiErrorFrom, parseApiResponse } from "@in-org-quicko/skillset-shared";
 import type { z } from "zod";
 
 // Re-exported so the commands keep importing the error they catch from the

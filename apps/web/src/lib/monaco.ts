@@ -75,7 +75,7 @@ export function defineMonacoThemes(): void {
  * Answered out of Monaco's own language registry rather than a table of our
  * own: each registered language already declares the extensions and bare
  * filenames it covers, so asking it is both shorter and more complete than
- * restating a subset here. `artifactMediaType` (`@skillset/shared`) is
+ * restating a subset here. `artifactMediaType` (`@in-org-quicko/skillset-shared`) is
  * the separate question of whether a file is text *at all* — this one only
  * runs once the answer to that is yes.
  *

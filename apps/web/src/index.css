@@ -2,18 +2,20 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource/michroma";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Instrument Sans', sans-serif;
+    --font-sans: 'Instrument Sans Variable', sans-serif;
     /* Medium (500) is the lightest weight this app ever renders — the
-       `font-normal` utility is repointed here instead of leaving 400
+      `font-normal` utility is repointed here instead of leaving 400
        reachable, so nothing new can slip back to Regular. */
     --font-weight-normal: 500;
-    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-    --font-wordmark: 'Michroma', 'Instrument Sans', sans-serif;
+    --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font-wordmark: 'Michroma', 'Instrument Sans Variable', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

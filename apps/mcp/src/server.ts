@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { AgentDetection } from "@skillset/shared";
+import type { AgentDetection } from "@in-org-quicko/skillset-shared";
 import type { McpConfig } from "./config.js";
 import { resolveAgent } from "./detect-agent.js";
 import type { Logger } from "./logger.js";

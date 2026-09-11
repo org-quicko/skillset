@@ -69,7 +69,7 @@ config file, no `login`, and no state carried between runs.
   "mcpServers": {
     "skillset": {
       "command": "npx",
-      "args": ["-y", "@skillset/mcp@latest", "--registry", "https://registry.example"],
+      "args": ["-y", "@in-org-quicko/skillset-mcp@latest", "--registry", "https://registry.example"],
       "env": {}
     }
   }
