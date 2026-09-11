@@ -46,7 +46,7 @@ export function DeleteIntegrationDialog({
         onCancel={() => handleOpenChange(false)}
         cancelDisabled={deleteIntegration.isPending}
         submit={{
-          label: "Delete integration",
+          label: "Delete Integration",
           pendingLabel: "Deleting…",
           pending: deleteIntegration.isPending,
           variant: "destructive",

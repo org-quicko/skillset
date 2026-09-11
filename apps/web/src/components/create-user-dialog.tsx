@@ -94,6 +94,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
           <FormField htmlFor="new_user_first_name" label="First name">
             <Input
               id="new_user_first_name"
+              placeholder="Eg. Jane"
               value={firstName}
               onChange={(event) => setFirstName(event.target.value)}
               disabled={createUser.isPending}
@@ -102,6 +103,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
           <FormField htmlFor="new_user_last_name" label="Last name">
             <Input
               id="new_user_last_name"
+              placeholder="Eg. Doe"
               value={lastName}
               onChange={(event) => setLastName(event.target.value)}
               disabled={createUser.isPending}
@@ -111,6 +113,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
             <Input
               id="new_user_email"
               type="email"
+              placeholder="Eg. jane.doe@example.com"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               disabled={createUser.isPending}

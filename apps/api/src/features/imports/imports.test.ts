@@ -10,6 +10,7 @@ import {
   type UserRow,
 } from "../../db/schemas/index.js";
 import { createLogger } from "../../lib/logger.js";
+import { deriveKeys } from "../../lib/secrets.js";
 import { ConnectionsService } from "../connections/connections.service.js";
 import { ImportsService } from "./imports.service.js";
 import { IntegrationsService } from "../integrations/integrations.service.js";
@@ -121,7 +122,7 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
     readerCookie = (await seed("reader@example.com", "reader")).cookie;
 
     const logger = createLogger("silent");
-    const integrationsService = new IntegrationsService(context.db, logger);
+    const integrationsService = new IntegrationsService(context.db, logger, deriveKeys(TEST_AUTH_SECRET));
     imports = new ImportsService(
       logger,
       integrationsService,

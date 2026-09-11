@@ -11,6 +11,7 @@ const config = (agentId?: McpConfig["agentId"]): McpConfig => ({
   agentId,
   logLevel: "warn",
   token: undefined,
+  tokenSource: "none",
 });
 
 async function withTempRoot<T>(run: (root: { cwd: string; homeDir: string }) => Promise<T>): Promise<T> {

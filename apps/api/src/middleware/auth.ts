@@ -1,11 +1,15 @@
 import { roleMeets, type Role } from "@skillset/shared";
 import { createMiddleware } from "hono/factory";
 import type { UserRow } from "../db/schemas/index.js";
+import type { Credential } from "../features/auth/authenticator.js";
 import { ForbiddenError, PasswordChangeRequiredError, UnauthenticatedError } from "../lib/errors.js";
 import type { AppEnv } from "../lib/factory.js";
 
-/** What a route mounted after `requireAuth` can read: the User it is made as. */
-export type AuthenticatedEnv = { Variables: { user: UserRow } };
+/**
+ * What a route mounted after `requireAuth` can read: the User it is made as,
+ * and what authenticated it.
+ */
+export type AuthenticatedEnv = { Variables: { user: UserRow; credential: Credential } };
 
 /**
  * Refuses a request that carries no valid session cookie or Bearer Token, and
@@ -17,7 +21,7 @@ export type AuthenticatedEnv = { Variables: { user: UserRow } };
  * pass `allowPendingPasswordChange`.
  *
  * @param options - `allowPendingPasswordChange` lets such a User through.
- * @returns A middleware handler that sets `user` on the context.
+ * @returns A middleware handler that sets `user` and `credential` on the context.
  * @throws UnauthenticatedError if no credential resolves to a User.
  * @throws PasswordChangeRequiredError if the User's `must_change_password` is
  * set and `allowPendingPasswordChange` was not passed.
@@ -28,12 +32,13 @@ export type AuthenticatedEnv = { Variables: { user: UserRow } };
  */
 export function requireAuth(options?: { allowPendingPasswordChange?: boolean }) {
   return createMiddleware<AppEnv & AuthenticatedEnv>(async (c, next) => {
-    const user = await c.var.services.authenticator.resolve(c.req.raw.headers);
-    if (!user) throw new UnauthenticatedError();
-    if (user.must_change_password && !options?.allowPendingPasswordChange) {
+    const credential = await c.var.services.authenticator.resolve(c.req.raw.headers);
+    if (!credential) throw new UnauthenticatedError();
+    if (credential.user.must_change_password && !options?.allowPendingPasswordChange) {
       throw new PasswordChangeRequiredError();
     }
-    c.set("user", user);
+    c.set("user", credential.user);
+    c.set("credential", credential);
     await next();
   });
 }

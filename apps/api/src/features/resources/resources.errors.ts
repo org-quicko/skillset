@@ -25,6 +25,27 @@ export class ArtifactFileNotFoundError extends AppError {
 }
 
 /**
+ * The stored Artifact is larger than one may be, so the API refuses to read
+ * it into memory.
+ *
+ * @remarks
+ * Only reachable through the drift ADR-0001 accepts: nothing verifies that
+ * the bytes a publisher uploads match the sizes they declared, and a
+ * presigned PUT cannot be signed for a maximum length. Refusing on the way
+ * out is what keeps an oversized upload from being turned into unbounded
+ * memory use on an unauthenticated read (ISSUE-5).
+ */
+export class ArtifactTooLargeError extends AppError {
+  constructor(bytes: number) {
+    super(
+      413,
+      "artifact_too_large",
+      `This Resource's stored Artifact is ${bytes} bytes, more than an Artifact may hold, and cannot be served.`,
+    );
+  }
+}
+
+/**
  * A Resource's delete failed for a reason other than a missing key. Reported
  * generically rather than distinguished, since the caller cannot act
  * differently either way — the real cause still reaches the logs via `cause`.

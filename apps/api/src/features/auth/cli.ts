@@ -1,5 +1,6 @@
 import { createDatabase } from "../../db/client.js";
 import { createLogger } from "../../lib/logger.js";
+import { deriveKeys } from "../../lib/secrets.js";
 import { createAuth } from "./instance.js";
 
 // Exists only so `@better-auth/cli generate` has an `auth` export to read the
@@ -15,6 +16,7 @@ export const auth = createAuth(
     secret: "codegen-only-secret-codegen-only-secret",
     publicUrl: "http://localhost:3000",
     logger: createLogger("silent"),
+    keys: deriveKeys("codegen-only-secret-codegen-only-secret"),
   },
   [],
 );

@@ -3,14 +3,21 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@skillset/shared";
 import { eq } from "drizzle-orm";
 import { connections, integrations, users } from "../../db/schemas/index.js";
+import { deriveKeys, openClientSecret } from "../../lib/secrets.js";
 import {
   seedUserWithPassword,
   sessionCookie,
   signIn,
   startTestContext,
   stopTestContext,
+  TEST_AUTH_SECRET,
   type TestContext,
 } from "../../../test/context.js";
+
+/** Reads a stored `client_secret` back, under the key the service encrypts it with (ISSUE-9). */
+function storedSecret(stored: string | null | undefined): Promise<string> {
+  return openClientSecret(deriveKeys(TEST_AUTH_SECRET).clientSecrets, stored ?? "");
+}
 
 interface ApiError {
   error: { code: string; message: string; field?: string };
@@ -167,12 +174,15 @@ describe("Integrations (ADR-0024)", () => {
       expect(((await res.json()) as ApiError).error.field).toBe("description");
     });
 
-    it("stores the client secret even though it is never read back", async () => {
+    it("stores the client secret encrypted, and never in the clear", async () => {
       await clearIntegrations();
       await post(admin.cookie, integrationBody({ client_secret: "the-real-secret" }));
 
       const [row] = await context.db.select().from(integrations);
-      expect(row?.client_secret).toBe("the-real-secret");
+      // A database dump is the threat this closes: the GitHub App secret is
+      // enough to exchange every writer's refresh token (ISSUE-9).
+      expect(row?.client_secret).not.toBe("the-real-secret");
+      expect(await storedSecret(row?.client_secret)).toBe("the-real-secret");
     });
 
     it("lists every configured Integration for an Admin, without secrets", async () => {
@@ -286,7 +296,7 @@ describe("Integrations (ADR-0024)", () => {
       expect(((await res.json()) as ApiIntegration).display_name).toBe("GitHub (work)");
 
       const [row] = await context.db.select().from(integrations);
-      expect(row?.client_secret).toBe("original-secret");
+      expect(await storedSecret(row?.client_secret)).toBe("original-secret");
     });
 
     it("replaces the client secret when one is given", async () => {
@@ -296,7 +306,7 @@ describe("Integrations (ADR-0024)", () => {
       expect((await patch(admin.cookie, id, { client_secret: "rotated-secret" })).status).toBe(200);
 
       const [row] = await context.db.select().from(integrations);
-      expect(row?.client_secret).toBe("rotated-secret");
+      expect(await storedSecret(row?.client_secret)).toBe("rotated-secret");
     });
 
     it("changes the description, and clears it when sent null", async () => {

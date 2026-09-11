@@ -1,4 +1,5 @@
 import {
+  ARTIFACT_MAX_UNCOMPRESSED_BYTES,
   artifactMediaType,
   buildArtifact,
   validateArtifactPath,
@@ -16,6 +17,7 @@ import { resourceDirectory, resourceTags, resources, users, type UserRow } from 
 import {
   ArtifactFileNotFoundError,
   ArtifactMissingError,
+  ArtifactTooLargeError,
   ResourceDeleteFailedError,
   ResourceNotFoundError,
 } from "./resources.errors.js";
@@ -104,10 +106,17 @@ interface ArtifactArchive {
   bytes: Uint8Array;
 }
 
-/** `GET /resources/{id}/files/{path}`: one file of an Artifact, ready to serve. */
+/**
+ * `GET /resources/{id}/files/{path}`: one file of an Artifact, ready to serve.
+ *
+ * Bytes are a stream rather than a buffer: this route is unauthenticated
+ * (ADR-0013), so buffering an object of a size nothing bounds would put the
+ * API's memory in a publisher's hands (ISSUE-5).
+ */
 interface ArtifactFileContent {
   path: string;
-  bytes: Uint8Array;
+  size: number;
+  stream: ReadableStream<Uint8Array>;
   contentType: string;
 }
 
@@ -638,14 +647,22 @@ export class ResourcesService {
    * (ADR-0013), and not an Install: previewing a file is not obtaining the
    * Resource (ADR-0028).
    *
+   * The bytes are streamed, and the size storage reports is checked against
+   * what an Artifact may hold before any of them are read: the route is
+   * unauthenticated, and an uploaded file can be larger than its publisher
+   * declared (ADR-0001, ISSUE-5).
+   *
    * @param id - The Resource's id.
    * @param rawPath - The file's path within the Artifact, as the caller gave
    * it and not yet known to be safe.
-   * @returns The file's normalised path, its bytes, and its `content-type`.
+   * @returns The file's normalised path, its byte length, its bytes as a
+   * stream, and its `content-type`.
    * @throws ResourceNotFoundError if no Resource exists by `id`.
    * @throws SkillValidationError if `rawPath` would address an object outside
    * the Resource's prefix.
    * @throws ArtifactFileNotFoundError if the Artifact holds no file there.
+   * @throws ArtifactTooLargeError if the stored file is larger than an
+   * Artifact may be.
    * @example
    * ```ts
    * const file = await resourcesService.readArtifactFile(id, "references/java.md");
@@ -657,10 +674,11 @@ export class ResourcesService {
     const path = normalizeSkillPath(rawPath);
     validateArtifactPath(path);
 
-    const bytes = await this.storage.get(artifactFileKey(id, path));
-    if (!bytes) throw new ArtifactFileNotFoundError(path);
+    const object = await this.storage.open(artifactFileKey(id, path));
+    if (!object) throw new ArtifactFileNotFoundError(path);
+    if (object.size > ARTIFACT_MAX_UNCOMPRESSED_BYTES) throw new ArtifactTooLargeError(object.size);
 
-    return { path, bytes, contentType: artifactMediaType(path).contentType };
+    return { path, size: object.size, stream: object.stream(), contentType: artifactMediaType(path).contentType };
   }
 
   /**
@@ -685,21 +703,35 @@ export class ResourcesService {
    * @param id - The Resource's id.
    * @param source - Where this download was requested from — recorded as
    * the Install's `source` (ADR-0012).
+   * @param clientFingerprint - Identifies the client, so this Install is
+   * counted at most once per day (ISSUE-23). See `installFingerprint`.
    * @returns The Resource's name, for the download filename, and the zip.
    * @throws ResourceNotFoundError if no Resource exists by `id`.
    * @throws ArtifactMissingError if the Resource's Artifact holds no files,
    * or a file the listing named has since gone.
-   * @throws SkillValidationError if the stored files exceed what an Artifact
+   * @throws ArtifactTooLargeError if the stored files exceed what an Artifact
    * may hold — reachable only for an Artifact whose uploaded bytes overran
    * the sizes its publisher declared, which is the drift ADR-0001 accepts.
+   * Refused from the listing's sizes, before anything is read.
    * @example
    * ```ts
    * const { name, bytes } = await resourcesService.buildArtifactArchive(id, "web");
    * ```
    */
-  async buildArtifactArchive(id: string, source: InstallSource): Promise<ArtifactArchive> {
+  async buildArtifactArchive(
+    id: string,
+    source: InstallSource,
+    clientFingerprint?: string,
+  ): Promise<ArtifactArchive> {
     const name = await this.getNameOrThrow(id);
     const manifest = await this.readManifest(id);
+
+    // Checked against the sizes *storage* reports, before a single object is
+    // read, because that is what this is about to hold in memory — the
+    // publisher's declared sizes were checked at publish time and nothing
+    // guarantees the bytes that arrived match them (ADR-0001, ISSUE-5).
+    const stored = manifest.reduce((total, file) => total + file.size, 0);
+    if (stored > ARTIFACT_MAX_UNCOMPRESSED_BYTES) throw new ArtifactTooLargeError(stored);
 
     const files = await Promise.all(
       manifest.map(async (file): Promise<SkillFile> => {
@@ -713,7 +745,7 @@ export class ResourcesService {
     );
 
     const bytes = buildArtifact(files);
-    await this.analytics.recordInstall(id, source);
+    await this.analytics.recordInstall(id, source, clientFingerprint);
 
     return { name, bytes };
   }

@@ -1,7 +1,17 @@
 {
-  "name": "@skillset/mcp",
-  "version": "0.0.0",
+  "name": "@in-org-quicko/skillset-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for searching, installing, and publishing Skills on a Skillset Registry.",
   "type": "module",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/org-quicko/skillset.git",
+    "directory": "apps/mcp"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "skillset-mcp": "./dist/cli.js"
   },
@@ -9,18 +19,17 @@
     "dist"
   ],
   "scripts": {
+    "build": "bun run src/build.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test"
   },
-  "dependencies": {
+  "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@skillset/installer": "workspace:*",
     "@skillset/shared": "workspace:*",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
     "@types/bun": "^1.4.0",
     "fflate": "^0.8.3",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "zod": "^4.4.3"
   }
 }

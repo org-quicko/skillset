@@ -1,3 +1,4 @@
+import { PASSWORD_MIN_LENGTH } from "@skillset/shared";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +31,7 @@ export function BootstrapForm() {
             <Label htmlFor="first_name">First name</Label>
             <Input
               id="first_name"
+              placeholder="Eg. Jane"
               value={firstName}
               onChange={(event) => setFirstName(event.target.value)}
               required
@@ -37,13 +39,20 @@ export function BootstrapForm() {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="last_name">Last name</Label>
-            <Input id="last_name" value={lastName} onChange={(event) => setLastName(event.target.value)} required />
+            <Input
+              id="last_name"
+              placeholder="Eg. Doe"
+              value={lastName}
+              onChange={(event) => setLastName(event.target.value)}
+              required
+            />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="email">Email</Label>
             <Input
               id="email"
               type="email"
+              placeholder="Eg. jane.doe@example.com"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
@@ -54,7 +63,8 @@ export function BootstrapForm() {
             <Input
               id="password"
               type="password"
-              minLength={12}
+              placeholder={`Eg. at least ${PASSWORD_MIN_LENGTH} characters`}
+              minLength={PASSWORD_MIN_LENGTH}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required

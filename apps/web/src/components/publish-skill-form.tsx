@@ -4,7 +4,7 @@ import {
   type SkillFile,
   type SkillSourceLocation,
 } from "@skillset/shared";
-import { CircleAlertIcon, CircleCheckIcon } from "lucide-react";
+import { CircleAlertIcon, CircleCheckIcon, UploadIcon } from "lucide-react";
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { connectHref, useConnections, useRepositories } from "@/hooks/use-connections";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
@@ -465,7 +465,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
     });
   }
 
-  async function handleDrop(event: DragEvent<HTMLDivElement>) {
+  async function handleDrop(event: DragEvent<HTMLButtonElement>) {
     event.preventDefault();
     setIsDragging(false);
     if (isBusy) return;
@@ -503,7 +503,9 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
       </TabsList>
 
       <TabsContent value="upload" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
-        <div
+        <button
+          type="button"
+          disabled={isBusy}
           onDragOver={(event) => {
             event.preventDefault();
             if (!isDragging) setIsDragging(true);
@@ -515,34 +517,41 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
           }}
           onDrop={handleDrop}
+          // Dropping is read via `webkitGetAsEntry` and accepts a folder or a
+          // lone SKILL.md either way (see `readDroppedFiles`). Clicking opens
+          // a native dialog, which can only ever be in one mode or the
+          // other — `webkitdirectory` below picks folder-picking mode, so a
+          // single markdown file has to be dragged in instead.
+          onClick={() => fileInputRef.current?.click()}
           className={cn(
-            "flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
+            "flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
             isDragging ? "border-primary bg-accent" : "border-border",
+            isBusy ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/50",
           )}
         >
+          <UploadIcon className="size-5 text-muted-foreground" />
           <p className="text-sm text-pretty text-muted-foreground">
-            Drag a Skill&apos;s folder here, or a single SKILL.md file
+            Drag and drop a Skill&apos;s folder or a SKILL.md file here, or{" "}
+            <span className="text-foreground underline underline-offset-2">browse for a folder</span>
           </p>
-          <p className="text-xs text-muted-foreground">or</p>
-          <Button type="button" variant="outline" disabled={isBusy} onClick={() => fileInputRef.current?.click()}>
-            Upload skill
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handlePicked}
-            // Nonstandard but universally supported attributes for picking a
-            // folder from the file dialog — not in React's JSX typings.
-            // `webkitdirectory` biases the dialog toward folder selection,
-            // but the OS picker it opens still lets a single file be chosen
-            // directly, and `readPickedFiles` renames a lone markdown file
-            // with no `webkitRelativePath` to `SKILL.md` — so one button
-            // covers both without a mode to toggle.
-            {...{ webkitdirectory: "true", directory: "true" }}
-          />
-        </div>
+        </button>
+        {/* Kept outside the button — HTML doesn't allow interactive content
+            nested inside one — but still hidden and driven entirely by
+            `fileInputRef`, so it needs no layout of its own. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handlePicked}
+          // Nonstandard but universally supported attribute for picking a
+          // folder from the file dialog — not in React's JSX typings.
+          {...{ webkitdirectory: "true", directory: "true" }}
+        />
+        <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+          <li>A folder must include a SKILL.md file</li>
+          <li>A markdown file must have its skill name and description in YAML frontmatter</li>
+        </ul>
         {readError && <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />}
         {/* Only this tab publishes through `publish.mutate` directly. Every
             GitHub failure lands in an `ImportOutcome` instead, so the two

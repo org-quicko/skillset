@@ -6,12 +6,15 @@ import type { Database } from "../../db/client.js";
 import {
   accounts,
   identityProviders,
+  rateLimits,
   sessions,
   users,
   verifications,
   type IdentityProviderRow,
 } from "../../db/schemas/index.js";
 import type { Logger } from "../../lib/logger.js";
+import { trustedOrigins } from "../../lib/origins.js";
+import { openClientSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { GITHUB_SCOPES, fetchGitHubIdentity } from "./github.js";
 import { hashPassword, verifyPassword } from "./password.js";
 
@@ -23,6 +26,14 @@ export interface BetterAuthDependencies {
   publicUrl: string;
   /** Where a refused login's reason goes — the only place it is ever told. */
   logger: Logger;
+  /**
+   * Whether to limit request rates. Defaults to on; only the test suite turns
+   * it off, because every test signs in from the same address and that is
+   * exactly what a credential limiter refuses.
+   */
+  rateLimiting?: boolean;
+  /** The per-purpose keys a Provider's stored `client_secret` is decrypted with (ISSUE-9). */
+  keys: DerivedKeys;
 }
 
 /** Better Auth's routes are mounted under this path, inside the `/api` app. */
@@ -160,6 +171,50 @@ function socialProvidersFor(providers: IdentityProviderRow[]): Record<string, un
   }
 
   return config;
+}
+
+/**
+ * The Providers whose login may attach to a User that already exists.
+ *
+ * @remarks
+ * Better Auth links an external login to an existing User by email when the
+ * Provider is trusted here, so this list is the answer to "whose word about
+ * an email address is good enough to sign in as whoever owns it".
+ *
+ * Google's is: it asserts `email_verified: true` only for addresses it has
+ * itself verified.
+ *
+ * Microsoft's is not, unconditionally. Entra takes `email` from a
+ * **mutable, admin-set** attribute that Microsoft does not verify (the
+ * published "nOAuth" class of bug), so anyone who can administer *any* tenant
+ * can set a user's `mail` to a Superadmin's address here. The one
+ * configuration where that does not follow is a Provider pinned to exactly
+ * one tenant: the endpoint is that tenant's, the `tid` claim is checked
+ * against it per login (`organisationGate`), and the address is then
+ * provisioned by an administrator this Registry has deliberately trusted.
+ * Any other Microsoft configuration — several tenants, or none at all
+ * (ADR-0021) — is untrusted, and a login through it that matches an existing
+ * User is refused as unlinked rather than signed in as them (ISSUE-2).
+ *
+ * GitHub is absent for a third reason: its primary address may be one GitHub
+ * has never challenged, so linking is left to its own `emailVerified` flag
+ * (ADR-0018).
+ *
+ * @param providers - The enabled Providers this instance is being built for.
+ * @returns The provider ids Better Auth may auto-link.
+ * @example
+ * ```ts
+ * trustedProvidersFor([{ kind: "microsoft", permitted_organisations: ["tenant-id"] }]); // ["microsoft"]
+ * ```
+ */
+function trustedProvidersFor(providers: IdentityProviderRow[]): string[] {
+  return providers
+    .filter((provider) => {
+      if (provider.kind === "google") return true;
+      if (provider.kind === "microsoft") return provider.permitted_organisations.length === 1;
+      return false;
+    })
+    .map((provider) => provider.kind);
 }
 
 /** The shape `validateUserInfo` reports a sign-in's origin in. */
@@ -316,10 +371,13 @@ export function organisationGate(db: Database, logger: Logger) {
  *
  * @param deps - The database, signing secret, and public URL.
  * @param providers - The enabled Providers whose credentials to configure.
+ * Each one's `client_secret` must already be decrypted — `createAuthRegistry`
+ * below is what does that, since this function is synchronous and decryption
+ * is not (ISSUE-9).
  * @returns The configured Better Auth instance.
  * @example
  * ```ts
- * const auth = createAuth({ db, secret, publicUrl }, enabledProviders);
+ * const auth = createAuth({ db, secret, publicUrl, logger, keys }, enabledProviders);
  * ```
  */
 export function createAuth(deps: BetterAuthDependencies, providers: IdentityProviderRow[]) {
@@ -330,8 +388,24 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
     basePath: AUTH_BASE_PATH,
     database: drizzleAdapter(deps.db, {
       provider: "pg",
-      schema: { users, sessions, accounts, verifications },
+      schema: { users, sessions, accounts, verifications, rate_limits: rateLimits },
     }),
+    // On in every environment, not just production as Better Auth defaults
+    // to, and counted in Postgres rather than in process memory (ISSUE-7).
+    // The memory store gave one bucket per replica and forgot everything on
+    // restart, which is no limit at all on a deployment that has either.
+    //
+    // The client address it keys on comes from `x-forwarded-for`, which is
+    // the only source Better Auth has — and the `clientIp` middleware has
+    // already overwritten that header with an address resolved from the
+    // socket or a trusted proxy, so what reaches here is not something the
+    // caller could choose.
+    rateLimit: {
+      enabled: deps.rateLimiting !== false,
+      storage: "database",
+      modelName: "rate_limits",
+      fields: { lastRequest: "last_request" },
+    },
     socialProviders: socialProvidersFor(providers),
     emailAndPassword: {
       enabled: true,
@@ -412,18 +486,13 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
       // no other code reads.
       accountLinking: {
         enabled: true,
-        // Google and Entra both prove ownership of the address they assert, and
-        // the gate has already established the login came from a permitted
-        // organisation. Entra is the reason this list is needed rather than
-        // leaning on `emailVerified`: it emits no `email_verified` claim at all,
-        // so Better Auth maps it to `false` and a Microsoft login could never
-        // link to an existing User.
-        //
-        // `github` is deliberately absent. Its primary address may be one GitHub
-        // has never challenged (ADR-0018), and an unverified address is not
-        // grounds for attaching to a User that already exists — so a GitHub login
-        // links only when GitHub itself says the address is verified.
-        trustedProviders: ["google", "microsoft"],
+        // Derived from the Providers actually configured rather than a fixed
+        // list, because whether Entra's word on an address can be trusted
+        // depends on how its Provider is gated — see `trustedProvidersFor`.
+        // This is why it matters that the instance is rebuilt whenever a
+        // Provider changes (ADR-0019): narrowing a Microsoft Provider's
+        // tenants has to narrow this too.
+        trustedProviders: trustedProvidersFor(providers),
         requireLocalEmailVerified: false,
       },
       fields: {
@@ -497,16 +566,10 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
         generateId: false,
       },
     },
-    // Vite's dev server proxies /api to this instance but keeps the browser's
-    // Origin header as its own (localhost:5173), which Better Auth would
-    // otherwise reject as cross-origin on every mutating auth call. Gated on
-    // publicUrl being a loopback address (NODE_ENV is always "production" in
-    // the Docker image this runs from even in local dev, so it can't tell
-    // dev and prod apart) rather than added unconditionally, so a real
-    // deployment's trusted origins stay exactly `[publicUrl]`.
-    trustedOrigins: ["localhost", "127.0.0.1"].includes(new URL(deps.publicUrl).hostname)
-      ? [deps.publicUrl, "http://localhost:5173"]
-      : [deps.publicUrl],
+    // The same list `hono/csrf` guards every other mutating route with, so
+    // "which origins does this Registry trust" has one answer — see
+    // lib/origins.ts for why Vite's dev server is on it.
+    trustedOrigins: trustedOrigins(deps.publicUrl),
   });
 }
 
@@ -603,10 +666,21 @@ export function createAuthRegistry(deps: BetterAuthDependencies): AuthRegistry {
   }
 
   async function build(key: string): Promise<Auth> {
-    const providers = await deps.db
+    const rows = await deps.db
       .select()
       .from(identityProviders)
       .where(eq(identityProviders.enabled, true));
+    // The column holds ciphertext (ISSUE-9), and what Better Auth needs is
+    // the credential itself. Decrypted here rather than in `createAuth`
+    // because that one is synchronous — and here is also where the rebuild
+    // already happens, so a rotated secret is picked up with the rest of the
+    // Provider's configuration (ADR-0019).
+    const providers = await Promise.all(
+      rows.map(async (row) => ({
+        ...row,
+        client_secret: await openClientSecret(deps.keys.clientSecrets, row.client_secret),
+      })),
+    );
     const auth = createAuth(deps, providers);
     cached = { key, auth };
     return auth;

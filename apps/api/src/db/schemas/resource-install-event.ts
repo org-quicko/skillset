@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, pgEnum, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { resources } from "./resource";
 
 /**
@@ -30,10 +30,27 @@ export const resourceInstallEvents = pgTable(
       .notNull()
       .references(() => resources.id, { onDelete: "cascade" }),
     source: resourceInstallSourceEnum("source").notNull(),
+    // A digest of the client's address and user agent, never either of them
+    // (see features/analytics/fingerprint.ts). Null when the client could not
+    // be identified, and null is what keeps those rows outside the unique
+    // index below — Postgres treats nulls as distinct, so an unidentifiable
+    // Install is counted without deduplication rather than discarded.
+    client_fingerprint: text("client_fingerprint"),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     resourceIdIdx: index("resource_install_events_resource_id_idx").on(table.resource_id),
+    // One Install per client per Resource per UTC day (ISSUE-23). The day is
+    // an expression rather than a column because a column would be a second
+    // copy of `created_at` that could disagree with it; `AT TIME ZONE 'UTC'`
+    // is what makes the cast immutable enough to index, and fixes the
+    // boundary to UTC rather than whatever the session's TimeZone happens to
+    // be.
+    perClientPerDay: uniqueIndex("resource_install_events_dedupe_idx").on(
+      table.resource_id,
+      table.client_fingerprint,
+      sql`((${table.created_at} AT TIME ZONE 'UTC')::date)`,
+    ),
   }),
 );
 

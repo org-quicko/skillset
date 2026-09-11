@@ -6,14 +6,14 @@ import {
   type UserCreate,
   type UserUpdateName,
 } from "@skillset/shared";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, ne } from "drizzle-orm";
 import { getPasswordCredential, setPasswordCredential } from "../auth/credential.js";
 import { generateInitialPassword, hashPassword, verifyPassword } from "../auth/password.js";
 import { generateTokenSecret, hashTokenSecret } from "../auth/token.js";
 import type { Database } from "../../db/client.js";
 import { firstRow } from "../../db/rows.js";
 import { isUniqueViolation } from "../../db/pg-errors.js";
-import { tokens, users, type TokenRow, type UserRow } from "../../db/schemas/index.js";
+import { sessions, tokens, users, type TokenRow, type UserRow } from "../../db/schemas/index.js";
 import { EmailTakenError, SuperadminProtectedError, TokenNotFoundError, UserNotFoundError } from "./users.errors.js";
 import { ValidationError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logger.js";
@@ -71,13 +71,14 @@ export class UsersService {
    * The plaintext initial password is returned only here — it is never
    * stored, and never appears in `list` above.
    *
+   * @param actor - The Admin or Superadmin creating the User.
    * @param input - The new User's names, email, and role. `role` excludes
    * `superadmin`, which only `/setup` ever grants.
    * @returns `{ user: UserRow; initial_password: string }`
    * @throws EmailTakenError if a User with that email already exists.
    * @example
    * ```ts
-   * const { user, initial_password } = await usersService.create({
+   * const { user, initial_password } = await usersService.create(actor, {
    *   first_name: "Ada",
    *   last_name: "Lovelace",
    *   email: "ada@example.com",
@@ -85,7 +86,7 @@ export class UsersService {
    * });
    * ```
    */
-  async create(input: UserCreate): Promise<{ user: UserRow; initial_password: string }> {
+  async create(actor: UserRow, input: UserCreate): Promise<{ user: UserRow; initial_password: string }> {
     const initial_password = generateInitialPassword();
     const password_hash = await hashPassword(initial_password);
 
@@ -120,7 +121,7 @@ export class UsersService {
       throw cause;
     }
 
-    this.logger.info({ user_id: created.id, role: created.role }, "user created");
+    this.logger.info({ actor_id: actor.id, user_id: created.id, role: created.role }, "user created");
     return { user: created, initial_password };
   }
 
@@ -151,19 +152,36 @@ export class UsersService {
    * Clears `must_change_password` — this is the route that resolves it
    * (docs/data-model.md).
    *
+   * Every *other* session of this User is deleted in the same transaction
+   * (ISSUE-10). Someone changing their password because they believe it is
+   * compromised is asking for the access that password bought to end, and a
+   * session lasts a week (`SESSION_TTL_SECONDS`), so leaving the others
+   * standing meant the change bought them nothing. The session making the
+   * request survives, so a routine change does not sign the person out of the
+   * page they are on.
+   *
+   * Tokens are deliberately left alone: they are a separate credential that
+   * the password never minted, and Settings lists them for revoking one by
+   * one.
+   *
    * @param user - The User replacing their own password.
    * @param input - The current password (verified) and the new one.
+   * @param keepSessionId - The session making this request, the one session
+   * not revoked. Omit to revoke every session, which is what a request made
+   * with anything other than a session should do.
+   * @returns How many other sessions were revoked.
    * @throws ValidationError with field `current_password` if it does not
    * match.
    * @example
    * ```ts
-   * await usersService.replaceOwnPassword(user, {
-   *   current_password: "the-generated-one",
-   *   new_password: "a-new-password-of-my-own",
-   * });
+   * await usersService.replaceOwnPassword(
+   *   user,
+   *   { current_password: "the-generated-one", new_password: "a-new-password-of-my-own" },
+   *   sessionId,
+   * );
    * ```
    */
-  async replaceOwnPassword(user: UserRow, input: PasswordReplace): Promise<void> {
+  async replaceOwnPassword(user: UserRow, input: PasswordReplace, keepSessionId?: string): Promise<number> {
     const current = await getPasswordCredential(this.db, user.id);
     const matches = await verifyPassword(input.current_password, current);
     if (!matches) {
@@ -171,15 +189,30 @@ export class UsersService {
     }
 
     const password_hash = await hashPassword(input.new_password);
-    await this.db.transaction(async (tx) => {
+    const revoked = await this.db.transaction(async (tx) => {
       await setPasswordCredential(tx, user.id, password_hash);
       // `must_change_password` is a column on the User, not the credential.
       await tx
         .update(users)
         .set({ must_change_password: false, updated_at: new Date() })
         .where(eq(users.id, user.id));
+
+      // Better Auth owns this table (db/schemas/README.md), and this is the
+      // one place anything else writes to it: there is no API for "revoke
+      // every session but this one".
+      const deleted = await tx
+        .delete(sessions)
+        .where(
+          keepSessionId
+            ? and(eq(sessions.user_id, user.id), ne(sessions.id, keepSessionId))
+            : eq(sessions.user_id, user.id),
+        )
+        .returning({ id: sessions.id });
+      return deleted.length;
     });
-    this.logger.info({ user_id: user.id }, "password replaced");
+
+    this.logger.info({ user_id: user.id, sessions_revoked: revoked }, "password replaced");
+    return revoked;
   }
 
   /**
@@ -217,7 +250,7 @@ export class UsersService {
       .returning();
     const updated = firstRow(rows, "User role update");
 
-    this.logger.info({ user_id: userId, role }, "user role changed");
+    this.logger.info({ actor_id: actor.id, user_id: userId, role }, "user role changed");
     return updated;
   }
 
@@ -249,7 +282,7 @@ export class UsersService {
     if (target.role === "superadmin") throw new SuperadminProtectedError();
 
     await this.db.delete(users).where(eq(users.id, userId));
-    this.logger.info({ user_id: userId }, "user removed");
+    this.logger.info({ actor_id: actor.id, user_id: userId }, "user removed");
   }
 
   /** Lists a User's own Tokens, newest first. */

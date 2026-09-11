@@ -65,6 +65,7 @@ export function ProfileCard({ user }: { user: User }) {
         <div className="divide-y">
           <InfoRow title="First name">
             <Input
+              placeholder="Eg. Jane"
               value={firstName}
               onChange={(event) => setFirstName(event.target.value)}
               required
@@ -73,6 +74,7 @@ export function ProfileCard({ user }: { user: User }) {
           </InfoRow>
           <InfoRow title="Last name">
             <Input
+              placeholder="Eg. Doe"
               value={lastName}
               onChange={(event) => setLastName(event.target.value)}
               required

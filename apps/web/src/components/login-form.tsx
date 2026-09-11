@@ -65,30 +65,13 @@ export function LoginForm() {
 
           {externalError && <p className="text-sm text-destructive">{loginRefusalMessage(externalError)}</p>}
 
-          {/* Above the password form, and the password form is always present:
-              it is the way back in when a provider is misconfigured or its
-              client secret has expired (ADR-0015). */}
-          {items.length > 0 && (
-            <>
-              <div className="flex flex-col gap-2.5">
-                {items.map((provider) => (
-                  <ProviderButton key={provider.kind} provider={provider} />
-                ))}
-              </div>
-              <div className="flex items-center gap-3.5">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">or</span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-            </>
-          )}
-
           <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
             <div className="flex flex-col gap-1.5">
               <FieldLabel>Email</FieldLabel>
               <Input
                 type="email"
                 autoComplete="email"
+                placeholder="Eg. jane.doe@example.com"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
@@ -128,6 +111,24 @@ export function LoginForm() {
               {login.isPending ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+
+          {/* Below the password form, which is always present: it is the way
+              back in when a provider is misconfigured or its client secret
+              has expired (ADR-0015). */}
+          {items.length > 0 && (
+            <>
+              <div className="flex items-center gap-3.5">
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <div className="flex flex-col gap-2.5">
+                {items.map((provider) => (
+                  <ProviderButton key={provider.kind} provider={provider} />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

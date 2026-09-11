@@ -32,15 +32,18 @@ const AppSlug = z
   .regex(/^[A-Za-z0-9-]+$/, { message: "An app slug may hold only letters, digits, and hyphens." });
 
 /**
- * A free-text note on what an Integration is for, shown alongside its other
- * details.
+ * How long an Integration's description may run.
  *
  * @remarks
- * Capped at 180 characters — long enough for a sentence, short enough that it
- * cannot turn into documentation the display name and app slug should carry
- * instead.
+ * Long enough for a sentence, short enough that it cannot turn into
+ * documentation the display name and app slug should carry instead. Exported
+ * so the form asking for one (`IntegrationDialog`) can enforce and display the
+ * same limit instead of carrying its own copy of the number.
  */
-const Description = z.string().trim().max(180);
+export const INTEGRATION_DESCRIPTION_MAX_LENGTH = 180;
+
+/** A free-text note on what an Integration is for, shown alongside its other details. */
+const Description = z.string().trim().max(INTEGRATION_DESCRIPTION_MAX_LENGTH);
 
 /**
  * An Admin's view of a configured Integration.

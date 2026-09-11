@@ -71,6 +71,13 @@
       "when": 1788862260305,
       "tag": "0009_cute_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789112764759,
+      "tag": "0010_rate_limits_and_install_dedupe",
+      "breakpoints": true
     }
   ]
 }

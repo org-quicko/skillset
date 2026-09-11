@@ -34,16 +34,33 @@ export class AnalyticsService {
    * Appends the event only (ADR-0012) — `skill_analytics` reflects it once
    * `refreshInstallCounts` next runs.
    *
+   * At most one Install per client per Resource per day is kept, which is
+   * what `onConflictDoNothing` and the unique index on
+   * `resource_install_events` do between them (ISSUE-23). The endpoint is
+   * unauthenticated, so without that the count — and the catalog's
+   * most-installed sort — was whatever anyone cared to make it. A repeat
+   * within the day is silently not recorded rather than refused: the caller
+   * is downloading a Skill, and being told off for downloading it twice would
+   * be a strange answer to that.
+   *
    * @param skillId - The Skill's id.
    * @param source - Where this Install came from.
+   * @param clientFingerprint - The digest identifying the client, from
+   * `installFingerprint`. Omitted or `undefined` records the Install without
+   * deduplicating it.
    * @example
    * ```ts
-   * await analytics.recordInstall(skillId, "web");
+   * await analytics.recordInstall(skillId, "web", fingerprint);
    * ```
    */
-  async recordInstall(skillId: string, source: InstallSource): Promise<void> {
+  async recordInstall(skillId: string, source: InstallSource, clientFingerprint?: string): Promise<void> {
     try {
-      await this.db.insert(resourceInstallEvents).values({ resource_id: skillId, source });
+      await this.db
+        .insert(resourceInstallEvents)
+        .values({ resource_id: skillId, source, client_fingerprint: clientFingerprint ?? null })
+        // No `target`: the index it would name is on an expression, and every
+        // unique constraint on this table is this one anyway.
+        .onConflictDoNothing();
     } catch (cause) {
       this.logger.error({ err: cause, skill_id: skillId, source }, "failed to record install");
     }

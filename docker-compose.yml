@@ -1,3 +1,12 @@
+# Local development only.
+#
+# Not a deployment template, and not a starting point for one (ISSUE-18). It
+# publishes MinIO's API and console on this machine, defaults both MinIO and
+# Postgres to well-known credentials, and opens MinIO's CORS policy to every
+# origin — each of which is the right trade for `docker compose up` on a
+# laptop and none of which is safe on a network. A real deployment points
+# `DATABASE_URL` and the `STORAGE_*` variables at managed services and runs
+# the `app` image on its own.
 services:
   app:
     build: .
@@ -10,40 +19,62 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL must be set}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ANALYTICS_REFRESH_CRON: ${ANALYTICS_REFRESH_CRON:-*/30 * * * * *}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-}
-      STORAGE_REGION: ${STORAGE_REGION:-}
-      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-}
-      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-}
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
-      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
+      # Defaulted to the bundled MinIO rather than left empty. Empty made
+      # `loadConfig` refuse to start on `STORAGE_BUCKET`, and an empty
+      # `STORAGE_ENDPOINT` pointed Bun's S3 client at AWS rather than at the
+      # `minio` service beside it (ISSUE-25).
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-skill-registry}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-minioadmin}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-minioadmin123}
+      # Two endpoints, because the API and the browser reach MinIO by
+      # different names: the API over the Docker network, a presigned upload
+      # URL from the browser (see .env.example).
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # No proxy in front of this, so no forwarded header is believed and the
+      # client address comes from the socket (ISSUE-7). A deployment behind a
+      # load balancer sets this to that balancer's address.
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
 
   postgres:
     image: postgres:18-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: skill_registry
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-skill_registry}
     volumes:
       - postgres-data:/var/lib/postgresql
+    # `service_started` raced: Postgres accepts connections some seconds after
+    # the container starts, and `app` would begin migrating before then. The
+    # API's own retry loop covered it, but waiting for `pg_isready` is the
+    # idiomatic fix and keeps the retries for genuine outages (ISSUE-18).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-skill_registry}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   # Local S3-compatible storage for development, so `docker compose up` works
   # with no external account (spec, "Storage": only S3 is implemented, but
   # any S3-compatible endpoint is fine). Not used when STORAGE_ENDPOINT points
-  # elsewhere in production.
+  # elsewhere in production. Pinned, like every other image here.
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY_ID:-minioadmin}
       MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_ACCESS_KEY:-minioadmin123}
       # This deployment's S3 bucket-CORS API (`mc cors set`) returns
       # NotImplemented, so CORS is opened at the server level instead — the
-      # browser upload needs this to PUT with a Content-Type header.
+      # browser upload needs this to PUT with a Content-Type header. One more
+      # reason this file is development-only: `*` is not a production CORS
+      # policy.
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
       - "9000:9000"
@@ -62,7 +93,7 @@ services:
   # exits; `app` waits on it rather than on `minio` directly so the bucket
   # always exists before the API's first presign.
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy

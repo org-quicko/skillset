@@ -13,6 +13,7 @@ export * from "./verification";
 export * from "./connection";
 export * from "./identity-provider";
 export * from "./integration";
+export * from "./rate-limit";
 export * from "./resource";
 export * from "./resource-analytics";
 export * from "./resource-directory";

@@ -23,7 +23,8 @@ program
   .description("Authenticate the CLI against a Registry with a Token minted from the web interface.")
   .requiredOption("--registry <url>", "The Registry's URL")
   .option("--token <secret>", "A Token minted from the web interface (prompted for if omitted)")
-  .action(async (opts: { registry: string; token?: string }) => {
+  .option("--insecure", "Allow a plain-http Registry that is not on this machine (sends the Token in the clear)")
+  .action(async (opts: { registry: string; token?: string; insecure?: boolean }) => {
     p.intro(label("login"));
 
     // Prompted rather than required on the command line, so the Token stays out of shell
@@ -42,7 +43,7 @@ program
     try {
       const result = await runLogin(
         { fetch, configPath: resolveConfigPath(process.env) },
-        { registry: opts.registry, token },
+        { registry: opts.registry, token, insecure: opts.insecure },
       );
       s.stop(`Authenticated as ${pc.cyan(result.email)} ${pc.dim(`(${result.role})`)}`);
       p.outro(`Logged in to ${result.registry}`);

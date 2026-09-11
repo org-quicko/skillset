@@ -260,6 +260,72 @@ describe("Managing Users (ticket 11)", () => {
     expect(reLogin.status).toBe(200);
   });
 
+  it("ends every other session when a password is replaced, and keeps the one that replaced it", async () => {
+    // Someone changing their password because they think it is compromised is
+    // asking for the access that password bought to end. A session lasts a
+    // week, so the other ones standing meant the change bought them nothing
+    // (ISSUE-10).
+    const user = await createUserAndLogIn(context, {
+      first_name: "Mary",
+      last_name: "Jackson",
+      email: "mary@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+
+    // A second browser, signed in with the same password.
+    const other = await context.app.request(SIGN_IN_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "mary@example.com", password: PASSWORD }),
+    });
+    const otherCookie = sessionCookie(other);
+    expect((await context.app.request("/api/users/me", { headers: { cookie: otherCookie } })).status).toBe(200);
+
+    const replaced = await context.app.request("/api/users/me/password", {
+      method: "PUT",
+      headers: { cookie: user.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ current_password: PASSWORD, new_password: "a-password-nobody-else-knows" }),
+    });
+    expect(replaced.status).toBe(204);
+
+    // The other browser is out.
+    expect((await context.app.request("/api/users/me", { headers: { cookie: otherCookie } })).status).toBe(401);
+    // The one that made the change is not, so a routine change does not sign
+    // the person out of the page they are on.
+    expect((await context.app.request("/api/users/me", { headers: { cookie: user.cookie } })).status).toBe(200);
+  });
+
+  it("leaves a User's Tokens alone, which the password never minted", async () => {
+    const user = await createUserAndLogIn(context, {
+      first_name: "Evelyn",
+      last_name: "Boyd",
+      email: "evelyn@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+
+    const minted = await context.app.request("/api/users/me/tokens", {
+      method: "POST",
+      headers: { cookie: user.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "ci" }),
+    });
+    const { secret } = (await minted.json()) as { secret: string };
+
+    const replaced = await context.app.request("/api/users/me/password", {
+      method: "PUT",
+      headers: { cookie: user.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ current_password: PASSWORD, new_password: "yet-another-new-password" }),
+    });
+    expect(replaced.status).toBe(204);
+
+    // A separate credential, listed and revocable one by one in Settings.
+    const withToken = await context.app.request("/api/users/me", {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(withToken.status).toBe(200);
+  });
+
   it("refuses to replace a password with the wrong current password", async () => {
     const reader = await createUserAndLogIn(context, {
       first_name: "Dorothy",

@@ -1,13 +1,32 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { startTestContext, stopTestContext, type TestContext } from "../test/context.js";
+import { eq } from "drizzle-orm";
+import { identityProviders, resourceInstallEvents, resources } from "./db/schemas/index.js";
+import { AnalyticsService } from "./features/analytics/analytics.service.js";
+import { createLogger } from "./lib/logger.js";
+import { deriveKeys, openClientSecret } from "./lib/secrets.js";
+import {
+  seedUserWithPassword,
+  signIn,
+  startTestContext,
+  stopTestContext,
+  TEST_AUTH_SECRET,
+  TEST_PUBLIC_URL,
+  type TestContext,
+} from "../test/context.js";
+
+interface ApiError {
+  error: { code: string; message: string; field?: string };
+}
+
+const PASSWORD = "correct-horse-battery";
 
 /**
- * Seam 1 — the API request boundary: no server listens, `app.request(...)`
- * calls the Hono app directly against a real Postgres and a fake storage
- * adapter, per the spec's testing decisions.
+ * Seam 1 — the whole app, asked about the things that are true of *every*
+ * response rather than of one route: the headers it carries, the bodies it
+ * refuses, and the origins it accepts a mutation from.
  */
-describe("API request boundary", () => {
+describe("responses every route shares (ISSUE-8)", () => {
   let container: StartedPostgreSqlContainer;
   let context: TestContext;
 
@@ -21,10 +40,269 @@ describe("API request boundary", () => {
     await stopTestContext(context, container);
   });
 
-  it("answers a health check via a real database round trip", async () => {
+  it("refuses to be framed, which is what a clickjacked admin control needs", async () => {
     const res = await context.app.request("/api/health");
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+  });
+
+  it("sends nothing but the origin as a Referer to a third party", async () => {
+    const res = await context.app.request("/api/health");
+    expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+  });
+
+  it("stops a browser guessing a content type it was given", async () => {
+    const res = await context.app.request("/api/health");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("carries the headers on a refusal too, not only on a success", async () => {
+    const res = await context.app.request("/api/resources/not-a-uuid");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+  });
+
+  it("does not claim HSTS over plain http, which a browser must ignore anyway", async () => {
+    // `TEST_PUBLIC_URL` is http. On an https deployment this header is sent —
+    // pinning localhost to https would break the next project served from it.
+    expect(new URL(TEST_PUBLIC_URL).protocol).toBe("http:");
+    const res = await context.app.request("/api/health");
+    expect(res.headers.get("strict-transport-security")).toBeNull();
+  });
+
+  it("sets no app-wide CSP, which would overwrite the Artifact sandbox", async () => {
+    // The one CSP here that is load-bearing is the one an Artifact file
+    // response sets on a publisher's own bytes (ISSUE-1), and `secureHeaders`
+    // applies its headers after the handler — so an app-wide policy would
+    // replace it.
+    const res = await context.app.request("/api/health");
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("gives every response a request id, so a report can be traced to its requests (ISSUE-19)", async () => {
+    const res = await context.app.request("/api/health");
+    expect(res.headers.get("x-request-id")).toBeTruthy();
+  });
+});
+
+describe("mutations and where they came from (ISSUE-17, ISSUE-20)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let cookie: string;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await seedUserWithPassword(context, {
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "ada@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    cookie = await signIn(context, "ada@example.com", PASSWORD);
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("refuses a form-shaped mutation from another origin, cookie and all", async () => {
+    // The shape a cross-site form post takes: `text/plain` rather than JSON,
+    // because a `<form>` cannot send an `application/json` body. The session
+    // cookie rode along on `SameSite=Lax` alone until this check existed.
+    const res = await context.app.request("/api/resources/skill/forged", {
+      method: "PUT",
+      headers: { cookie, origin: "https://attacker.example", "content-type": "text/plain" },
+      body: JSON.stringify({ description: "Forged.", body: "Body.\n" }),
+    });
+
+    expect(res.status).toBe(403);
+    const rows = await context.db.select().from(resources).where(eq(resources.name, "forged"));
+    expect(rows.length).toBe(0);
+  });
+
+  it("accepts the same mutation from the Registry's own origin", async () => {
+    const res = await context.app.request("/api/resources/skill/legitimate", {
+      method: "PUT",
+      headers: { cookie, origin: TEST_PUBLIC_URL, "content-type": "application/json" },
+      body: JSON.stringify({
+        description: "Published from the interface.",
+        body: "Body.\n",
+        files: [{ path: "SKILL.md", size: 6 }],
+      }),
+    });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok" });
+  });
+
+  it("refuses a body larger than any legitimate request", async () => {
+    // Bun would otherwise read up to 128 MB before validation ran, on a route
+    // whose largest honest body is a manifest and a SKILL.md.
+    const res = await context.app.request("/api/resources/skill/enormous", {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ description: "x".repeat(3 * 1024 * 1024), body: "Body.\n" }),
+    });
+
+    expect(res.status).toBe(413);
+  });
+});
+
+describe("install counts and who can run them up (ISSUE-23)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let analytics: AnalyticsService;
+  let id: string;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+    analytics = new AnalyticsService(context.db, createLogger("silent"));
+
+    await seedUserWithPassword(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    const cookie = await signIn(context, "grace@example.com", PASSWORD);
+
+    const res = await context.app.request("/api/resources/skill/counted-skill", {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        description: "Counts installs.",
+        body: "Body.\n",
+        files: [{ path: "SKILL.md", size: 6 }],
+      }),
+    });
+    id = ((await res.json()) as { skill: { id: string } }).skill.id;
+    await context.storage.put(`resources/${id}/SKILL.md`, new TextEncoder().encode("Body.\n"));
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function eventCount(): Promise<number> {
+    const rows = await context.db
+      .select()
+      .from(resourceInstallEvents)
+      .where(eq(resourceInstallEvents.resource_id, id));
+    return rows.length;
+  }
+
+  it("keeps one Install per client per day, however many times that client downloads", async () => {
+    // The download endpoint is unauthenticated, so before this the count —
+    // and the catalog's most-installed sort — was whatever anyone cared to
+    // make it with a loop.
+    const before = await eventCount();
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await analytics.recordInstall(id, "web", "client-a");
+    }
+
+    expect(await eventCount()).toBe(before + 1);
+  });
+
+  it("counts a different client separately", async () => {
+    const before = await eventCount();
+    await analytics.recordInstall(id, "cli", "client-b");
+    expect(await eventCount()).toBe(before + 1);
+  });
+
+  it("counts an Install it cannot identify, rather than dropping it", async () => {
+    // Behind a proxy this app has not been told to trust there is no client
+    // address to hash, and `app.request` has no socket at all. An uncounted
+    // Install would be a worse answer than a double-counted one.
+    const before = await eventCount();
+
+    const first = await context.app.request(`/api/resources/${id}/artifact`);
+    const second = await context.app.request(`/api/resources/${id}/artifact`);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    expect(await eventCount()).toBe(before + 2);
+  });
+});
+
+describe("who administers the Registry's logins (ISSUE-2)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await seedUserWithPassword(context, {
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "ada@example.com",
+      password: PASSWORD,
+      role: "superadmin",
+    });
+    await seedUserWithPassword(context, {
+      first_name: "Alan",
+      last_name: "Turing",
+      email: "alan@example.com",
+      password: PASSWORD,
+      role: "admin",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  const body = {
+    kind: "google",
+    display_name: "Google Workspace",
+    client_id: "client-id",
+    client_secret: "client-secret",
+    permitted_organisations: ["example.com"],
+    enabled: true,
+  };
+
+  it("refuses an Admin, for whom configuring a Provider is a way to outrank themselves", async () => {
+    const cookie = await signIn(context, "alan@example.com", PASSWORD);
+
+    const res = await context.app.request("/api/identity-providers", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as ApiError).error.code).toBe("forbidden");
+  });
+
+  it("refuses an Admin the list as well, which carries every Provider's configuration", async () => {
+    const cookie = await signIn(context, "alan@example.com", PASSWORD);
+    const res = await context.app.request("/api/identity-providers", { headers: { cookie } });
+    expect(res.status).toBe(403);
+  });
+
+  it("allows the Superadmin, and stores the client secret encrypted (ISSUE-9)", async () => {
+    const cookie = await signIn(context, "ada@example.com", PASSWORD);
+
+    const res = await context.app.request("/api/identity-providers", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(201);
+    // Never on the wire, encrypted or otherwise.
+    expect(JSON.stringify(await res.json())).not.toContain("client-secret");
+
+    // A database dump must not hand over the OAuth app's credentials either.
+    const [row] = await context.db.select().from(identityProviders).limit(1);
+    expect(row?.client_secret).not.toBe("client-secret");
+    expect(await openClientSecret(deriveKeys(TEST_AUTH_SECRET).clientSecrets, row?.client_secret ?? "")).toBe(
+      "client-secret",
+    );
   });
 });

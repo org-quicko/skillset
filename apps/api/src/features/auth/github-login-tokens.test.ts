@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { GITHUB_SCOPES } from "./github.js";
 import { createAuth } from "./instance.js";
 import { createLogger } from "../../lib/logger.js";
+import { deriveKeys } from "../../lib/secrets.js";
 import { accounts, connections, integrations, users, type UserRow } from "../../db/schemas/index.js";
 import {
   seedUserWithPassword,
@@ -60,7 +61,13 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
    */
   function instance() {
     return createAuth(
-      { db: context.db, secret: TEST_AUTH_SECRET, publicUrl: TEST_PUBLIC_URL, logger: createLogger("silent") },
+      {
+        db: context.db,
+        secret: TEST_AUTH_SECRET,
+        publicUrl: TEST_PUBLIC_URL,
+        logger: createLogger("silent"),
+        keys: deriveKeys(TEST_AUTH_SECRET),
+      },
       [],
     );
   }

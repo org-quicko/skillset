@@ -1,4 +1,4 @@
-import type { PresignOptions, StorageAdapter, StorageObject } from "./types.js";
+import type { PresignOptions, StorageAdapter, StorageObject, StorageObjectBody } from "./types.js";
 
 export interface S3Settings {
   bucket: string;
@@ -19,6 +19,19 @@ export interface S3Settings {
 }
 
 const DEFAULT_EXPIRY_SECONDS = 60;
+
+/**
+ * The S3 error codes that mean "no such object", as opposed to a
+ * misconfiguration. Anything else `open` rethrows rather than reporting as a
+ * missing file, so a wrong bucket or an expired credential is not served to
+ * callers as a 404 forever.
+ */
+const NOT_FOUND_CODES = new Set(["NoSuchKey", "NotFound", "ENOENT"]);
+
+function isNotFound(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && NOT_FOUND_CODES.has(code);
+}
 
 /**
  * The S3 StorageAdapter, built on Bun's own S3 client — no AWS SDK. Uploaded
@@ -49,6 +62,20 @@ export class S3StorageAdapter implements StorageAdapter {
     const file = this.client.file(key);
     if (!(await file.exists())) return null;
     return new Uint8Array(await file.arrayBuffer());
+  }
+
+  async open(key: string): Promise<StorageObjectBody | null> {
+    const file = this.client.file(key);
+    try {
+      // One HEAD, for both halves of what a streaming read needs: whether the
+      // object is there at all, and how big it is — which the caller checks
+      // against the Artifact limits before a single byte is fetched.
+      const stat = await file.stat();
+      return { size: stat.size, stream: () => file.stream() };
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
   }
 
   async exists(key: string): Promise<boolean> {

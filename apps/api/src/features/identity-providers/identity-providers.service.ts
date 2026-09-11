@@ -10,6 +10,7 @@ import { firstRow } from "../../db/rows.js";
 import { isUniqueViolation } from "../../db/pg-errors.js";
 import { identityProviders, type IdentityProviderRow } from "../../db/schemas/index.js";
 import type { Logger } from "../../lib/logger.js";
+import { sealSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { IdentityProviderKindTakenError, IdentityProviderNotFoundError } from "./identity-providers.errors.js";
 
 /**
@@ -44,17 +45,20 @@ function normaliseOrganisations(organisations: string[] | undefined): string[] {
   return result;
 }
 
-/** Configured Identity Providers: the Admin's view, and the public login-page list (ADR-0015, ADR-0017). */
+/** Configured Identity Providers: the Superadmin's view, and the public login-page list (ADR-0015, ADR-0017). */
 export class IdentityProvidersService {
   constructor(
     private readonly db: Database,
     private readonly logger: Logger,
+    /** Where `client_secret` is encrypted before it is stored (ISSUE-9). */
+    private readonly keys: DerivedKeys,
   ) {}
 
   /**
-   * Every configured Provider, enabled or not, oldest first — the Admin's
-   * view. Rows carry `client_secret`, so callers must shape the response
-   * through `IdentityProviderSchema`, which has no such field.
+   * Every configured Provider, enabled or not, oldest first — the
+   * Superadmin's view. Rows carry `client_secret`, encrypted, so callers must
+   * shape the response through `IdentityProviderSchema`, which has no such
+   * field.
    */
   async list(): Promise<IdentityProviderRow[]> {
     return this.db.select().from(identityProviders).orderBy(asc(identityProviders.created_at));
@@ -90,7 +94,7 @@ export class IdentityProvidersService {
    *
    * @param input - The Provider's kind, display name, credentials, permitted
    * organisations, and whether to enable it immediately.
-   * @returns The created row, including its `client_secret`.
+   * @returns The created row, including its `client_secret`, encrypted.
    * @throws IdentityProviderKindTakenError if a Provider of that kind already
    * exists (ADR-0017).
    * @example
@@ -116,7 +120,7 @@ export class IdentityProvidersService {
           kind: input.kind,
           display_name: input.display_name,
           client_id: input.client_id,
-          client_secret: input.client_secret,
+          client_secret: await sealSecret(this.keys.clientSecrets, input.client_secret),
           permitted_organisations: permittedOrganisations,
           enabled,
         })
@@ -173,7 +177,9 @@ export class IdentityProvidersService {
       .set({
         ...(input.display_name !== undefined ? { display_name: input.display_name } : {}),
         ...(input.client_id !== undefined ? { client_id: input.client_id } : {}),
-        ...(input.client_secret !== undefined ? { client_secret: input.client_secret } : {}),
+        ...(input.client_secret !== undefined
+          ? { client_secret: await sealSecret(this.keys.clientSecrets, input.client_secret) }
+          : {}),
         permitted_organisations: permittedOrganisations,
         enabled,
         updated_at: new Date(),

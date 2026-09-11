@@ -38,7 +38,7 @@ export function RevokeTokenDialog({
         onCancel={() => handleOpenChange(false)}
         cancelDisabled={revokeToken.isPending}
         submit={{
-          label: "Revoke token",
+          label: "Revoke Token",
           pendingLabel: "Revoking…",
           pending: revokeToken.isPending,
           variant: "destructive",

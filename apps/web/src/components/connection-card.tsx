@@ -79,7 +79,7 @@ function ConnectedAccountRow({
               <span className="sr-only">Actions for {entry.display_name}</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="min-w-44">
             {/* A trip to the provider, not through our callback: choosing
                 repositories grants no credential, so nothing here waits on
                 a return. */}

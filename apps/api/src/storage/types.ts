@@ -11,6 +11,21 @@ export interface StorageObject {
 }
 
 /**
+ * One stored object opened for reading: how big it is, and its bytes on
+ * demand.
+ *
+ * @remarks
+ * The size arrives *before* any bytes do, which is the whole point of this
+ * shape existing next to `get`. A read path can refuse an object that overran
+ * what an Artifact may hold, and answer with a `content-length`, without ever
+ * holding it in memory (ISSUE-5).
+ */
+export interface StorageObjectBody {
+  size: number;
+  stream(): ReadableStream<Uint8Array>;
+}
+
+/**
  * Standard object-storage contract. Only S3 is implemented (s3.ts); the
  * fake in fake.ts backs the API test harness (seam 1).
  *
@@ -30,6 +45,13 @@ export interface StorageObject {
 export interface StorageAdapter {
   put(key: string, body: Uint8Array, contentType?: string): Promise<void>;
   get(key: string): Promise<Uint8Array | null>;
+  /**
+   * Opens an object for streaming, or `null` if there is none at `key`.
+   * Prefer this to `get` wherever the bytes are only being passed on: `get`
+   * buffers the whole object, so it belongs to the zip path alone, which has
+   * to hold every file anyway.
+   */
+  open(key: string): Promise<StorageObjectBody | null>;
   exists(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
   list(prefix: string): Promise<StorageObject[]>;

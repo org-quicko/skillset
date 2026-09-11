@@ -56,7 +56,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
           {canPublish && (
             <Button variant="outline" onClick={() => (user ? setPublishOpen(true) : navigate(LOGIN_PATH))}>
               <UploadIcon />
-              Publish<span className="hidden sm:inline"> a skill</span>
+              Publish<span className="hidden sm:inline"> a Skill</span>
             </Button>
           )}
           {!user && <ThemeToggle />}
@@ -67,7 +67,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                   <AvatarFallback className="text-[11px]">{initials(user)}</AvatarFallback>
                 </Avatar>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuContent align="end" sideOffset={14} className="w-64">
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="flex flex-col items-center gap-3 px-3 pt-3 pb-4 text-center font-normal">
                     <Avatar className="size-12">

@@ -46,12 +46,16 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
             className="h-9"
           />
         </LabeledField>
-        <LabeledField label="New password" htmlFor="new_password" hint="At least 12 characters.">
+        <LabeledField
+          label="New password"
+          htmlFor="new_password"
+          hint={`At least ${PASSWORD_MIN_LENGTH} characters.`}
+        >
           <Input
             id="new_password"
             type="password"
             autoComplete="new-password"
-            minLength={12}
+            minLength={PASSWORD_MIN_LENGTH}
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             required

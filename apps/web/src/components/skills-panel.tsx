@@ -12,7 +12,7 @@ import type { SkillDirectoryFilters } from "@/hooks/use-skills";
 import { SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 
-const DEFAULT_SORT_BY: SkillDirectorySortField = "installs";
+const DEFAULT_SORT_BY: SkillDirectorySortField = "updated_at";
 const DEFAULT_SORT_ORDER: SkillDirectorySortOrder = "desc";
 
 /**

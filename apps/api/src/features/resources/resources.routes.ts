@@ -12,6 +12,7 @@ import { uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { ARTIFACT_ARCHIVE_CONTENT_TYPE } from "../../storage/keys.js";
 import type { InstallSource } from "../analytics/analytics.service.js";
+import { installFingerprint } from "../analytics/fingerprint.js";
 import { ResourceDirectoryQuerySchema } from "./resource-directory-query.js";
 import { ResourceNotFoundError } from "./resources.errors.js";
 import { PublishBodySchema, PublishParamsSchema, SetTagsBodySchema } from "./resources.schemas.js";
@@ -35,24 +36,37 @@ function isInstallSource(value: string): value is InstallSource {
 }
 
 /**
- * The Content-Security-Policy one Artifact file is served under, or
- * `undefined` for a type that needs none.
+ * The Content-Security-Policy every Artifact file is served under.
  *
  * @remarks
- * A publisher's file is served from this Registry's own origin, and two of
- * the types they can upload are ones a browser *executes*: HTML, and SVG,
- * which carries `<script>` like any other document. Displaying them inline is
- * the whole point of the preview, so the defence is what they may do once
- * displayed: no scripts, no plugins, nothing fetched from anywhere else, and
- * an opaque origin. A PDF is rendered by the browser's own viewer, which
- * `default-src 'none'` and `sandbox` between them stop from loading at all,
- * so it is left alone.
+ * A publisher's file is served from this Registry's own origin, and several of
+ * the types they can upload are ones a browser *executes* — HTML, SVG, and
+ * any XML document, which runs `<script>` in the XHTML namespace. Displaying
+ * them inline is the whole point of the preview, so the defence is what they
+ * may do once displayed: no scripts, no plugins, nothing fetched from
+ * anywhere else, and an opaque origin.
+ *
+ * Sent unconditionally rather than for the types known to be script-capable.
+ * That allowlist was the bug behind ISSUE-1: `.xml` was never on it, so an
+ * XHTML document uploaded as `x.xml` ran same-origin against an
+ * unauthenticated read, and every script-capable type added to `MEDIA_TYPES`
+ * later would have had to be remembered here too. The default is now
+ * "contained", and only PDF is exempt.
  */
-function contentSecurityPolicy(contentType: string): string | undefined {
-  if (contentType.startsWith("text/html") || contentType.startsWith("image/svg+xml")) {
-    return "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox";
-  }
-  return undefined;
+const ARTIFACT_FILE_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox";
+
+/**
+ * Whether an Artifact file's `content-type` is exempt from
+ * `ARTIFACT_FILE_CSP`.
+ *
+ * @remarks
+ * Only PDF. It is rendered by the browser's own viewer, which
+ * `default-src 'none'` and `sandbox` between them stop from loading at all,
+ * and that viewer is a sandbox of its own with no access to this origin's
+ * cookies or DOM.
+ */
+function isCspExempt(contentType: string): boolean {
+  return contentType.startsWith("application/pdf");
 }
 
 /**
@@ -94,10 +108,17 @@ export const resourcesRoutes = createRouter()
       return c.json(SkillPublishedSchema.parse(result));
     },
   )
-  .put(`/${ID}/tags`, requireAuth(), requireRole("writer"), resourceId, validate("json", SetTagsBodySchema), async (c) => {
-    const tags = await c.var.services.tags.setSkillTags(c.req.valid("param").id, c.req.valid("json").tags);
-    return c.json(SkillTagsSchema.parse({ tags }));
-  })
+  .put(
+    `/${ID}/tags`,
+    requireAuth(),
+    requireRole("writer"),
+    resourceId,
+    validate("json", SetTagsBodySchema),
+    async (c) => {
+      const tags = await c.var.services.tags.setSkillTags(c.req.valid("param").id, c.req.valid("json").tags);
+      return c.json(SkillTagsSchema.parse({ tags }));
+    },
+  )
   .delete(`/${ID}`, requireAuth(), requireRole("admin"), resourceId, async (c) => {
     await c.var.services.resources.remove(c.req.valid("param").id);
     return c.body(null, 204);
@@ -115,12 +136,11 @@ export const resourcesRoutes = createRouter()
   // bytes), and `nosniff` keeps a browser from guessing a different one.
   .get(`/${ID}/files/:path{.+}`, resourceId, async (c) => {
     const file = await c.var.services.resources.readArtifactFile(c.req.valid("param").id, c.req.param("path"));
-    const policy = contentSecurityPolicy(file.contentType);
-    return c.body(file.bytes as unknown as ArrayBuffer, 200, {
+    return c.body(file.stream, 200, {
       "content-type": file.contentType,
-      "content-length": String(file.bytes.byteLength),
+      "content-length": String(file.size),
       "x-content-type-options": "nosniff",
-      ...(policy ? { "content-security-policy": policy } : {}),
+      ...(isCspExempt(file.contentType) ? {} : { "content-security-policy": ARTIFACT_FILE_CSP }),
     });
   })
   // The zip is assembled per request from the stored files (ADR-0032) and
@@ -131,7 +151,12 @@ export const resourcesRoutes = createRouter()
     // `web` rather than refusing the download, so an old client keeps working.
     const rawSource = c.req.query("source");
     const source: InstallSource = rawSource && isInstallSource(rawSource) ? rawSource : "web";
-    const { name, bytes } = await c.var.services.resources.buildArtifactArchive(c.req.valid("param").id, source);
+    const id = c.req.valid("param").id;
+    const { name, bytes } = await c.var.services.resources.buildArtifactArchive(
+      id,
+      source,
+      installFingerprint(id, c.var.clientIp, c.req.header("user-agent")),
+    );
     // `name` is constrained to SKILL_NAME_PATTERN, so it is safe in the header unescaped.
     return c.body(bytes as unknown as ArrayBuffer, 200, {
       "content-type": ARTIFACT_ARCHIVE_CONTENT_TYPE,

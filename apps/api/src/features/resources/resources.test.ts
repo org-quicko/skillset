@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { extractSkillFiles, type Role } from "@skillset/shared";
+import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, type Role } from "@skillset/shared";
 import { asc, eq } from "drizzle-orm";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
@@ -1526,6 +1526,89 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
       expect(rows.length).toBe(0);
     });
   }
+
+  // ISSUE-1: `.xml` was served as `application/xml` with no policy at all, and
+  // a browser runs `<script>` in an XHTML document — so a publisher's `x.xml`
+  // ran on this Registry's own origin, against an unauthenticated read, with
+  // a session cookie attached to every fetch it made. The allowlist that
+  // caused it is gone: the policy is now sent for every extension, so a
+  // script-capable type added to `MEDIA_TYPES` later cannot be forgotten here.
+  const SANDBOX_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox";
+
+  it("sandboxes every Artifact file it serves, whatever the extension", async () => {
+    const files = {
+      "SKILL.md": "Body.\n",
+      "payload.xml": '<html xmlns="http://www.w3.org/1999/xhtml"><script>alert(1)</script></html>',
+      "payload.xhtml": "<html/>",
+      "payload.xsl": "<xsl:stylesheet/>",
+      "page.html": "<script>alert(1)</script>",
+      "icon.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>",
+      "notes.txt": "plain",
+      "bin/tool": "\u0000binary",
+    };
+    const id = await publishWithFiles("sandboxed-skill", files);
+
+    for (const path of Object.keys(files)) {
+      const res = await context.app.request(`/api/resources/${id}/files/${path}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
+
+  it("serves an XML document as text, so a browser reads it instead of running it", async () => {
+    const id = await publishWithFiles("xml-skill", {
+      "SKILL.md": "Body.\n",
+      "payload.xml": "<html xmlns=\"http://www.w3.org/1999/xhtml\"/>",
+    });
+
+    const res = await context.app.request(`/api/resources/${id}/files/payload.xml`);
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+  });
+
+  it("exempts only PDF, which the browser's own sandboxed viewer renders", async () => {
+    const id = await publishWithFiles("pdf-skill", { "SKILL.md": "Body.\n", "guide.pdf": "%PDF-1.4\n" });
+
+    const res = await context.app.request(`/api/resources/${id}/files/guide.pdf`);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  // ISSUE-5: a presigned PUT cannot be signed for a maximum length, so the
+  // bytes that arrive can be larger than the manifest declared — and both
+  // read paths are unauthenticated. Refusing from the size storage reports,
+  // before anything is read, is what keeps that from becoming the API's
+  // memory.
+  it("refuses to serve a stored file larger than an Artifact may be, before reading it", async () => {
+    const id = await publishWithFiles("oversized-skill", { "SKILL.md": "Body.\n" });
+    await context.storage.put(
+      `resources/${id}/huge.bin`,
+      new Uint8Array(ARTIFACT_MAX_UNCOMPRESSED_BYTES + 1),
+    );
+
+    const res = await context.app.request(`/api/resources/${id}/files/huge.bin`);
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as ApiError).error.code).toBe("artifact_too_large");
+  });
+
+  it("refuses to assemble a zip from stored files larger than an Artifact may be", async () => {
+    const id = await publishWithFiles("oversized-zip-skill", { "SKILL.md": "Body.\n" });
+    await context.storage.put(
+      `resources/${id}/huge.bin`,
+      new Uint8Array(ARTIFACT_MAX_UNCOMPRESSED_BYTES + 1),
+    );
+
+    const res = await context.app.request(`/api/resources/${id}/artifact`);
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as ApiError).error.code).toBe("artifact_too_large");
+
+    // Refused before a byte was read, so nothing counted as an Install.
+    const events = await context.db
+      .select()
+      .from(resourceInstallEvents)
+      .where(eq(resourceInstallEvents.resource_id, id));
+    expect(events.length).toBe(0);
+  });
 
   it("reads a file without recording an Install", async () => {
     const id = await publishWithFiles("previewed-skill", { "SKILL.md": "Body.\n" });

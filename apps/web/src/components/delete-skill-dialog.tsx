@@ -55,6 +55,7 @@ export function DeleteSkillDialog({
         <FormField htmlFor="delete-confirmation" label="Skill name">
           <Input
             id="delete-confirmation"
+            placeholder={name}
             value={confirmation}
             onChange={(event) => setConfirmation(event.target.value)}
             autoComplete="off"

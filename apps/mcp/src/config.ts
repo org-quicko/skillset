@@ -11,6 +11,17 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 const DEFAULT_SCOPE: Scope = "project";
 const DEFAULT_LOG_LEVEL: LogLevel = "warn";
 
+/**
+ * Whether a Token came from the command line rather than the environment.
+ *
+ * `--token <secret>` puts the secret in the process list, where every other
+ * process on the machine can read it, and in the `.mcp.json` that configures
+ * this server — which is usually checked in (ISSUE-22). `SKILLSET_TOKEN` is
+ * the documented way, and this is what lets the server say so out loud when
+ * the flag is used instead.
+ */
+export type TokenSource = "flag" | "environment" | "none";
+
 /** The server's fully resolved configuration: where to read from, who to install for, and how loud to be about it. */
 export interface McpConfig {
   registry: string;
@@ -27,6 +38,8 @@ export interface McpConfig {
    * `publish_skill` (ADR-0035) — reads still send no `authorization` header at all (ADR-0013).
    */
   token: string | undefined;
+  /** Where `token` came from — see {@link TokenSource}. */
+  tokenSource: TokenSource;
 }
 
 /** Raised by {@link parseConfig} when `argv`/`env` cannot be turned into a valid {@link McpConfig}. */
@@ -61,7 +74,8 @@ function readFlag(argv: readonly string[], flag: string): string | undefined {
  * @param argv - The flags to parse, e.g. `process.argv.slice(2)`.
  * @param env - The environment to read fallbacks from, e.g. `process.env`.
  * @returns The resolved `registry`, `scope`, `agentId` (`undefined` unless `--agent` was
- * given), `logLevel`, and `token` (`undefined` unless `--token` or `SKILLSET_TOKEN` was given).
+ * given), `logLevel`, `token` (`undefined` unless `--token` or `SKILLSET_TOKEN` was given), and
+ * `tokenSource`, which records which of the two it came from.
  * @throws ConfigError if `--registry` is absent and `SKILLSET_REGISTRY` is not set, if
  * `--scope` or `--log-level` is given a value outside their accepted sets, or if `--agent` is
  * given but names no Agent in the table.
@@ -101,9 +115,11 @@ export function parseConfig(argv: readonly string[], env: NodeJS.ProcessEnv): Mc
     throw new ConfigError(`--agent must be one of: ${AGENT_IDS.join(", ")}.`);
   }
 
-  const token = readFlag(argv, "--token") ?? env.SKILLSET_TOKEN;
+  const tokenFlag = readFlag(argv, "--token");
+  const token = tokenFlag ?? env.SKILLSET_TOKEN;
+  const tokenSource: TokenSource = tokenFlag ? "flag" : token ? "environment" : "none";
 
-  return { registry, scope: rawScope, agentId: rawAgent, logLevel: rawLogLevel, token };
+  return { registry, scope: rawScope, agentId: rawAgent, logLevel: rawLogLevel, token, tokenSource };
 }
 
 function isScope(value: string): value is Scope {

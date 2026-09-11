@@ -54,27 +54,21 @@ export async function readDroppedFiles(items: DataTransferItemList): Promise<Ski
 }
 
 /**
- * A folder chosen from a file dialog (`<input type="file" webkitdirectory>`)
- * — or, when a single markdown file was picked directly rather than through
- * that folder dialog, that file alone, renamed to `SKILL.md` (see
- * `readDroppedFiles`).
+ * A folder chosen from the publish form's folder dialog
+ * (`<input type="file" webkitdirectory>`), read via each file's
+ * `webkitRelativePath` — Chrome sets one on every file the dialog returns,
+ * including one sitting at the chosen folder's own root.
  *
  * @remarks
- * A file picked directly carries no `webkitRelativePath`; the folder dialog
- * sets one on every file, including one sitting at the chosen folder's own
- * root — that's what tells the two apart.
+ * A single markdown file can't be picked through this dialog (folder-picking
+ * mode shows no files at all, by design) — that case is drag-and-drop only,
+ * via `readDroppedFiles`.
  */
 export async function readPickedFiles(fileList: File[]): Promise<SkillFile[]> {
-  const [only] = fileList;
-  if (fileList.length === 1 && only && !only.webkitRelativePath && isMarkdownFile(only.name)) {
-    return [{ path: SKILL_FILE_NAME, bytes: new Uint8Array(await only.arrayBuffer()) }];
-  }
-
-  const files = await Promise.all(
+  return Promise.all(
     fileList.map(async (file) => ({
       path: file.webkitRelativePath || file.name,
       bytes: new Uint8Array(await file.arrayBuffer()),
     })),
   );
-  return files;
 }

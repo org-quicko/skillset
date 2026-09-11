@@ -14,7 +14,7 @@ const noopLogger: Logger = {
 describe("Skillset MCP server instructions", () => {
   it("tells the client the Registry is remote and unlisted, so it searches instead of using its own catalog", async () => {
     const server = createServer(
-      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined },
+      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined, tokenSource: "none" },
       fetch,
       noopLogger,
       { cwd: process.cwd(), env: {}, homeDir: process.cwd() },
@@ -38,7 +38,7 @@ describe("Skillset MCP server instructions", () => {
 
   it("distinguishes search_skills from the client's own Skill catalog in its description", async () => {
     const server = createServer(
-      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined },
+      { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined, tokenSource: "none" },
       fetch,
       noopLogger,
       { cwd: process.cwd(), env: {}, homeDir: process.cwd() },

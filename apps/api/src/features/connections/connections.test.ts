@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { ConnectionList, Role } from "@skillset/shared";
-import { symmetricDecrypt } from "better-auth/crypto";
 import { and, eq } from "drizzle-orm";
 import { connections, integrations, users, type IntegrationRow, type UserRow } from "../../db/schemas/index.js";
 import { createLogger } from "../../lib/logger.js";
+import { deriveKeys, openSecret } from "../../lib/secrets.js";
 import { ConnectionsService } from "./connections.service.js";
 import { IntegrationsService } from "../integrations/integrations.service.js";
 import {
@@ -16,6 +16,14 @@ import {
   TEST_AUTH_SECRET,
   type TestContext,
 } from "../../../test/context.js";
+
+/**
+ * Reads a stored grant back, under the key the service actually encrypts with
+ * — derived from the signing secret rather than the secret itself (ISSUE-9).
+ */
+function decryptGrant(stored: string | null | undefined): Promise<string> {
+  return openSecret(deriveKeys(TEST_AUTH_SECRET).connectionTokens, stored ?? "");
+}
 
 interface ApiError {
   error: { code: string; message: string; field?: string };
@@ -131,7 +139,7 @@ describe("Connections (ADR-0024)", () => {
     readerCookie = (await seedUser("reader@example.com", "reader")).cookie;
 
     logger = createLogger("silent");
-    integrationsService = new IntegrationsService(context.db, logger);
+    integrationsService = new IntegrationsService(context.db, logger, deriveKeys(TEST_AUTH_SECRET));
     service = new ConnectionsService(context.db, TEST_AUTH_SECRET, logger, integrationsService);
   }, 60_000);
 
@@ -422,12 +430,8 @@ describe("Connections (ADR-0024)", () => {
 
       const [row] = await context.db.select().from(connections);
       expect(row?.access_token).not.toBe("ghu_fresh_access");
-      expect(await symmetricDecrypt({ key: TEST_AUTH_SECRET, data: row?.access_token ?? "" })).toBe(
-        "ghu_fresh_access",
-      );
-      expect(await symmetricDecrypt({ key: TEST_AUTH_SECRET, data: row?.refresh_token ?? "" })).toBe(
-        "ghr_fresh_refresh",
-      );
+      expect(await decryptGrant(row?.access_token)).toBe("ghu_fresh_access");
+      expect(await decryptGrant(row?.refresh_token)).toBe("ghr_fresh_refresh");
     });
 
     it("records the expiries the provider reported", async () => {
@@ -553,8 +557,8 @@ describe("Connections (ADR-0024)", () => {
         integration_id: integration.id,
         external_account_id: "1",
         external_account_login: "ada-work",
-        access_token: await encrypt("ghu_stored_access"),
-        refresh_token: await encrypt("ghr_stored_refresh"),
+        access_token: await encryptLegacy("ghu_stored_access"),
+        refresh_token: await encryptLegacy("ghr_stored_refresh"),
         expires_at: new Date(Date.now() + 3_600_000),
         refresh_token_expires_at: new Date(Date.now() + 30 * 86_400_000),
         ...overrides,
@@ -597,8 +601,8 @@ describe("Connections (ADR-0024)", () => {
       );
 
       const [row] = await context.db.select().from(connections);
-      expect(await symmetricDecrypt({ key: TEST_AUTH_SECRET, data: row?.access_token ?? "" })).toBe("ghu_refreshed");
-      expect(await symmetricDecrypt({ key: TEST_AUTH_SECRET, data: row?.refresh_token ?? "" })).toBe("ghr_rotated");
+      expect(await decryptGrant(row?.access_token)).toBe("ghu_refreshed");
+      expect(await decryptGrant(row?.refresh_token)).toBe("ghr_rotated");
       expect(row?.expires_at?.getTime()).toBeGreaterThan(Date.now() + 60_000);
     });
 
@@ -614,9 +618,11 @@ describe("Connections (ADR-0024)", () => {
       expect(await service.accessTokenFor(writer.id, "github", provider.fetch)).toBe("ghu_refreshed");
 
       const [row] = await context.db.select().from(connections);
-      expect(await symmetricDecrypt({ key: TEST_AUTH_SECRET, data: row?.refresh_token ?? "" })).toBe(
-        "ghr_stored_refresh",
-      );
+      // Still readable under the *legacy* key, because this refresh did not
+      // rewrite it — which is the ISSUE-9 migration path working: a row
+      // written before per-purpose keys keeps opening until something
+      // re-encrypts it.
+      expect(await decryptLegacyGrant(row?.refresh_token)).toBe("ghr_stored_refresh");
       expect(row?.expires_at).not.toBeNull();
     });
 
@@ -856,7 +862,7 @@ describe("Connections (ADR-0024)", () => {
         integration_id: integration.id,
         external_account_id: "1",
         external_account_login: "x",
-        access_token: await encrypt("ghu_x"),
+        access_token: await encryptLegacy("ghu_x"),
       });
 
       // RESTRICT, not CASCADE: silently dropping a writer's credential when an
@@ -881,7 +887,7 @@ describe("Connections (ADR-0024)", () => {
         integration_id: integration.id,
         external_account_id: "1",
         external_account_login: "x",
-        access_token: await encrypt("ghu_x"),
+        access_token: await encryptLegacy("ghu_x"),
       });
 
       await context.db.delete(users).where(eq(users.id, doomed.id));
@@ -893,7 +899,23 @@ describe("Connections (ADR-0024)", () => {
 });
 
 /** Encrypts as the service does, so a seeded row is indistinguishable from a real one. */
-async function encrypt(value: string): Promise<string> {
+/**
+ * Encrypts a grant the way rows written before ISSUE-9 were: bare ciphertext
+ * under the signing secret itself, with no key derivation and no version
+ * envelope.
+ *
+ * @remarks
+ * Deliberately the old scheme, not the current one. Every seeded Connection
+ * here is therefore a pre-migration row, so the tests that read one back are
+ * also the check that `deriveKeys`' `legacySecret` fallback still opens it.
+ */
+async function encryptLegacy(value: string): Promise<string> {
   const { symmetricEncrypt } = await import("better-auth/crypto");
   return symmetricEncrypt({ key: TEST_AUTH_SECRET, data: value });
+}
+
+/** Reads back a grant written by {@link encryptLegacy}. */
+async function decryptLegacyGrant(stored: string | null | undefined): Promise<string> {
+  const { symmetricDecrypt } = await import("better-auth/crypto");
+  return symmetricDecrypt({ key: TEST_AUTH_SECRET, data: stored ?? "" });
 }

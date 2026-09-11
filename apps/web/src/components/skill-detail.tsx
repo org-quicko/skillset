@@ -119,14 +119,14 @@ export function SkillDetail({
             <TooltipTrigger asChild>
               <Button
                 variant="outline"
-                size="icon"
-                aria-label="Download skill"
+                aria-label="Download Skill"
                 onClick={() => download(data.id, data.name)}
               >
                 <DownloadIcon />
+                Download
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Download skill</TooltipContent>
+            <TooltipContent>Download Skill</TooltipContent>
           </Tooltip>
           {(canEditTags || canDelete) && (
             <DropdownMenu>
@@ -135,11 +135,11 @@ export function SkillDetail({
                   <EllipsisIcon />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className="min-w-44">
                 {canEditTags && (
                   <DropdownMenuItem onClick={() => setEditTagsOpen(true)}>
                     <PencilIcon />
-                    Edit tags
+                    Edit Tags
                   </DropdownMenuItem>
                 )}
                 {canDelete && (

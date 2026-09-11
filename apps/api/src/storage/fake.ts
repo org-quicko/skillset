@@ -1,4 +1,4 @@
-import type { PresignOptions, StorageAdapter, StorageObject } from "./types.js";
+import type { PresignOptions, StorageAdapter, StorageObject, StorageObjectBody } from "./types.js";
 
 /**
  * In-memory StorageAdapter for tests. Presigned URLs are deterministic
@@ -14,6 +14,21 @@ export class FakeStorageAdapter implements StorageAdapter {
 
   async get(key: string): Promise<Uint8Array | null> {
     return this.objects.get(key) ?? null;
+  }
+
+  async open(key: string): Promise<StorageObjectBody | null> {
+    const body = this.objects.get(key);
+    if (!body) return null;
+    return {
+      size: body.byteLength,
+      stream: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(body);
+            controller.close();
+          },
+        }),
+    };
   }
 
   async exists(key: string): Promise<boolean> {

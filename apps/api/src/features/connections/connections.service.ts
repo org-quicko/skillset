@@ -5,7 +5,7 @@ import {
   type ConnectableProvider,
   type GitProviderOAuth,
 } from "@skillset/shared";
-import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
+import { deriveKeys, openClientSecret, openSecret, sealSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
 import { firstRow } from "../../db/rows.js";
@@ -115,13 +115,21 @@ interface TokenResponse {
 export class ConnectionsService {
   constructor(
     private readonly db: Database,
-    /** Better Auth's signing secret: what the state is signed with and the tokens encrypted under. */
+    /**
+     * Better Auth's signing secret. Never used directly: the state's HMAC key
+     * and the key grants are encrypted under are each derived from it, so a
+     * value signed for one cannot be read as the other (ISSUE-9).
+     */
     private readonly secret: string,
     private readonly logger: Logger,
     private readonly integrations: IntegrationsService,
     /** Injected so a test can move it; the state's expiry is otherwise unreachable. */
     private readonly now: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.keys = deriveKeys(secret);
+  }
+
+  private readonly keys: DerivedKeys;
 
   /**
    * Begins a Connection: where to send the writer, and what to remember.
@@ -536,7 +544,7 @@ export class ConnectionsService {
       },
       body: new URLSearchParams({
         client_id: integration.client_id,
-        client_secret: integration.client_secret,
+        client_secret: await openClientSecret(this.keys.clientSecrets, integration.client_secret),
         ...grant,
       }).toString(),
       // A pinned host that follows a redirect is not a pinned host.
@@ -601,9 +609,9 @@ export class ConnectionsService {
   private async grantColumns(tokens: TokenResponse & { access_token: string }, existing?: ConnectionRow) {
     const now = this.now().getTime();
     return {
-      access_token: await symmetricEncrypt({ key: this.secret, data: tokens.access_token }),
+      access_token: await sealSecret(this.keys.connectionTokens, tokens.access_token),
       refresh_token: tokens.refresh_token
-        ? await symmetricEncrypt({ key: this.secret, data: tokens.refresh_token })
+        ? await sealSecret(this.keys.connectionTokens, tokens.refresh_token)
         : (existing?.refresh_token ?? null),
       expires_at: tokens.expires_in
         ? new Date(now + tokens.expires_in * 1_000)
@@ -745,13 +753,22 @@ export class ConnectionsService {
     return payload;
   }
 
-  /** HMAC-SHA256 over the state's body, hex, under the signing secret. */
+  /** HMAC-SHA256 over the state's body, hex, under the state's own derived key. */
   private sign(body: string): string {
-    return createHmac("sha256", this.secret).update(body).digest("hex");
+    return createHmac("sha256", this.keys.connectionState).update(body).digest("hex");
   }
 
-  /** Decrypts a stored token. Every row this table holds was written encrypted. */
+  /**
+   * Decrypts a stored token.
+   *
+   * @remarks
+   * Every row this table holds was written encrypted, but not all under the
+   * same key: rows written before ISSUE-9 used the signing secret directly,
+   * and `deriveKeys` keeps that as `legacySecret` so they still open. Such a
+   * row is re-encrypted under the derived key the next time the grant is
+   * refreshed.
+   */
   private decrypt(stored: string): Promise<string> {
-    return symmetricDecrypt({ key: this.secret, data: stored });
+    return openSecret(this.keys.connectionTokens, stored);
   }
 }

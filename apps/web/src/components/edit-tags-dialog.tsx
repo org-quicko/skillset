@@ -52,7 +52,7 @@ export function EditTagsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit tags</DialogTitle>
+          <DialogTitle>Edit Tags</DialogTitle>
           <DialogDescription>Tags help with browsing and filtering — {name} can carry as many as you like.</DialogDescription>
         </DialogHeader>
         {open && <TagsEditorBody id={id} name={name} tags={tags} />}

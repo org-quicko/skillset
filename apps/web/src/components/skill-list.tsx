@@ -16,6 +16,35 @@ const VISIBLE_TAG_COUNT = 2;
 
 const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
 
+/** One shimmering placeholder row matching the directory table's column layout. */
+function SkillListSkeletonRow({ index }: { index: number }) {
+  return (
+    <TableRow key={index} className="hover:bg-transparent">
+      <TableCell>
+        <Skeleton className="h-3 w-4" />
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1.5">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-14 rounded-full" />
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <Skeleton className="size-[26px] rounded-full" />
+          <Skeleton className="h-3.5 w-24" />
+        </div>
+      </TableCell>
+      <TableCell>
+        <Skeleton className="h-3 w-12" />
+      </TableCell>
+      <TableCell>
+        <Skeleton className="ml-auto h-3 w-10" />
+      </TableCell>
+    </TableRow>
+  );
+}
+
 /** The placeholder table shown while the first page of the directory loads. */
 function SkillListSkeleton() {
   return (
@@ -32,29 +61,7 @@ function SkillListSkeleton() {
         </TableHeader>
         <TableBody>
           {Array.from({ length: 8 }).map((_, index) => (
-            <TableRow key={index} className="hover:bg-transparent">
-              <TableCell>
-                <Skeleton className="h-3 w-4" />
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-1.5">
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-4 w-14 rounded-full" />
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Skeleton className="size-[26px] rounded-full" />
-                  <Skeleton className="h-3.5 w-24" />
-                </div>
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-3 w-12" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="ml-auto h-3 w-10" />
-              </TableCell>
-            </TableRow>
+            <SkillListSkeletonRow key={index} index={index} />
           ))}
         </TableBody>
       </Table>
@@ -167,13 +174,13 @@ export function SkillList({
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground">#</TableHead>
           <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Skill</TableHead>
-          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-44 text-center text-xs font-normal tracking-[0.08em] text-muted-foreground">
             Publisher
           </TableHead>
-          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-28 text-center text-xs font-normal tracking-[0.08em] text-muted-foreground">
             <SortHeader field="updated_at" label="Updated" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
-          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-24 text-center text-xs font-normal tracking-[0.08em] text-muted-foreground">
             <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
         </TableRow>
@@ -236,25 +243,24 @@ export function SkillList({
                 </div>
               </TableCell>
               <TableCell>
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 items-center justify-center gap-2">
                   <Avatar className="size-[26px] shrink-0">
                     <AvatarFallback className="text-[11px]">{initials(skill.published_by_name)}</AvatarFallback>
                   </Avatar>
                   <span className="truncate text-sm text-muted-foreground">{skill.published_by_name}</span>
                 </div>
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">{formatRelativeTime(skill.updated_at)}</TableCell>
-              <TableCell className="text-right tabular-nums">{skill.installs.toLocaleString()}</TableCell>
+              <TableCell className="text-center text-xs text-muted-foreground">
+                {formatRelativeTime(skill.updated_at)}
+              </TableCell>
+              <TableCell className="text-center tabular-nums">{skill.installs.toLocaleString()}</TableCell>
             </TableRow>
           );
         })}
+        {isFetchingNextPage && <SkillListSkeletonRow index={rows.length} />}
       </TableBody>
     </Table>
-      {hasNextPage && (
-        <div ref={sentinelRef} className="py-3 text-center text-sm text-muted-foreground">
-          {isFetchingNextPage ? "Loading more…" : ""}
-        </div>
-      )}
+      {hasNextPage && <div ref={sentinelRef} className="h-px" />}
     </div>
   );
 }

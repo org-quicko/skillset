@@ -13,8 +13,24 @@ const INVALID_TEXT_REPRESENTATION = "22P02";
 // foreign key, as opposed to the default `NO ACTION`.
 const RESTRICT_VIOLATION = "23001";
 
+/**
+ * Whether `error`, or anything it wraps, carries a Postgres error code.
+ *
+ * @remarks
+ * The chain is walked rather than the top-level error inspected, because
+ * Drizzle wraps every driver error in a `DrizzleQueryError` and hangs the
+ * real one off `cause`. Reading `error.code` alone therefore stopped
+ * recognising a unique or restrict violation the moment Drizzle started
+ * wrapping, which turned "that email is taken" into a 500.
+ */
 function hasCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === code;
+  for (let current: unknown = error; current !== null && typeof current === "object"; ) {
+    if ((current as { code?: string }).code === code) return true;
+    const next: unknown = (current as { cause?: unknown }).cause;
+    if (next === current) return false;
+    current = next;
+  }
+  return false;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { Integration } from "@skillset/shared";
+import { INTEGRATION_DESCRIPTION_MAX_LENGTH, type Integration } from "@skillset/shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
@@ -7,9 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateIntegration, useUpdateIntegration } from "@/hooks/use-integrations";
 import { apiErrorMessage } from "@/lib/api";
-
-/** How long a description may run — a sentence, not documentation. */
-const DESCRIPTION_MAX_LENGTH = 180;
 
 const GithubIcon = PROVIDER_ICONS.github;
 
@@ -100,7 +97,7 @@ export function IntegrationDialog({
       <FormDialogHeader
         icon={GithubIcon}
         title={isEdit ? `Edit ${integration.display_name}` : "Add GitHub app"}
-        description="An app you've already registered on GitHub. Its permissions and repository access are set there — skillset only stores how to reach it."
+        description="An app you've already registered on GitHub. Its permissions and repository access are set there — this Registry only stores how to reach it."
       />
 
       <FormDialogBody>
@@ -119,7 +116,7 @@ export function IntegrationDialog({
           label="Description"
           trailing={
             <span className="text-xs text-muted-foreground">
-              {description.length}/{DESCRIPTION_MAX_LENGTH}
+              {description.length}/{INTEGRATION_DESCRIPTION_MAX_LENGTH}
             </span>
           }
         >
@@ -127,7 +124,7 @@ export function IntegrationDialog({
             id="integration_description"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            maxLength={DESCRIPTION_MAX_LENGTH}
+            maxLength={INTEGRATION_DESCRIPTION_MAX_LENGTH}
             placeholder="Eg. Skills from the platform team's private repos, synced on every push to main."
             disabled={pending}
             className="min-h-[84px] resize-none"
@@ -177,7 +174,7 @@ export function IntegrationDialog({
       <FormDialogFooter
         onCancel={() => handleOpenChange(false)}
         submit={{
-          label: isEdit ? "Save changes" : "Add integration",
+          label: isEdit ? "Save changes" : "Add Integration",
           pending,
           disabled: !canSubmit,
           onClick: handleSubmit,

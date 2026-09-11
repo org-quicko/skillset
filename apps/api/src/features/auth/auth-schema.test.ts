@@ -3,7 +3,15 @@ import { getTableColumns } from "drizzle-orm";
 import { createAuth } from "./instance.js";
 import { createDatabase } from "../../db/client.js";
 import { createLogger } from "../../lib/logger.js";
-import { accounts, sessions, users, verifications } from "../../db/schemas/index.js";
+import {
+  accounts,
+  rateLimits,
+  sessions,
+  users,
+  verifications,
+  type IdentityProviderRow,
+} from "../../db/schemas/index.js";
+import { deriveKeys } from "../../lib/secrets.js";
 
 /** The Drizzle tables Better Auth is pointed at, by the model name it uses. */
 const TABLES: Record<string, Parameters<typeof getTableColumns>[0]> = {
@@ -11,6 +19,11 @@ const TABLES: Record<string, Parameters<typeof getTableColumns>[0]> = {
   sessions,
   accounts,
   verifications,
+  // Only a model at all because rate limiting counts in Postgres rather than
+  // in process memory (ISSUE-7) — Better Auth adds it to its own table list
+  // when `rateLimit.storage` is "database", which is exactly the kind of
+  // silently-added model this test exists to catch.
+  rate_limits: rateLimits,
 };
 
 // Never connected to. postgres.js does not dial until a query runs, and
@@ -38,7 +51,10 @@ const SECRET = "test-only-secret-with-enough-entropy-to-be-quiet";
 describe("Better Auth's model and the schema agree", () => {
   it("maps every field Better Auth expects onto a column that exists", async () => {
     const { db } = createDatabase(UNUSED_DATABASE_URL);
-    const auth = createAuth({ db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent") }, []);
+    const auth = createAuth(
+      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
+      [],
+    );
     const context = await auth.$context;
 
     const missing: string[] = [];
@@ -61,13 +77,16 @@ describe("Better Auth's model and the schema agree", () => {
 
   it("points every model at a table this schema actually declares", async () => {
     const { db } = createDatabase(UNUSED_DATABASE_URL);
-    const auth = createAuth({ db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent") }, []);
+    const auth = createAuth(
+      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
+      [],
+    );
     const context = await auth.$context;
 
     // Guards the other direction: a model renamed in a future upgrade would
     // otherwise silently resolve to nothing.
     const models = Object.values(context.tables).map((table) => table.modelName).sort();
-    expect(models).toEqual(["accounts", "sessions", "users", "verifications"]);
+    expect(models).toEqual(["accounts", "rate_limits", "sessions", "users", "verifications"]);
   });
 });
 
@@ -83,9 +102,27 @@ describe("Better Auth's model and the schema agree", () => {
  * broken with nothing in the schema to show it.
  */
 describe("account linking admits an existing User", () => {
-  async function contextFor() {
+  /** An enabled Provider row, with only the fields `trustedProvidersFor` reads. */
+  function provider(kind: IdentityProviderRow["kind"], permitted: string[]): IdentityProviderRow {
+    return {
+      id: `id-${kind}`,
+      kind,
+      display_name: kind,
+      client_id: "client-id",
+      client_secret: "client-secret",
+      permitted_organisations: permitted,
+      enabled: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+  }
+
+  async function contextFor(providers: IdentityProviderRow[] = []) {
     const { db } = createDatabase(UNUSED_DATABASE_URL);
-    const auth = createAuth({ db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent") }, []);
+    const auth = createAuth(
+      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
+      providers,
+    );
     return auth.$context;
   }
 
@@ -95,13 +132,32 @@ describe("account linking admits an existing User", () => {
     expect(context.options.account?.accountLinking?.enabled).toBe(true);
   });
 
-  it("trusts Google and Microsoft, because Entra asserts no email_verified and would never link", async () => {
-    const context = await contextFor();
-    expect(context.trustedProviders).toEqual(["google", "microsoft"]);
+  it("trusts a configured Google Provider, which asserts email_verified only for addresses it verified", async () => {
+    const context = await contextFor([provider("google", ["example.com"])]);
+    expect(context.trustedProviders).toEqual(["google"]);
+  });
+
+  it("trusts a Microsoft Provider pinned to exactly one tenant, whose addresses that tenant's admin provisions", async () => {
+    const context = await contextFor([provider("microsoft", ["11111111-2222-3333-4444-555555555555"])]);
+    expect(context.trustedProviders).toEqual(["microsoft"]);
+  });
+
+  // The nOAuth bug: Entra's `email` is a mutable, unverified attribute, so any
+  // tenant administrator could set it to a Superadmin's address and have the
+  // login attach to that account (ISSUE-2). Only a single pinned tenant —
+  // endpoint and `tid` both — makes that claim worth anything.
+  it("does not trust an ungated Microsoft Provider, whose email claim any tenant can set", async () => {
+    const context = await contextFor([provider("microsoft", [])]);
+    expect(context.trustedProviders).not.toContain("microsoft");
+  });
+
+  it("does not trust a multi-tenant Microsoft Provider either", async () => {
+    const context = await contextFor([provider("microsoft", ["tenant-a", "tenant-b"])]);
+    expect(context.trustedProviders).not.toContain("microsoft");
   });
 
   it("does not trust GitHub, whose address may be one GitHub never challenged (ADR-0018)", async () => {
-    const context = await contextFor();
+    const context = await contextFor([provider("github", ["acme"])]);
     expect(context.trustedProviders).not.toContain("github");
   });
 });

@@ -83,7 +83,7 @@
     /* The hero band and its dot grid. Light mode lightens (a faint grey
        section band), dark mode darkens — the search bar sits on top and needs
        to stay legibly separate from it in both. */
-    --hero: oklch(0.968 0.001 286.375);
+    --hero: #fafafa;
     --hero-dot: oklch(0.21 0.006 285.885 / 0.06);
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.141 0.005 285.823);

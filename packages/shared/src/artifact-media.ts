@@ -65,7 +65,14 @@ const MEDIA_TYPES: Record<string, ArtifactMediaType> = {
   conf: TEXT("plain"),
   env: TEXT("plain"),
   properties: TEXT("plain"),
-  xml: CODE("xml"),
+  // Plain text, not `application/xml`: a browser *renders* an XML document,
+  // and one in the XHTML namespace carries `<script>` that runs on whatever
+  // origin served it. The preview is a code viewer either way, so nothing is
+  // lost by labelling it as the text it is shown as.
+  xml: TEXT("plain"),
+  xsl: TEXT("plain"),
+  xhtml: TEXT("plain"),
+  svgz: BINARY("application/octet-stream"),
   graphql: TEXT("plain"),
   gql: TEXT("plain"),
   proto: TEXT("plain"),

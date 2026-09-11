@@ -140,7 +140,7 @@ export function IntegrationsCard() {
       {integrations.isSuccess && configured.length === 0 && (
         <Panel>
           <p className="text-sm text-muted-foreground">
-            No integrations configured. Importing is not available until you add one.
+            No Integrations configured. Importing is not available until you add one.
           </p>
         </Panel>
       )}

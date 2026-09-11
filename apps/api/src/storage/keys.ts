@@ -63,5 +63,16 @@ export const ARTIFACT_UPLOAD_CONTENT_TYPE = "application/octet-stream";
 /** An assembled Artifact is a zip; that is what the download endpoint serves. */
 export const ARTIFACT_ARCHIVE_CONTENT_TYPE = "application/zip";
 
-/** Long enough to transfer up to the 10 MiB an Artifact may be, short enough to be no use if leaked. */
+/**
+ * Long enough to transfer the 25 MiB of files an Artifact may hold, short
+ * enough to be no use if leaked.
+ *
+ * @remarks
+ * This window is the *only* bound on an upload's size. Bun's `presign` signs
+ * a method, a key, and a content type, with no way to sign a maximum
+ * `Content-Length`, so a writer holding a presigned URL can store an object
+ * larger than the size they declared (ISSUE-5). The consequence is closed on
+ * the read side instead: serving a file and assembling a zip both check the
+ * sizes storage reports before reading anything.
+ */
 export const ARTIFACT_UPLOAD_EXPIRY_SECONDS = 900;

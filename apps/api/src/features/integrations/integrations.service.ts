@@ -11,6 +11,7 @@ import { isInvalidIdSyntax, isRestrictViolation } from "../../db/pg-errors.js";
 import { connections, integrations, type IntegrationRow } from "../../db/schemas/index.js";
 import { ValidationError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logger.js";
+import { sealSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { IntegrationInUseError, IntegrationNotFoundError } from "./integrations.errors.js";
 
 /**
@@ -71,6 +72,8 @@ export class IntegrationsService {
   constructor(
     private readonly db: Database,
     private readonly logger: Logger,
+    /** Where `client_secret` is encrypted before it is stored (ISSUE-9). */
+    private readonly keys: DerivedKeys,
   ) {}
 
   /**
@@ -174,7 +177,7 @@ export class IntegrationsService {
         display_name: input.display_name,
         description: input.description ?? null,
         client_id: input.client_id,
-        client_secret: input.client_secret,
+        client_secret: await sealSecret(this.keys.clientSecrets, input.client_secret),
         app_slug: input.app_slug ?? null,
       })
       .returning();
@@ -249,7 +252,9 @@ export class IntegrationsService {
           ...(input.display_name !== undefined ? { display_name: input.display_name } : {}),
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.client_id !== undefined ? { client_id: input.client_id } : {}),
-          ...(input.client_secret !== undefined ? { client_secret: input.client_secret } : {}),
+          ...(input.client_secret !== undefined
+            ? { client_secret: await sealSecret(this.keys.clientSecrets, input.client_secret) }
+            : {}),
           ...(input.app_slug !== undefined ? { app_slug: input.app_slug } : {}),
           updated_at: new Date(),
         })

@@ -28,17 +28,26 @@ const CONNECTIONS_PATH = "/settings/connected-accounts";
 
 type Section = "profile" | "users" | "login" | "integrations" | "connections" | "tokens";
 
-// `canManageUsers` gates the Login and Integrations sections too: both decide
-// something about the Registry rather than about you — who may sign in, and
-// which apps it holds repository credentials through — and the API refuses
-// everyone below admin either way.
+// `canManageUsers` gates the Integrations section too: it decides something
+// about the Registry rather than about you — which apps it holds repository
+// credentials through — and the API refuses everyone below admin either way.
+//
+// OIDC is `superadmin`, matching the API (ISSUE-2). Configuring a Provider
+// decides who can obtain an account here and, for an ungated one, who an
+// external login may attach to, which made it the shortest path from a
+// compromised Admin account to the Superadmin's.
 //
 // Connections is gated on `writer` instead, and separately: it is the one
 // section here that is about the person rather than the Registry, and a reader
 // must not be invited to grant a credential they could never use (ADR-0024).
-function sectionFor(pathname: string, canManageUsers: boolean, canImport: boolean): Section {
+function sectionFor(
+  pathname: string,
+  canManageUsers: boolean,
+  canManageLogin: boolean,
+  canImport: boolean,
+): Section {
   if (pathname === USERS_PATH && canManageUsers) return "users";
-  if (pathname === LOGIN_PATH && canManageUsers) return "login";
+  if (pathname === LOGIN_PATH && canManageLogin) return "login";
   if (pathname === INTEGRATIONS_PATH && canManageUsers) return "integrations";
   if (pathname === CONNECTIONS_PATH && canImport) return "connections";
   if (pathname === TOKENS_PATH) return "tokens";
@@ -48,13 +57,14 @@ function sectionFor(pathname: string, canManageUsers: boolean, canImport: boolea
 export function SettingsPage({ user }: { user: User }) {
   const { pathname, navigate } = useRouter();
   const canManageUsers = roleMeets(user.role, "admin");
+  const canManageLogin = roleMeets(user.role, "superadmin");
   const canImport = roleMeets(user.role, "writer");
-  const section = sectionFor(pathname, canManageUsers, canImport);
+  const section = sectionFor(pathname, canManageUsers, canManageLogin, canImport);
 
   const tabs: { label: string; section: Section; path: string }[] = [
     { label: "Personal Info", section: "profile", path: PROFILE_PATH },
     ...(canManageUsers ? [{ label: "Team", section: "users" as const, path: USERS_PATH }] : []),
-    ...(canManageUsers ? [{ label: "OIDC", section: "login" as const, path: LOGIN_PATH }] : []),
+    ...(canManageLogin ? [{ label: "OIDC", section: "login" as const, path: LOGIN_PATH }] : []),
     ...(canManageUsers
       ? [{ label: "Integrations", section: "integrations" as const, path: INTEGRATIONS_PATH }]
       : []),
@@ -66,14 +76,14 @@ export function SettingsPage({ user }: { user: User }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center">
-        {/* `-ml-7` cancels the button's own `size-7` width, so it sits inside
-            the page's left padding gutter instead of pushing the heading —
-            the heading's text still starts flush with the header's wordmark. */}
+      <div className="flex items-center gap-2">
+        {/* `-ml-1` cancels the icon-sm button's own centering inset (the button box
+            is wider than the icon inside it), so the arrow glyph itself starts flush
+            with the page's left padding — lined up with the header wordmark's "S". */}
         <Button
           variant="ghost"
           size="icon-sm"
-          className="-ml-7"
+          className="-ml-1"
           aria-label="Back to skills"
           onClick={() => navigate("/")}
         >
@@ -110,7 +120,7 @@ export function SettingsPage({ user }: { user: User }) {
         >
           {section === "profile" && <ProfileCard user={user} />}
           {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
-          {section === "login" && canManageUsers && <IdentityProvidersCard />}
+          {section === "login" && canManageLogin && <IdentityProvidersCard />}
           {section === "integrations" && canManageUsers && <IntegrationsCard />}
           {section === "connections" && canImport && <ConnectionCard />}
           {section === "tokens" && <TokensCard />}

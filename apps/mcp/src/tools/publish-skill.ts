@@ -1,4 +1,4 @@
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import {
   apiErrorFrom,
@@ -25,6 +25,60 @@ export interface PublishSkillResult {
   name: string;
   id: string;
   published_at: string;
+  /** Every file that left this machine, and what they came to — see `publishSkill`. */
+  files: { path: string; size: number }[];
+  total_bytes: number;
+}
+
+/**
+ * Resolves `path` inside the project, refusing anything that escapes it.
+ *
+ * @remarks
+ * `path` is chosen by the *model*, not by the person running the Agent, and
+ * everything below the directory it names is uploaded to a Registry whose
+ * reads are unauthenticated (ADR-0013). An absolute path, or one climbing out
+ * with `../..`, was therefore a way to publish any readable directory on the
+ * machine — `~/.ssh` and `~/.aws` included — and a prompt injection inside a
+ * Skill the Agent had just installed is enough to ask for it (ISSUE-12).
+ *
+ * Checked after `realpath` on both sides, so a symlink pointing out of the
+ * project is refused too: comparing the strings before resolving them would
+ * be a check a link walks straight past. `realpath` on the project root also
+ * settles the macOS `/tmp` → `/private/tmp` case, where the two spellings of
+ * one directory would otherwise fail to match.
+ *
+ * @param cwd - The project root, from the MCP server's own working directory.
+ * @param path - The requested directory, relative to `cwd` unless absolute.
+ * @returns The resolved, contained directory.
+ * @throws Error naming `path` if it resolves outside `cwd`, or if either
+ * directory does not exist.
+ * @example
+ * ```ts
+ * await containedPath("/work/project", "skills/code-review"); // "/work/project/skills/code-review"
+ * await containedPath("/work/project", "../../etc"); // throws
+ * ```
+ */
+async function containedPath(cwd: string, path: string | undefined): Promise<string> {
+  const root = await realpath(cwd);
+  if (path === undefined) return root;
+
+  let target: string;
+  try {
+    target = await realpath(resolve(root, path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`No directory at "${path}".`);
+    }
+    throw error;
+  }
+
+  const inside = target === root || target.startsWith(root.endsWith(sep) ? root : root + sep);
+  if (!inside) {
+    throw new Error(
+      `"${path}" is outside this project (${root}). publish_skill only publishes a directory inside it.`,
+    );
+  }
+  return target;
 }
 
 /** Reads every file under `root`, skipping whatever `isExcludedPath` (shared) would exclude anyway. */
@@ -126,7 +180,13 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
     }),
   );
 
-  return { name: published.skill.name, id: published.skill.id, published_at: published.skill.published_at };
+  return {
+    name: published.skill.name,
+    id: published.skill.id,
+    published_at: published.skill.published_at,
+    files: bundle.files.map((file) => ({ path: file.path, size: file.bytes.byteLength })),
+    total_bytes: bundle.files.reduce((total, file) => total + file.bytes.byteLength, 0),
+  };
 }
 
 /**
@@ -135,7 +195,11 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
  * @param deps - The injected `fetch`, the Registry's URL, the writer's Token, and the
  * directory a relative `path` is resolved against.
  * @param path - Where the Skill lives, relative to `deps.cwd`; defaults to `deps.cwd` itself.
- * @returns The published Skill's name, id, and publish timestamp.
+ * Refused if it resolves outside `deps.cwd` (ISSUE-12).
+ * @returns The published Skill's name, id, publish timestamp, and the list of files that were
+ * uploaded with their sizes — so whoever is reading the Agent's output can see what left the
+ * machine rather than having to trust that it was what they meant.
+ * @throws Error naming `path` if it resolves outside `deps.cwd`, or if no directory is there.
  * @throws Error naming the directory when it holds no `SKILL.md` at its root — this tool
  * publishes exactly the Skill at `path`, not a discovery walk over several.
  * @throws Error naming the rule broken when the Skill fails the local validation rules
@@ -160,7 +224,7 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
  * ```
  */
 export async function publishSkill(deps: PublishSkillDeps, path?: string): Promise<PublishSkillResult> {
-  const targetPath = path ? resolve(deps.cwd, path) : deps.cwd;
+  const targetPath = await containedPath(deps.cwd, path);
 
   if (!(await holdsSkillFile(targetPath))) {
     throw new Error(`No ${SKILL_FILE_NAME} found at "${targetPath}" — point path at the Skill's own directory.`);

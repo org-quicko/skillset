@@ -36,7 +36,7 @@ export const usersRoutes = createRouter()
     requireRole("admin"),
     validate("json", UserCreateSchema, "first_name, last_name, email, and role are required."),
     async (c) => {
-      const result = await c.var.services.users.create(c.req.valid("json"));
+      const result = await c.var.services.users.create(c.var.user, c.req.valid("json"));
       return c.json(UserCreatedSchema.parse(result), 201);
     },
   )
@@ -56,7 +56,16 @@ export const usersRoutes = createRouter()
     requireAuth({ allowPendingPasswordChange: true }),
     validate("json", PasswordReplaceSchema, "current_password and new_password (at least 12 characters) are required."),
     async (c) => {
-      await c.var.services.users.replaceOwnPassword(c.var.user, c.req.valid("json"));
+      // The session making the request is the one kept alive. A request
+      // authenticated by a Token has none, and passes `undefined` — which
+      // revokes every session, the right answer when the password was
+      // replaced by something that is not a browser.
+      const credential = c.var.credential;
+      await c.var.services.users.replaceOwnPassword(
+        c.var.user,
+        c.req.valid("json"),
+        credential.kind === "session" ? credential.sessionId : undefined,
+      );
       return c.body(null, 204);
     },
   )

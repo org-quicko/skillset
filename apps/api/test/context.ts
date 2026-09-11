@@ -61,9 +61,44 @@ export async function startTestContext(): Promise<{
     betterAuthSecret: TEST_AUTH_SECRET,
     publicUrl: TEST_PUBLIC_URL,
     logger: createLogger("silent"),
+    // Off for the suite as a whole: every test signs in from the same
+    // address, which the credential limiter is built to refuse. Tests that
+    // are *about* the limiter build their own app with it on.
+    rateLimiting: false,
   });
 
-  return { context: { app, sql, db, storage }, container };
+  return { context: { app: withTestOrigin(app), sql, db, storage }, container };
+}
+
+/**
+ * Makes every request a test sends carry the Registry's own `origin`, unless
+ * it sets one itself.
+ *
+ * @remarks
+ * Mutating routes are guarded by an Origin check (`hono/csrf`, ISSUE-17), and
+ * a browser supplies that header on every non-GET request by itself — so a
+ * test that omits it is not reproducing a real request, it is reproducing one
+ * no client makes. Defaulting it here rather than in three hundred call sites
+ * keeps the tests about what they are testing; a test that is *about* the
+ * Origin check passes its own header and this leaves it alone.
+ *
+ * @param app - The app under test.
+ * @returns The same app, with `request` defaulting the header.
+ */
+function withTestOrigin(app: Hono): Hono {
+  const original = app.request.bind(app);
+
+  app.request = ((input: Parameters<Hono["request"]>[0], init?: RequestInit, ...rest: unknown[]) => {
+    // A `Request` carries its own headers and ignores `init`, so there is
+    // nothing to add to — every test passes a path.
+    if (typeof input !== "string") return original(input, init, ...(rest as []));
+
+    const headers = new Headers(init?.headers);
+    if (!headers.has("origin")) headers.set("origin", TEST_PUBLIC_URL);
+    return original(input, { ...init, headers }, ...(rest as []));
+  }) as Hono["request"];
+
+  return app;
 }
 
 /**

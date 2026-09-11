@@ -15,8 +15,8 @@
     "@hono/zod-validator": "0.9.1",
     "@skillset/shared": "workspace:*",
     "better-auth": "^1.7.2",
-    "drizzle-orm": "^0.36.4",
-    "hono": "^4.6.14",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.7",
     "node-cron": "^4.6.0",
     "openid-client": "^6.8.7",
     "pino": "^9.5.0",
@@ -27,7 +27,7 @@
   "devDependencies": {
     "@testcontainers/postgresql": "^10.16.0",
     "@types/bun": "^1.1.14",
-    "drizzle-kit": "^0.28.1",
+    "drizzle-kit": "^0.31.10",
     "typescript": "^5.7.2"
   }
 }

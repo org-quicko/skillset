@@ -13,6 +13,16 @@ export interface Config {
   publicUrl: string;
   /** Cron expression governing how often `skill_analytics` is refreshed (ADR-0012). */
   analyticsRefreshCron: string;
+  /**
+   * Addresses of the proxies this app sits behind, from `TRUSTED_PROXY_IPS`.
+   *
+   * Empty by default, and that default is the safe one: with no trusted proxy
+   * the client address is taken from the socket, and `x-forwarded-for` — a
+   * header the client writes — is ignored entirely (ISSUE-7). Set it to the
+   * load balancer's address, or the rate limiter and `sessions.ip_address`
+   * see the proxy rather than the client.
+   */
+  trustedProxies: string[];
   storage: {
     bucket: string;
     region: string | undefined;
@@ -38,7 +48,9 @@ export interface Config {
  * missing, if `PORT` is set to something other than a valid port number, if
  * `PUBLIC_URL` is set to something that is not an absolute http(s) URL, or if
  * `ANALYTICS_REFRESH_CRON` is set to something `node-cron` cannot parse as a
- * cron expression (ADR-0012).
+ * cron expression (ADR-0012). `TRUSTED_PROXY_IPS` is a comma-separated list
+ * and is not validated: an entry that is not an address simply never matches
+ * a hop, which fails closed.
  * @example
  * ```ts
  * const config = loadConfig();
@@ -94,6 +106,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     betterAuthSecret,
     publicUrl,
     analyticsRefreshCron,
+    trustedProxies: (env.TRUSTED_PROXY_IPS ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
     storage: {
       bucket,
       region: env.STORAGE_REGION,
