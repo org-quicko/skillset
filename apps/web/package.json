@@ -1,5 +1,5 @@
 {
-  "name": "@skillset/web",
+  "name": "@in-org-quicko/skillset-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,7 +12,7 @@
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",
     "@monaco-editor/react": "^4.7.0",
-    "@skillset/shared": "workspace:*",
+    "@in-org-quicko/skillset-shared": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8",

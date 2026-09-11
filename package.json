@@ -1,5 +1,5 @@
 {
-  "name": "skillset",
+  "name": "@in-org-quicko/skillset",
   "private": true,
   "version": "0.0.1",
   "workspaces": [
@@ -12,12 +12,12 @@
   "scripts": {
     "dev": "bun --filter @skillset/api dev",
     "prebuild": "bun run lint",
-    "build:web": "bun --filter @skillset/web build",
-    "build:api": "bun --filter @skillset/api build",
+    "build:web": "bun --filter @in-org-quicko/skillset-web build",
+    "build:api": "bun --filter @in-org-quicko/skillset-api build",
     "build:cli": "bun --filter @in-org-quicko/skillset-cli build",
     "build:mcp": "bun --filter @in-org-quicko/skillset-mcp build",
     "build": "bun run build:web && bun run build:api && bun run build:cli && bun run build:mcp",
-    "test": "bun run --filter @skillset/shared --filter @skillset/installer --filter @skillset/api --filter @in-org-quicko/skillset-cli --filter @in-org-quicko/skillset-mcp test",
+    "test": "bun run --filter @in-org-quicko/skillset-shared --filter @in-org-quicko/skillset-installation --filter @in-org-quicko/skillset-api --filter @in-org-quicko/skillset-cli --filter @in-org-quicko/skillset-mcp test",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint .",
     "audit": "bun audit --audit-level=high"
