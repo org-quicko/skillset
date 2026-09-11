@@ -58,7 +58,7 @@ export function ProfileCard({ user }: { user: User }) {
     <div className="flex flex-col gap-3.5">
       <div className="flex flex-col gap-1">
         <h2 className="text-sm font-medium">Personal Info</h2>
-        <p className="max-w-2xl text-xs text-muted-foreground">Your name and password.</p>
+        <p className="max-w-2xl text-xs text-muted-foreground">Manage your personal information.</p>
       </div>
 
       <Panel contentClassName="p-0">

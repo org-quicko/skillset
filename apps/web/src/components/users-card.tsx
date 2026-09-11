@@ -99,7 +99,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">Team</h2>
-          <p className="max-w-2xl text-xs text-muted-foreground">Create, promote, demote, and remove Users.</p>
+          <p className="max-w-2xl text-xs text-muted-foreground">Manage your team members and their roles.</p>
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
           <PlusIcon />

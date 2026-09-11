@@ -168,7 +168,7 @@ export function SkillsHome({
               type="text"
               value={term}
               onChange={(event) => setTerm(event.target.value)}
-              placeholder="Search skills, tags or publishers"
+              placeholder="Search skills"
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             {term && (
