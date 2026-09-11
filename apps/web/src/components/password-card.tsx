@@ -17,23 +17,28 @@ import { apiErrorMessage } from "@/lib/api";
 export function PasswordCard({ description }: { description?: ReactNode }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const replacePassword = useReplaceOwnPassword();
+
+  const mismatch = confirmPassword.length > 0 && confirmPassword !== newPassword;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (newPassword !== confirmPassword) return;
     replacePassword.mutate(
       { current_password: currentPassword, new_password: newPassword },
       {
         onSuccess: () => {
           setCurrentPassword("");
           setNewPassword("");
+          setConfirmPassword("");
         },
       },
     );
   }
 
   return (
-    <Panel className="w-full" title="Password" description={description ?? "Change your password at any time."}>
+    <Panel className="w-full" title="Password" description={description ?? "Change your password at any time."} uppercase={false}>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <LabeledField label="Current password" htmlFor="current_password">
           <Input
@@ -62,10 +67,27 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
             className="h-9"
           />
         </LabeledField>
+        <LabeledField label="Verify password" htmlFor="confirm_password">
+          <Input
+            id="confirm_password"
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            aria-invalid={mismatch}
+            required
+            className="h-9"
+          />
+        </LabeledField>
+        {mismatch && <p className="-mt-2 text-xs text-destructive">Passwords don't match.</p>}
         {replacePassword.isError && (
           <p className="text-sm text-destructive">{apiErrorMessage(replacePassword.error)}</p>
         )}
-        <Button type="submit" className="w-fit" disabled={replacePassword.isPending}>
+        <Button
+          type="submit"
+          className="w-fit"
+          disabled={replacePassword.isPending || newPassword.length < PASSWORD_MIN_LENGTH || newPassword !== confirmPassword}
+        >
           {replacePassword.isPending ? "Replacing…" : "Replace password"}
         </Button>
       </form>
@@ -87,18 +109,23 @@ export function ChangePasswordDialog({
 }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const replacePassword = useReplaceOwnPassword();
+
+  const mismatch = confirmPassword.length > 0 && confirmPassword !== newPassword;
 
   function handleOpenChange(next: boolean) {
     if (!next) {
       setCurrentPassword("");
       setNewPassword("");
+      setConfirmPassword("");
       replacePassword.reset();
     }
     onOpenChange(next);
   }
 
   function handleSubmit() {
+    if (newPassword !== confirmPassword) return;
     replacePassword.mutate(
       { current_password: currentPassword, new_password: newPassword },
       { onSuccess: () => handleOpenChange(false) },
@@ -134,6 +161,21 @@ export function ChangePasswordDialog({
             required
           />
         </FormField>
+        <FormField
+          htmlFor="dialog_confirm_password"
+          label="Verify password"
+          helperText={mismatch ? <span className="text-destructive">Passwords don't match.</span> : undefined}
+        >
+          <Input
+            id="dialog_confirm_password"
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            aria-invalid={mismatch}
+            required
+          />
+        </FormField>
         {replacePassword.isError && (
           <p className="text-sm text-destructive">{apiErrorMessage(replacePassword.error)}</p>
         )}
@@ -144,7 +186,8 @@ export function ChangePasswordDialog({
           label: "Change password",
           pendingLabel: "Changing…",
           pending: replacePassword.isPending,
-          disabled: currentPassword.length === 0 || newPassword.length < PASSWORD_MIN_LENGTH,
+          disabled:
+            currentPassword.length === 0 || newPassword.length < PASSWORD_MIN_LENGTH || newPassword !== confirmPassword,
           onClick: handleSubmit,
         }}
       />

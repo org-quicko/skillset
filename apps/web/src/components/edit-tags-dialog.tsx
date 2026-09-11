@@ -1,6 +1,7 @@
 import { validateTagName, type Tag } from "@in-org-quicko/skillset-shared";
 import { XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -152,21 +153,19 @@ function TagsEditorBody({ id, name, tags }: { id: string; name: string; tags: Ta
         {draftTags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {draftTags.map((tag) => (
-              <span
-                key={tag.name}
-                className="flex items-center gap-1.5 rounded-full bg-muted py-1 pr-1.5 pl-2.5 text-xs text-muted-foreground"
-              >
-                <span>{tag.name}</span>
+              <Badge key={tag.name} variant="secondary">
+                {tag.name}
                 <button
                   type="button"
+                  data-icon="inline-end"
                   disabled={setSkillTags.isPending}
                   onClick={() => removeTag(tag.name)}
                   aria-label={`Remove ${tag.name}`}
-                  className="flex rounded-full p-1 text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
+                  className="flex cursor-pointer rounded-sm p-0.5 transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96] disabled:cursor-not-allowed"
                 >
                   <XIcon className="size-3" />
                 </button>
-              </span>
+              </Badge>
             ))}
           </div>
         )}

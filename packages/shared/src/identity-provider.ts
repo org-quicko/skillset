@@ -203,7 +203,7 @@ export const IDENTITY_PROVIDER_GUIDANCE: Record<
   { label: string; organisation: string; organisationTooltip: string; organisationSupport: string }
 > = {
   google: {
-    label: "Google Workspace",
+    label: "Google",
     organisation: "Permitted Workspace domains",
     organisationTooltip:
       "Matched against the account's Workspace domain, not the email address's suffix. For example: " +

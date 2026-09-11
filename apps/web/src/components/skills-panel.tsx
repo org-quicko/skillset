@@ -78,6 +78,7 @@ export function SkillsPanel({ role }: { role: Role | null }) {
       filters={filters}
       onFiltersChange={handleFiltersChange}
       onSelect={(name) => navigate(skillPath(name))}
+      role={role}
     />
   );
 }

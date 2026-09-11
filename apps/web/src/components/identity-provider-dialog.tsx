@@ -150,7 +150,7 @@ export function IdentityProviderDialog({
                     disabled={pending}
                     onClick={() => setKind(option)}
                     className={cn(
-                      "flex flex-col items-center gap-2 rounded-lg border px-3 py-4 text-sm font-medium transition-colors",
+                      "flex cursor-pointer flex-col items-center gap-2 rounded-lg border px-3 py-4 text-sm font-medium transition-colors disabled:cursor-not-allowed",
                       selected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted/50",
                     )}
                   >

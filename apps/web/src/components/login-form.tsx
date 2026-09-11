@@ -9,6 +9,7 @@ import { useLoginProviders } from "@/hooks/use-identity-providers";
 import { ApiError } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "@/lib/use-router";
+import { cn } from "@/lib/utils";
 
 /**
  * Starts an external login. Better Auth answers with the provider's
@@ -20,8 +21,10 @@ function startExternalLogin(kind: string): void {
   void authClient.signIn.social({ provider: kind, callbackURL: "/" });
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">{children}</span>;
+function FieldLabel({ children, uppercase = true }: { children: React.ReactNode; uppercase?: boolean }) {
+  return (
+    <span className={cn("text-xs tracking-[0.1em] text-foreground", uppercase && "uppercase")}>{children}</span>
+  );
 }
 
 export function LoginForm() {
@@ -96,7 +99,7 @@ export function LoginForm() {
                   onClick={() => setReveal((value) => !value)}
                   className="absolute top-1/2 right-1 flex -translate-y-1/2 cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,scale] duration-150 ease-out outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96]"
                 >
-                  {reveal ? <EyeOffIcon strokeWidth={1.75} className="size-[18px]" /> : <EyeIcon strokeWidth={1.75} className="size-[18px]" />}
+                  {reveal ? <EyeIcon strokeWidth={1.75} className="size-[18px]" /> : <EyeOffIcon strokeWidth={1.75} className="size-[18px]" />}
                 </button>
               </div>
             </div>

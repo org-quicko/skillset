@@ -610,11 +610,11 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
                           Integration at all, since there is then nothing to
                           connect to or list. */}
                       {githubConnectable && !githubConnection && (
-                        <div className="flex flex-col items-center gap-3 px-6 py-7 text-center">
+                        <div className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 text-center">
                           <p className="text-sm text-pretty text-muted-foreground">
                             Connect GitHub to search your own repositories, public and private.
                           </p>
-                          <Button asChild variant="outline" size="sm">
+                          <Button asChild size="sm">
                             <a href={connectHref("github", githubConnectable.id)}>Connect GitHub</a>
                           </Button>
                         </div>
@@ -641,7 +641,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
                                       setQuery(repository.html_url);
                                       runImport(repository.html_url);
                                     }}
-                                    className="rounded-md"
+                                    className="cursor-pointer rounded-md"
                                   >
                                     <span className="truncate">{repository.full_name}</span>
                                   </CommandItem>

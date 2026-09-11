@@ -26,19 +26,24 @@ const RELATIVE_UNITS: { unit: Intl.RelativeTimeFormatUnit; seconds: number }[] =
   { unit: "minute", seconds: 60 },
 ]
 
+/** Sentence-cases a string by upper-casing its first character alone, leaving the rest — including any other capitals — untouched. */
+function sentenceCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
 /**
  * A moment as a short "3d ago" style string, in the viewer's locale — what the
- * Skill list's Updated column shows. Falls back to "just now" under a minute
- * and "never" for a null value.
+ * Skill list's Updated column shows. Falls back to "Just now" under a minute
+ * and "Never" for a null value.
  */
 export function formatRelativeTime(value: string | null): string {
-  if (value === null) return "never"
+  if (value === null) return "Never"
   const deltaSeconds = (Date.now() - new Date(value).getTime()) / 1000
   const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" })
   for (const { unit, seconds } of RELATIVE_UNITS) {
-    if (deltaSeconds >= seconds) return formatter.format(-Math.floor(deltaSeconds / seconds), unit)
+    if (deltaSeconds >= seconds) return sentenceCase(formatter.format(-Math.floor(deltaSeconds / seconds), unit))
   }
-  return "just now"
+  return "Just now"
 }
 
 const BYTE_UNITS = ["B", "KB", "MB"]
