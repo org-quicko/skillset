@@ -1,29 +1,20 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import type postgres from "postgres";
-import { createAuthRegistry } from "./auth/instance.js";
-import type { AuthVariables } from "./auth/middleware.js";
 import type { Database } from "./db/client.js";
-import { registerErrorHandler } from "./http/errors.js";
-import type { Logger } from "./logger.js";
-import { registerAuthRoutes } from "./routes/auth.js";
-import { registerConnectionRoutes } from "./routes/connections.js";
-import { registerIdentityProviderRoutes } from "./routes/identity-providers.js";
-import { registerImportRoutes } from "./routes/imports.js";
-import { registerIntegrationRoutes } from "./routes/integrations.js";
-import { registerResourcesRoutes } from "./routes/resources.js";
-import { registerSetupRoutes } from "./routes/setup.js";
-import { registerTagsRoutes } from "./routes/tags.js";
-import { registerUsersRoutes } from "./routes/users.js";
-import { AnalyticsService } from "./services/analytics.js";
-import { ConnectionsService } from "./services/connections.js";
-import { ImportsService } from "./services/imports.js";
-import { IntegrationsService } from "./services/integrations.js";
-import { IdentityProvidersService } from "./services/identity-providers.js";
-import { ResourcesService } from "./services/resources.js";
-import { SetupService } from "./services/setup.js";
-import { TagsService } from "./services/tags.js";
-import { UsersService } from "./services/users.js";
+import { authRoutes } from "./features/auth/auth.routes.js";
+import { connectionsRoutes } from "./features/connections/connections.routes.js";
+import { identityProvidersRoutes } from "./features/identity-providers/identity-providers.routes.js";
+import { importsRoutes } from "./features/imports/imports.routes.js";
+import { integrationsRoutes } from "./features/integrations/integrations.routes.js";
+import { resourcesRoutes } from "./features/resources/resources.routes.js";
+import { setupRoutes } from "./features/setup/setup.routes.js";
+import { tagsRoutes } from "./features/tags/tags.routes.js";
+import { usersRoutes } from "./features/users/users.routes.js";
+import { notFound, onError } from "./lib/errors.js";
+import { createRouter } from "./lib/factory.js";
+import type { Logger } from "./lib/logger.js";
+import { buildServices } from "./services.js";
 import type { StorageAdapter } from "./storage/types.js";
 
 export interface AppDependencies {
@@ -40,14 +31,47 @@ export interface AppDependencies {
 }
 
 /**
- * Builds the fully wired Hono app: constructs each service, mounts every
- * resource's routes under `/api`, registers the central error handler, and —
- * when a built web interface is available — serves it with an SPA fallback.
+ * Builds the API: every feature's routes under `/api`, sharing one set of
+ * services, one error handler, and one middleware stack.
  *
- * @remarks
- * The composition root. Every service is constructed exactly once here and
- * handed only to the routes that use it, so a route module names the services
- * it depends on rather than receiving the whole application's dependencies.
+ * @param deps - The database, storage adapter, signing secret, public URL, and logger.
+ * @returns The API's router, before it is mounted under `/api`.
+ */
+function createApi(deps: AppDependencies) {
+  const services = buildServices(deps);
+
+  const api = createRouter()
+    .use(async (c, next) => {
+      c.set("services", services);
+      c.set("publicUrl", deps.publicUrl);
+      await next();
+    })
+    .get("/health", async (c) => {
+      await deps.sql`SELECT 1`;
+      return c.json({ status: "ok" });
+    })
+    .route("/setup", setupRoutes)
+    .route("/auth", authRoutes)
+    .route("/identity-providers", identityProvidersRoutes)
+    .route("/integrations", integrationsRoutes)
+    .route("/connections", connectionsRoutes)
+    .route("/imports", importsRoutes)
+    .route("/users", usersRoutes)
+    .route("/resources", resourcesRoutes)
+    .route("/tags", tagsRoutes);
+
+  // Registered before `app.route("/api", api)` below: Hono wraps a sub-app's
+  // routes in its error handler at the moment the sub-app is mounted.
+  api.onError(onError(deps.logger));
+  return api;
+}
+
+/** The API's routes, for a typed client (`hc<ApiType>`) to be built against. */
+export type ApiType = ReturnType<typeof createApi>;
+
+/**
+ * Builds the fully wired app: the API under `/api`, and — when a built web
+ * interface is available — the web interface, with an SPA fallback.
  *
  * @param deps - The database, storage adapter, signing secret, public URL,
  * logger, and optional web interface root.
@@ -59,53 +83,11 @@ export interface AppDependencies {
  */
 export function createApp(deps: AppDependencies): Hono {
   const app = new Hono();
+  app.route("/api", createApi(deps));
 
-  // One registry for the whole app, so every route shares the same cached
-  // Better Auth instance and one Provider edit rebuilds it once (ADR-0019).
-  const auth = createAuthRegistry({
-    db: deps.db,
-    secret: deps.betterAuthSecret,
-    publicUrl: deps.publicUrl,
-    logger: deps.logger,
-  });
-
-  const analytics = new AnalyticsService(deps.db, deps.logger);
-  const tags = new TagsService(deps.db, deps.logger);
-  const resources = new ResourcesService(deps.db, deps.storage, deps.logger, tags, analytics);
-  const users = new UsersService(deps.db, deps.logger);
-  const setup = new SetupService(deps.db, deps.logger);
-  const identityProviders = new IdentityProvidersService(deps.db, deps.logger);
-  const integrations = new IntegrationsService(deps.db, deps.logger);
-  const connections = new ConnectionsService(deps.db, deps.betterAuthSecret, deps.logger, integrations);
-  const imports = new ImportsService(deps.logger, integrations, connections);
-
-  // What `requireAuth`/`requireRole` need, and nothing else — the role is
-  // re-read from the database on every request (ADR-0005).
-  const authDeps = { db: deps.db, auth };
-
-  // One shared app that each resource's register function mutates in place
-  // — routes aren't split across per-resource sub-apps composed with
-  // `.route()`, so there's a single place a request for a given path is
-  // ever matched.
-  const api = new Hono<{ Variables: AuthVariables }>();
-  registerErrorHandler(api, deps.logger);
-
-  api.get("/health", async (c) => {
-    await deps.sql`SELECT 1`;
-    return c.json({ status: "ok" });
-  });
-
-  registerSetupRoutes(api, { setup, auth });
-  registerAuthRoutes(api, { identityProviders, auth });
-  registerIdentityProviderRoutes(api, { ...authDeps, identityProviders });
-  registerIntegrationRoutes(api, { ...authDeps, integrations });
-  registerConnectionRoutes(api, { ...authDeps, connections, publicUrl: deps.publicUrl });
-  registerImportRoutes(api, { ...authDeps, imports });
-  registerUsersRoutes(api, { ...authDeps, users });
-  registerResourcesRoutes(api, { ...authDeps, resources, tags });
-  registerTagsRoutes(api, { ...authDeps, tags });
-
-  app.route("/api", api);
+  // Only an `/api` path that no route matched reaches here: every other miss
+  // is either a static file or the SPA's own route.
+  app.notFound((c) => (c.req.path.startsWith("/api/") ? notFound(c) : c.text("404 Not Found", 404)));
 
   if (deps.webRoot) {
     const webRoot = deps.webRoot;
@@ -116,7 +98,7 @@ export function createApp(deps: AppDependencies): Hono {
       // A route under /api that didn't match above is a genuine 404, not a
       // client-side route — never mask it with the SPA shell.
       if (c.req.path.startsWith("/api/")) {
-        return c.notFound();
+        return notFound(c);
       }
       // A miss with a file extension was a real static-asset request that
       // serveStatic already couldn't find (e.g. a stale hashed asset after a

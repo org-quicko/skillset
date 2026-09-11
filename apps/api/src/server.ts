@@ -3,8 +3,8 @@ import cron from "node-cron";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations, waitForDatabase } from "./db/migrate.js";
-import { createLogger } from "./logger.js";
-import { AnalyticsService } from "./services/analytics.js";
+import { createLogger } from "./lib/logger.js";
+import { AnalyticsService } from "./features/analytics/analytics.service.js";
 import { S3StorageAdapter } from "./storage/s3.js";
 import { createApp } from "./app.js";
 

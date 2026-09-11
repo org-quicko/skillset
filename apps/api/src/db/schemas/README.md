@@ -10,10 +10,10 @@ models, not ours (ADR-0016). Their column set comes from the CLI, not from
 hand-editing:
 
 ```bash
-bunx @better-auth/cli@latest generate --config src/auth/cli.ts --output ./src/db/generated-auth-schema.ts
+bunx @better-auth/cli@latest generate --config src/features/auth/cli.ts --output ./src/db/generated-auth-schema.ts
 ```
 
-`src/auth/cli.ts` exists only to give the CLI an `auth` export to read; the
+`src/features/auth/cli.ts` exists only to give the CLI an `auth` export to read; the
 generated file is a throwaway to diff against, not something to commit.
 
 The CLI cannot know three things about this schema, so its output is reconciled

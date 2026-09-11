@@ -27,7 +27,7 @@ simpler and has no staleness window, but keeps no history and cannot answer "ins
 the web" or "installs this week" without a schema change. `REFRESH MATERIALIZED VIEW CONCURRENTLY` was
 considered over a plain refresh, to avoid blocking reads during the refresh; rejected for now as
 complexity (an extra unique index, a more awkward first-refresh) this scale doesn't need yet — see the
-refresh statement in `apps/api/src/services/analytics.ts` if that changes.
+refresh statement in `apps/api/src/features/analytics/analytics.service.ts` if that changes.
 
 ## Consequences
 

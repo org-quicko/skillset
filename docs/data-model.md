@@ -319,7 +319,7 @@ the plain table this view replaced had. Every read path (a Resource's detail rea
 list-summary read) treats "no row" and "a row with `install_count = 0`" identically.
 
 **This view is never read live.** It is recomputed only by `refreshInstallCounts`
-(`apps/api/src/services/analytics.ts`) — a plain `REFRESH MATERIALIZED VIEW`, called on every tick
+(`apps/api/src/features/analytics/analytics.service.ts`) — a plain `REFRESH MATERIALIZED VIEW`, called on every tick
 of a schedule (`ANALYTICS_REFRESH_CRON`, a `node-cron` expression, default every 30 seconds) that
 is wired up only in `server.ts`, never inside request handling. Every install count shown
 anywhere — a Skill's own page, the Skill list, `sort_by=installs` — can therefore lag reality by up
@@ -550,7 +550,7 @@ and ADR-0024 disagree, and the ADR is right.
 ## `sessions`, `accounts`, and `verifications`
 
 These three belong to Better Auth (ADR-0016). Their columns are its model, mapped back to this
-repo's snake_case in `apps/api/src/auth/instance.ts` rather than letting one library's naming
+repo's snake_case in `apps/api/src/features/auth/instance.ts` rather than letting one library's naming
 break the convention that a column, its TS key, and the wire all agree. Nothing in this
 codebase writes to them directly.
 
