@@ -24,7 +24,3 @@ All the public method should have tsdoc comments which describes all the argumen
 Exempt from the above: constructors, and methods whose body is a single statement. Document these only when there is something to say that the signature does not already say — a constraint, a gotcha, a reason. A docstring that restates the name, the parameter names, or the return type is noise; leave it out. The class or function's own docstring still carries the summary.
 
 Always use claude in chrome for verification and debugging
-
-Use router instead of useState for navigating between pages
-
-To use python use `py` instead of `python3` or `python` in bash
