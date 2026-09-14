@@ -6,3 +6,5 @@ dist/
 .claude
 .agents
 .scratch
+docs/agents
+.mcp.json
