@@ -18,64 +18,27 @@ const FORWARDED_FOR = "x-forwarded-for";
  * chose, so a password-guessing client could pick a fresh address per request
  * and never fill a bucket (ISSUE-7).
  *
- * Two things fix that. The address is resolved here, from the socket when no
- * proxy is trusted and from the furthest believable hop of the forwarded
- * chain when one is; and the header is then *overwritten* with that single
- * address, which is what makes the fix reach Better Auth. Better Auth reads
- * the client IP from headers alone and has no access to the socket, so
- * handing it a header this app has already vouched for is the only way to
- * give it a trustworthy address — and rewriting rather than appending means a
- * value the client supplied cannot survive to be read.
+ * The address is always taken from the socket, never from the forwarded
+ * chain, and the header is then *overwritten* with that single address, which
+ * is what makes the fix reach Better Auth. Better Auth reads the client IP
+ * from headers alone and has no access to the socket, so handing it a header
+ * this app has already vouched for is the only way to give it a trustworthy
+ * address — and rewriting rather than appending means a value the client
+ * supplied cannot survive to be read.
  *
- * `trustedProxies` is exact-match on the nearest hop rather than CIDR: a
- * deployment either terminates at a known load balancer or it does not, and
- * range matching here would be a second, worse copy of the one inside Better
- * Auth (`@better-auth/core/utils/ip`).
- *
- * @param trustedProxies - Addresses of the proxies this app sits behind.
- * Empty — the default — means no forwarded header is believed at all and the
- * socket address is used.
  * @returns A middleware handler that sets `clientIp` on the context.
  * @example
  * ```ts
- * app.use("*", clientIp(config.trustedProxies));
+ * app.use("*", clientIp());
  * ```
  */
-export function clientIp(trustedProxies: readonly string[]) {
-  const trusted = new Set(trustedProxies);
-
+export function clientIp() {
   return createMiddleware<ClientIpEnv>(async (c, next) => {
-    const address = resolve(c, trusted);
+    const address = socketAddress(c);
     c.set("clientIp", address);
     rewriteForwardedFor(c, address);
     await next();
   });
-}
-
-/**
- * The client's address: the furthest hop of the forwarded chain this app has
- * reason to believe when it is behind a trusted proxy, and the socket's peer
- * otherwise.
- */
-function resolve(c: Context, trusted: Set<string>): string | undefined {
-  const socket = socketAddress(c);
-
-  if (trusted.size === 0) return socket;
-  // The chain only means anything if the hop that wrote it is one we trust.
-  if (!socket || !trusted.has(socket)) return socket;
-
-  const chain = (c.req.header(FORWARDED_FOR) ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  // Right to left, past every trusted proxy: the first address that is not
-  // one of ours is the furthest hop anything here can vouch for.
-  for (let index = chain.length - 1; index >= 0; index -= 1) {
-    const hop = chain[index] as string;
-    if (!trusted.has(hop)) return hop;
-  }
-  return socket;
 }
 
 /** `undefined` under `app.request(...)`, which has no socket behind it — every test, and nothing else. */

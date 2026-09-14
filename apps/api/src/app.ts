@@ -72,12 +72,6 @@ export interface AppDependencies {
   /** Absolute path to the built web interface's static assets, if any. */
   webRoot?: string;
   /**
-   * Addresses of the proxies this app sits behind, if any. Empty means no
-   * `x-forwarded-for` header is believed and the socket address is used
-   * (ISSUE-7).
-   */
-  trustedProxies?: readonly string[];
-  /**
    * Whether to limit request rates. Defaults to on; the test harness turns it
    * off, because a suite that signs in repeatedly from one address is exactly
    * what a credential limiter is built to refuse.
@@ -150,7 +144,7 @@ export function createApp(deps: AppDependencies): Hono {
   // router: every one of these applies to the whole app, and each handler
   // added to the API's chained builder multiplies its per-route generic
   // inference — enough of them and `tsc` runs out of type instantiations.
-  app.use("*", requestId(), clientIp(deps.trustedProxies ?? []), requestLog(deps.logger));
+  app.use("*", requestId(), clientIp(), requestLog(deps.logger));
   app.use("*", securityHeaders(deps.publicUrl));
   if (deps.rateLimiting !== false) app.use("/api/*", rateLimit(RATE_LIMIT));
   app.use("/api/*", bodyLimit({ maxSize: MAX_BODY_BYTES }));

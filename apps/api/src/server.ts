@@ -50,7 +50,6 @@ async function main() {
     webRoot,
     betterAuthSecret: config.betterAuthSecret,
     publicUrl: config.publicUrl,
-    trustedProxies: config.trustedProxies,
     storageOrigin,
     logger,
   });

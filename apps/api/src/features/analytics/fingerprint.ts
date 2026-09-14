@@ -18,11 +18,10 @@ import { createHash } from "node:crypto";
  * Resource's own id as well, so the same digest cannot be recognised across
  * Resources.
  *
- * Returns `undefined` when the address is unknown — behind a proxy this app
- * has not been told to trust (see `clientIp`), typically. Those Installs are
- * counted without deduplication rather than dropped: an uncounted Install is
- * a worse answer than a double-counted one, and the honest fix is to
- * configure `TRUSTED_PROXY_IPS`.
+ * Returns `undefined` when the address is unknown — behind a proxy, since
+ * `clientIp` only ever resolves the socket address, typically. Those
+ * Installs are counted without deduplication rather than dropped: an
+ * uncounted Install is a worse answer than a double-counted one.
  *
  * @param resourceId - The Resource being installed.
  * @param clientIp - The client's address, as `clientIp` middleware resolved it.
