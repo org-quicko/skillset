@@ -25,8 +25,8 @@ function initials(user: User): string {
 
 /**
  * The site's top navigation: the wordmark, the Publish a skill action (shown to every
- * visitor able to publish, signed in or not), and either a Sign in link (with a standalone
- * theme toggle) or the signed-in User's menu, which folds the theme control into itself.
+ * visitor able to publish, signed in or not), a standalone theme toggle for signed-out
+ * visitors, and the signed-in User's menu, which folds the theme control into itself.
  *
  * @param user - The signed-in User, or `null`/`undefined` for a signed-out visitor.
  * @param onOpenSettings - Called when the User picks Edit personal info or Settings from their menu.
@@ -98,11 +98,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : (
-            <Button size="sm" onClick={() => navigate(LOGIN_PATH)}>
-              Sign in
-            </Button>
-          )}
+          ) : null}
         </div>
       </div>
 
