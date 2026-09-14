@@ -1,6 +1,6 @@
 import { AGENT_IDS, type AgentId } from "@in-org-quicko/skillset-shared";
 
-/** Where an install goes: `add_skills`'s target Scope. */
+/** Where an install goes: `install_skills`'s target Scope. */
 export const SCOPES = ["project", "user"] as const;
 export type Scope = (typeof SCOPES)[number];
 

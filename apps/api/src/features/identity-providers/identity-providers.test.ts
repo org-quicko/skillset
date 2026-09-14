@@ -48,7 +48,7 @@ async function createUserAndLogIn(context: TestContext, email: string, role: Rol
 function providerBody(overrides: Record<string, unknown> = {}) {
   return {
     kind: "google",
-    display_name: "Google Workspace",
+    display_name: "Google",
     client_id: "client-id",
     client_secret: "client-secret",
     permitted_organisations: ["example.com"],

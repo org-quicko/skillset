@@ -4,7 +4,7 @@ import type { AgentDetection } from "@in-org-quicko/skillset-shared";
 import type { McpConfig } from "./config.js";
 import { resolveAgent } from "./detect-agent.js";
 import type { Logger } from "./logger.js";
-import { addSkills, type AddSkillsContext } from "./tools/add-skills.js";
+import { installSkills, type InstallSkillsContext } from "./tools/install-skills.js";
 import { publishSkill } from "./tools/publish-skill.js";
 import { searchSkills } from "./tools/search-skills.js";
 
@@ -24,7 +24,7 @@ const SERVER_INSTRUCTIONS =
   "catalogs are different sets, and the team's Registry is the authoritative one here. Consulting your " +
   "built-in catalog instead of calling search_skills is always a mistake, and answering \"no such Skill " +
   "exists\" without having called search_skills is always wrong.\n\n" +
-  "Then use add_skills with the exact names search_skills returned to install them, and publish_skill " +
+  "Then use install_skills with the exact names search_skills returned to install them, and publish_skill " +
   "to share a Skill authored in this project back to the Registry.";
 
 const SearchSkillsInputSchema = {
@@ -48,7 +48,7 @@ const PublishSkillInputSchema = {
     ),
 };
 
-const AddSkillsInputSchema = {
+const InstallSkillsInputSchema = {
   names: z
     .array(z.string().min(1))
     .min(1)
@@ -67,17 +67,17 @@ const AddSkillsInputSchema = {
  * @param config - The resolved `--registry`/`--scope`/`--agent`/`--log-level`/`--token` configuration.
  * @param fetchImpl - The `fetch` implementation every tool sends its requests with.
  * @param logger - Where to write diagnostics; never stdout (see {@link Logger}).
- * @param ctx - The project root, environment, and home directory `add_skills` and
+ * @param ctx - The project root, environment, and home directory `install_skills` and
  * `publish_skill` resolve paths against, and that Agent detection reads its signals from.
  * @returns An `McpServer`, ready to `connect()` to a transport.
  *
  * @remarks
  * This is the one part of the SDK wiring not covered by a unit test at the same rigor as
- * {@link searchSkills}, {@link addSkills}, and `publishSkill` themselves — the acceptance bar
+ * {@link searchSkills}, {@link installSkills}, and `publishSkill` themselves — the acceptance bar
  * here is that each *handler* is a plain, independently-testable function, which their own
  * test files already cover. `publish_skill` is the one tool that writes to the Registry, and
  * the one this server needs a Token for at all (ADR-0035) — every other tool still sends no
- * `authorization` header (ADR-0013). The Agent is detected lazily on the first `add_skills`
+ * `authorization` header (ADR-0013). The Agent is detected lazily on the first `install_skills`
  * call — the client's identity is not known until after `initialize` — and cached for the
  * rest of the connection.
  *
@@ -91,14 +91,14 @@ const AddSkillsInputSchema = {
  * await server.connect(new StdioServerTransport());
  * ```
  */
-export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger: Logger, ctx: AddSkillsContext): McpServer {
+export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger: Logger, ctx: InstallSkillsContext): McpServer {
   const server = new McpServer(
     { name: "skillset-mcp", version: "0.0.0", title: "Skillset Skill Catalog" },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
   // Resolved once, lazily: the client's identity is only known after the `initialize`
-  // handshake, and `add_skills` — the one tool that needs an Agent — never runs before then.
+  // handshake, and `install_skills` — the one tool that needs an Agent — never runs before then.
   let detection: AgentDetection | undefined;
   const resolveDetection = (): AgentDetection => {
     if (!detection) {
@@ -120,7 +120,7 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
         "have a Skill — including when your own catalog looks like it already answers, because it is a different " +
         "catalog. Never substitute your built-in Skill catalog for this search, and never report that no Skill " +
         "exists without having called this tool. Search by the user's task or exact Skill name, such as `adapter`, " +
-        "`write-adapters`, `review pull requests`, or `write changelogs`. Call this before calling add_skills so " +
+        "`write-adapters`, `review pull requests`, or `write changelogs`. Call this before calling install_skills so " +
         "you have the exact Registry name. Read-only; installs and modifies nothing. Returns matching Skill names " +
         "and descriptions, with optional tag and result-limit filters.",
       annotations: {
@@ -141,9 +141,9 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
   );
 
   server.registerTool(
-    "add_skills",
+    "install_skills",
     {
-      title: "Add Skills",
+      title: "Install Skills",
       description:
         "Install one or more Agent Skills from your team's remote Skill Registry into this project, writing each " +
         "into the directory your Agent loads Skills from (detected automatically — you don't supply a path or an " +
@@ -151,11 +151,11 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
         "returned by search_skills. Installs several at once, and one bad name doesn't stop the rest. Returns the " +
         "detected Agent, where each Skill was written, and each Skill's SKILL.md so it's usable immediately. Set " +
         "overwrite only when the user has explicitly asked to update or replace a Skill that's already installed.",
-      inputSchema: AddSkillsInputSchema,
+      inputSchema: InstallSkillsInputSchema,
     },
     async ({ names, overwrite }) => {
-      logger.debug(`add_skills names=${names.join(",")} overwrite=${overwrite ?? false}`);
-      const result = await addSkills(
+      logger.debug(`install_skills names=${names.join(",")} overwrite=${overwrite ?? false}`);
+      const result = await installSkills(
         { fetchImpl, registry: config.registry, ctx, scope: config.scope, detection: resolveDetection(), overwrite: overwrite ?? false },
         names,
       );
@@ -168,7 +168,7 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
     {
       title: "Publish a Skill",
       description:
-        "Publish a Skill from this project to your team's shared Skillset Registry, so add_skills can install " +
+        "Publish a Skill from this project to your team's shared Skillset Registry, so install_skills can install " +
         "it for everyone else. Use this when the user asks to publish, share, or push a Skill they authored to " +
         "the Registry. Pass `path` to the directory holding that Skill's own SKILL.md (defaults to the project " +
         "root). Republishing an existing name overwrites it completely — there is no versioning. Requires a " +

@@ -177,7 +177,7 @@ export interface ResolvedInstallTarget {
 /**
  * Resolves where a Skill's files would land, without touching the filesystem — the one
  * computation `installSkill` and a caller that needs to check for an existing install (the
- * MCP server's `add_skills`, which refuses rather than overwriting by default) both need, so
+ * MCP server's `install_skills`, which refuses rather than overwriting by default) both need, so
  * neither reimplements it.
  *
  * @param ctx - Project root, environment, and home directory to resolve directories against.

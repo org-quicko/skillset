@@ -1,5 +1,5 @@
 import { ASSIGNABLE_ROLES, type AssignableRole } from "@in-org-quicko/skillset-shared";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
 import { IconSwap } from "@/components/icon-swap";
@@ -57,9 +57,14 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
       <FormDialogHeader
         title={created ? `Password for ${created.email}` : "Add a User"}
         description={
-          created
-            ? "This password is shown once and can't be retrieved again."
-            : "Skillset generates an initial password for them. They must replace it before doing anything else."
+          created ? (
+            "Copy it now — Skillset won't show it again."
+          ) : (
+            <span className="flex items-start gap-2 rounded-md border bg-muted/50 p-3 text-foreground">
+              <InfoIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              Skillset generates an initial password for them. They should change it when logging in for the first time.
+            </span>
+          )
         }
       />
 

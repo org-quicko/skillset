@@ -260,7 +260,7 @@ describe("who administers the Registry's logins (ISSUE-2)", () => {
 
   const body = {
     kind: "google",
-    display_name: "Google Workspace",
+    display_name: "Google",
     client_id: "client-id",
     client_secret: "client-secret",
     permitted_organisations: ["example.com"],

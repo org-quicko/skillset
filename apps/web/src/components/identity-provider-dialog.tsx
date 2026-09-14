@@ -181,7 +181,6 @@ export function IdentityProviderDialog({
               value={clientSecret}
               onChange={(event) => setClientSecret(event.target.value)}
               disabled={pending}
-              placeholder={isEdit ? "Leave blank to keep the current secret" : ""}
               // Not the viewer's own login password — "new-password" is what
               // reliably stops a browser from offering to autofill it with
               // their saved site credentials (e.g. a saved Google account).

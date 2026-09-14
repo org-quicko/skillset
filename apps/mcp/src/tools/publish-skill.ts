@@ -211,7 +211,7 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
  * @remarks
  * Republishing an already-published name overwrites it completely rather than versioning
  * (ADR-0002) — the same behaviour `skillset publish` has always had, now available without a
- * terminal. Unlike `search_skills` and `add_skills`, this sends an `authorization` header:
+ * terminal. Unlike `search_skills` and `install_skills`, this sends an `authorization` header:
  * publishing needs a writer Token, which is why it is the one tool this server is configured
  * with a Token for at all (ADR-0035).
  *

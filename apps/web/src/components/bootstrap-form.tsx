@@ -63,7 +63,6 @@ export function BootstrapForm() {
             <Input
               id="password"
               type="password"
-              placeholder={`Eg. at least ${PASSWORD_MIN_LENGTH} characters`}
               minLength={PASSWORD_MIN_LENGTH}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
