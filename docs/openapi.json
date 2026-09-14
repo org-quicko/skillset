@@ -1,0 +1,1792 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Skillset API",
+    "version": "0.1.0",
+    "description": "A self-hosted Registry for Agent Skills. This is the contract the CLI depends on; the web interface uses the same routes and has no private data path of its own.\n\n**Conventions.** Every JSON key on the wire is snake_case, which means wire keys line up with Postgres column names. TypeScript types, interfaces, and classes are camelCase, so conversion happens once at the boundary in the shared module rather than ad hoc per call site.\n\n**Uploaded Artifact bytes never pass through this API.** An Artifact is stored as its files, one object each; publishing returns one presigned upload target per file, and the caller writes each directly. The API therefore validates the metadata and the file *manifest* a caller claims about a Skill, never the bytes themselves (ADR-0001, ADR-0032). Reads are the other way round: `GET /resources/{id}/artifact` assembles a zip from those files, and `GET /resources/{id}/files/{path}` serves one of them, so Artifact bytes do pass through on the way out."
+  },
+  "servers": [{ "url": "/api" }],
+  "security": [{ "cookieAuth": [] }, { "bearerAuth": [] }],
+  "tags": [
+    { "name": "setup", "description": "First-run setup: whether any User exists yet, and creating the first one" },
+    { "name": "auth", "description": "Logging in and out" },
+    { "name": "users", "description": "Users, their own details, and their Tokens" },
+    { "name": "resources", "description": "Publishing, reading, searching, and retrieving Resources — Skills today (ADR-0026)" },
+    { "name": "tags", "description": "The Tag catalog: listing it, and renaming a Tag" },
+    {
+      "name": "identity-providers",
+      "description": "Configuring the Identity Providers a Registry offers on its login page (ADR-0015)"
+    },
+    {
+      "name": "integrations",
+      "description": "The Registry's registrations with Git Providers. An Integration holds the credential pair a Connection is granted against, and its existence is the only switch Importing has (ADR-0024)"
+    },
+    {
+      "name": "imports",
+      "description": "Reading a Skill's files out of a Git Provider. A one-time copy, never a link (ADR-0024)"
+    },
+    {
+      "name": "connections",
+      "description": "A writer's own grant of repository access, made deliberately and separately from signing in. Its existence is the consent (ADR-0024)"
+    }
+  ],
+  "paths": {
+    "/setup": {
+      "get": {
+        "tags": ["setup"],
+        "summary": "Read first-run setup state",
+        "description": "Tells the web interface whether to show the bootstrap screen or the login screen. Unauthenticated, as the Skill reads are (ADR-0013).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Setup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["initialized"],
+                  "properties": {
+                    "initialized": {
+                      "type": "boolean",
+                      "description": "False only while no User exists at all."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["setup"],
+        "summary": "Create the first User",
+        "description": "Creates the first User, who is a Superadmin and chooses their own password. Available only while no User exists; afterwards this returns 409 forever and new Users come from `POST /users` instead.\n\nModelled as its own resource rather than as an unauthenticated `POST /users`, because the two differ in authentication, in who picks the password, and in whether a role may be supplied — one endpoint with two request shapes would be a trap for both callers. This is deliberately not a `Registry` resource: the Registry is the deployment itself, not something with a create-or-initialise lifecycle — this route is about the first User existing, nothing else.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["first_name", "last_name", "email", "password"],
+                "properties": {
+                  "first_name": { "type": "string", "minLength": 1 },
+                  "last_name": { "type": "string", "minLength": 1 },
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string", "minLength": 12 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The first User was created as a Superadmin and is logged in",
+            "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "409": {
+            "description": "A User already exists, so setup is closed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/auth/sign-in/email": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Sign in with an email address and password",
+        "description": "Served by Better Auth (ADR-0016) rather than by a route in this codebase, and documented here because it is how the interface logs in. Issues a session and sets its cookie; the session is a row, so it can be revoked (ADR-0005's trade-off no longer applies).\n\nAn unknown email and a wrong password are refused identically, and both run an argon2id hash — the decoy for an unknown email costs what a real verify costs — so the two cannot be told apart by timing either.\n\nIf the User has `must_change_password` set, every route except reading and replacing their own password will be refused until it is done.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "headers": { "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" } }
+          },
+          "401": { "description": "Unknown email or wrong password. Deliberately does not distinguish the two." }
+        }
+      }
+    },
+    "/auth/sign-out": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Sign out",
+        "description": "Served by Better Auth (ADR-0016). Deletes the session row and clears the cookie, so replaying the cookie fails rather than working until the token would have expired.\n\nSigning out with no session reports success rather than an error: there is nothing to revoke, and nothing the caller could do differently.",
+        "security": [],
+        "responses": {
+          "200": { "description": "Signed out" }
+        }
+      }
+    },
+    "/auth/providers": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "List the Identity Providers the login page offers",
+        "description": "Enabled Providers only, and only the fields a login button needs. Unauthenticated, as it must be — it is read by visitors who have no session (ADR-0013). An instance with none configured returns an empty list, and its login page is exactly what it was before.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The enabled Identity Providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/PublicIdentityProvider" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/sign-in/social": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Begin a login through an Identity Provider",
+        "description": "Served by Better Auth (ADR-0016). Answers with the provider's authorization URL for the browser to navigate to, and persists this login's PKCE verifier and CSRF nonce as a `verifications` row — server-side, not in memory, which is why a login survives the auth instance being rebuilt (ADR-0019).",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["provider"],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": ["google", "microsoft", "github"],
+                    "description": "The Provider's kind, which is its identity (ADR-0017). Must be configured and enabled."
+                  },
+                  "callbackURL": {
+                    "type": "string",
+                    "description": "Where to land after signing in, as a path within this Registry."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The authorization URL to navigate to" }
+        }
+      }
+    },
+    "/auth/callback/{kind}": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Complete a login an Identity Provider has returned",
+        "description": "Served by Better Auth (ADR-0016). One path per kind rather than the single shared callback earlier versions used, so each provider console registers `<PUBLIC_URL>/api/auth/callback/<kind>`.\n\nBefore any claim is trusted, the returned state must match what was stored for this flow. The login is then refused unless the Provider is enabled and the organisation matches the Provider's permitted one — Google's `hd` claim, Entra's `tid` claim, or, for GitHub, membership returned by `/user/orgs`, since it issues no ID token (ADR-0018). Matched on what the Provider asserts, never on the email address's suffix.\n\nAn email matching an existing User signs into them, whatever role they hold; one matching none creates a reader with no password. Every refusal redirects back to the login page with the same coarse reason — which check failed goes to the logs and only there.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "description": "The Provider that returned this login.",
+            "schema": { "type": "string", "enum": ["google", "microsoft", "github"] }
+          },
+          { "name": "code", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": { "$ref": "#/components/responses/ExternalLoginRedirect" }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["users"],
+        "summary": "List Users",
+        "description": "Requires at least the admin role.",
+        "parameters": [{ "$ref": "#/components/parameters/Page" }],
+        "responses": {
+          "200": {
+            "description": "A page of Users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "page", "page_size", "total"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/User" } },
+                    "page": { "type": "integer" },
+                    "page_size": { "type": "integer" },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      },
+      "post": {
+        "tags": ["users"],
+        "summary": "Create a User",
+        "description": "Requires at least the admin role. The Registry generates the initial password and returns it once — there is no email delivery. The new User must change it before they can do anything else.\n\n`role` accepts `reader`, `writer`, or `admin` only — never `superadmin`, which exists on exactly one User and is set only by `/setup`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["first_name", "last_name", "email", "role"],
+                "properties": {
+                  "first_name": { "type": "string", "minLength": 1 },
+                  "last_name": { "type": "string", "minLength": 1 },
+                  "email": { "type": "string", "format": "email" },
+                  "role": { "$ref": "#/components/schemas/AssignableRole" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. `initial_password` is shown once and is not recoverable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["user", "initial_password"],
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" },
+                    "initial_password": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "409": {
+            "description": "A User with that email already exists",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/users/me": {
+      "get": {
+        "tags": ["users"],
+        "summary": "Read the authenticated User",
+        "description": "Also the CLI's identity command: it distinguishes a wrong Registry location from a rejected Token. The role is resolved on this request, not read from the credential.",
+        "responses": {
+          "200": {
+            "description": "The authenticated User",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      },
+      "patch": {
+        "tags": ["users"],
+        "summary": "Correct your own names",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "first_name": { "type": "string", "minLength": 1 },
+                  "last_name": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users/me/password": {
+      "put": {
+        "tags": ["users"],
+        "summary": "Replace your own password",
+        "description": "Clears `must_change_password`. Permitted while that flag is set — this is the route that resolves it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["current_password", "new_password"],
+                "properties": {
+                  "current_password": { "type": "string" },
+                  "new_password": { "type": "string", "minLength": 12 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Password replaced" },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users/me/tokens": {
+      "get": {
+        "tags": ["users"],
+        "summary": "List your own Tokens",
+        "description": "Secrets are never included. `last_used_at` is how a dead Token is identified. Nested under the owner because a User may only ever manage their own.",
+        "responses": {
+          "200": {
+            "description": "Your Tokens",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Token" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      },
+      "post": {
+        "tags": ["users"],
+        "summary": "Mint a Token",
+        "description": "The secret is returned exactly once and stored only as a hash. Tokens do not expire; revoke by deleting. A Token carries no role of its own — its owner's current role is resolved on every request, so a demotion applies to existing Tokens immediately.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A display name, so a Token can be recognised later."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Minted. `secret` will never be shown again.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TokenCreated" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/users/me/tokens/{token_id}": {
+      "parameters": [
+        {
+          "name": "token_id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "delete": {
+        "tags": ["users"],
+        "summary": "Revoke a Token",
+        "description": "The next request bearing it fails.",
+        "responses": {
+          "204": { "description": "Revoked" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": {
+            "description": "No such Token belonging to you",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/users/{user_id}": {
+      "parameters": [
+        {
+          "name": "user_id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "patch": {
+        "tags": ["users"],
+        "summary": "Change a User's role",
+        "description": "Requires at least the admin role. Refused on the Superadmin's own User (see 409). Takes effect on that User's next request, including requests bearing their existing Tokens.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["role"],
+                "properties": { "role": { "$ref": "#/components/schemas/AssignableRole" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": { "$ref": "#/components/responses/UserNotFound" },
+          "409": { "$ref": "#/components/responses/SuperadminProtected" }
+        }
+      },
+      "delete": {
+        "tags": ["users"],
+        "summary": "Remove a User",
+        "description": "Requires at least the admin role. Refused on the Superadmin's own User (see 409). Ends their access and deletes their Tokens. Skills they published remain, and attribution survives through the publisher email snapshot.",
+        "responses": {
+          "204": { "description": "Removed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": { "$ref": "#/components/responses/UserNotFound" },
+          "409": { "$ref": "#/components/responses/SuperadminProtected" }
+        }
+      }
+    },
+    "/resources": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "List, search, filter, and sort Resources",
+        "description": "Reads from the `resource_directory` view (ticket 23, ADR-0026, docs/data-model.md), not `resources` directly. Defaults to sorted by last-updated, descending (ADR-0028 — installs are not comparable across Kinds). With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. Unauthenticated (ADR-0013).",
+        "security": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Full-text search phrase, matched against name, description, and publisher. Supports quoted phrases and `-exclusions`. Omitted or empty returns the ordinary list.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "Narrows to one Kind. Omitted lists every Kind together. An unrecognised value is rejected with a field-named validation error, the same as `sort_by`. `skill` is the only registered Kind so far (ADR-0026), so this is exercisable but not yet load-bearing.",
+            "schema": { "type": "string", "enum": ["skill"] }
+          },
+          {
+            "name": "tag_id",
+            "in": "query",
+            "required": false,
+            "description": "Repeatable. Narrows to Resources carrying at least one of the given Tag ids (any-match). Omitted returns Resources regardless of Tags.",
+            "schema": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "description": "Governs ordering unconditionally, even with `q` set. Invalid values are rejected with a field-named validation error.",
+            "schema": { "type": "string", "enum": ["installs", "updated_at"], "default": "updated_at" }
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "description": "Invalid values are rejected with a field-named validation error.",
+            "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to [1, 100] rather than rejected.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }
+          },
+          { "$ref": "#/components/parameters/Page" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Resources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "page", "page_size", "total"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/SkillDirectoryEntry" }
+                    },
+                    "page": { "type": "integer" },
+                    "page_size": { "type": "integer", "minimum": 1, "maximum": 100 },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" }
+        }
+      }
+    },
+    "/resources/{kind}/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Kind" }, { "$ref": "#/components/parameters/SkillName" }],
+      "put": {
+        "tags": ["resources"],
+        "summary": "Publish a Resource",
+        "description": "Create or replace, idempotent by `(kind, name)`: publishing an existing Resource replaces it whoever published it first, and `published_by` and `published_at` become whoever published it last (ADR-0002, amended by ADR-0026).\n\n`kind` comes from the path and is checked against the registered Kinds before anything else — an unrecognised value is refused here, naming the field, rather than falling through to a 404 (ADR-0026). `skill` is the only Kind registered so far, so this request body shape is Skill's own; a second Kind gets its own payload shape and validation, not a variant of this one.\n\nThe row is written first and one upload target per declared file returned, in the order `files` declared them. The caller then writes each file to its own target directly. Until every one lands, the Resource lists and reads but its Artifact is incomplete — the file listing shows what arrived and the zip download refuses. A republish deletes the files its new manifest no longer names *before* those URLs are issued, so a dropped file is never left servable (ADR-0032).\n\n`name` comes from the path; the caller parses it out of `SKILL.md` frontmatter. The API validates it against the same rules the shared module applies, but does not read the Artifact to confirm they agree.\n\n`license`, `compatibility`, `metadata`, and `allowed_tools` are optional, but are validated exactly as strictly as `description` and `body` when present — any one of them failing rejects the whole publish, naming the specific field and rule (ADR-0009). Publishing always writes all four (a validated value, or null when absent), so a republish that no longer sets a field clears it. `tags` cannot be set through this endpoint at all — see `PUT /resources/{id}/tags`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["description", "body", "files"],
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "description": "From the `SKILL.md` frontmatter."
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The `SKILL.md` content below the frontmatter. Rendered through an allowlist sanitiser, never trusted as markup."
+                  },
+                  "license": { "type": "string", "description": "From the SKILL.md frontmatter. Optional." },
+                  "compatibility": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "From the SKILL.md frontmatter. Optional."
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "From the SKILL.md frontmatter, a mapping of string keys to string values. Optional."
+                  },
+                  "allowed_tools": {
+                    "type": "string",
+                    "description": "From the SKILL.md frontmatter. Optional; internal grammar unvalidated (experimental in the specification)."
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/ArtifactFile" },
+                    "description": "The Artifact's declared manifest — the paths and sizes about to be uploaded. Part of this body rather than a separate call because the presigned destinations in the response are derived from it: the API cannot sign a PUT for a key it has not been told about. Every path is validated before a row is written, so a manifest with a parent-directory segment, an absolute path, a backslash, a null byte, a duplicate, no root `SKILL.md`, or more files or bytes than an Artifact may hold rejects the whole publish, naming the rule (ADR-0032)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Resource row was created or replaced. Write the Artifact to `upload` next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["skill", "upload"],
+                  "properties": {
+                    "skill": { "$ref": "#/components/schemas/Skill" },
+                    "upload": { "$ref": "#/components/schemas/ArtifactUpload" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed validation — either `kind` names no registered Kind, or the body failed one of the shared rules (both field-named, ADR-0009, ADR-0026)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Readers cannot publish",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/resources/{kind}/by-name/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Kind" }, { "$ref": "#/components/parameters/SkillName" }],
+      "get": {
+        "tags": ["resources"],
+        "summary": "Read a Resource by (kind, name)",
+        "description": "An exact-name read, for resolving `name` to `id` — the web keeps `/skills/<name>` as its own browser URL and needs this to land a reader there with nothing already cached (a bookmark, a shared link, a refresh). Not full-text search: `GET /resources?q=` ranks by recency and caps at one page, so it cannot guarantee finding an existing Resource by exact name, and Postgres's stopword handling can make it return nothing at all for a name that happens to be one. `kind` not matching a registered Kind reads as \"not found\", the same as a name with no match — this is a read, so nothing here is worth a validation error. Unauthenticated (ADR-0013).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The Skill",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
+        }
+      }
+    },
+    "/resources/stats": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Read the catalog's hero stats",
+        "description": "Registry-wide counts: how many Resources exist, how many distinct Publishers have published one, and how many Installs have been recorded in total. Unfiltered — unaffected by any search term, Kind, or Tag selection, unlike `GET /resources`'s `total`. Unauthenticated (ADR-0013).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The registry-wide counts",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SkillDirectoryStats" } } }
+          }
+        }
+      }
+    },
+    "/resources/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
+      "get": {
+        "tags": ["resources"],
+        "summary": "Read a Resource",
+        "description": "An exact-id read, whatever Kind it is. Does not go through full-text search. The web keeps `/skills/<name>` as its own browser URL and resolves `name` to `id` itself before calling this — see `GET /resources/{kind}/by-name/{name}`. Unauthenticated (ADR-0013).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The Skill",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["resources"],
+        "summary": "Delete a Resource",
+        "description": "Requires at least the admin role. Removes the row and the Artifact permanently — there is no version history and no soft delete. Recovery is bucket versioning in object storage (ADR-0002). Succeeds even when the Artifact was never uploaded.",
+        "responses": {
+          "204": { "description": "Deleted. The name is immediately available to publish again." },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Readers and writers cannot delete a Resource",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
+        }
+      }
+    },
+    "/resources/{id}/artifact": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
+      "get": {
+        "tags": ["resources"],
+        "summary": "Download a Resource's Artifact as a zip",
+        "description": "Assembles the Resource's stored files into a zip and returns it as an attachment named after the Resource. An Artifact is stored as its files, one object each, so this archive is built per request and cached nowhere (ADR-0032). Unauthenticated — anyone who can reach the Registry may retrieve an Artifact (ADR-0013). Records exactly one Install, and only once every file is in hand, so a failure never inflates the count; `installs` elsewhere reflects the last periodic refresh rather than this request's own Install (ADR-0012).\n\nThere is no `Accept: application/json` representation any more. It existed to hand back a presigned storage URL alongside the Resource, for a caller that needed to know the request had succeeded before navigating there; with the bytes served here, there is no such URL.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The Artifact, as a zip",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Always `attachment; filename=\"<name>.zip\"` — the storage prefix is the Resource's `id`, so without this a browser would save the file under a UUID.",
+                "schema": { "type": "string" }
+              }
+            },
+            "content": { "application/zip": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "404": {
+            "description": "No such Resource, or its Artifact holds no files — never uploaded, or an upload still in flight",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/resources/{id}/files": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
+      "get": {
+        "tags": ["resources"],
+        "summary": "List an Artifact's files",
+        "description": "Every file the Resource's Artifact holds, with its size, `SKILL.md` first — what the interface's file browser is built on. Read from object storage rather than from the manifest the publisher declared, so it reports what a reader will actually get: the two agree once an upload has finished and disagree while one is in flight (ADR-0032). Unauthenticated (ADR-0013), and not an Install: listing what a Skill contains is not obtaining it (ADR-0028).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The Artifact's files",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ArtifactManifest" } } }
+          },
+          "404": {
+            "description": "No such Resource, or its Artifact holds no files",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/resources/{id}/files/{path}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/SkillId" },
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "The file's path within the Artifact, relative to the Skill's root. May contain slashes — `references/style.md` is one file, not two segments — so encode each segment and leave the slashes between them. Refused with 400 if it would address an object outside the Resource's own storage prefix.",
+          "example": "references/style.md"
+        }
+      ],
+      "get": {
+        "tags": ["resources"],
+        "summary": "Read one file of an Artifact",
+        "description": "The file's bytes, with a `content-type` derived from its path — the API has never read these bytes and has no sniffed type to prefer (ADR-0001). Served here rather than redirected to object storage so the interface's preview can read it with `fetch` without depending on a bucket's CORS policy.\n\nEvery response carries `X-Content-Type-Options: nosniff`, since the type is guessed from the path and a browser must not be allowed to guess differently. An HTML or SVG file — the two types a publisher can upload that a browser executes — additionally carries a `Content-Security-Policy` forbidding scripts, plugins and external fetches, and sandboxing the result. Unauthenticated (ADR-0013), and not an Install: previewing a file is not obtaining the Resource (ADR-0028).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The file's bytes",
+            "content": { "*/*": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "400": {
+            "description": "The path would address an object outside the Resource's own prefix",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": {
+            "description": "No such Resource, or its Artifact holds no file at that path",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/resources/{id}/tags": {
+      "parameters": [{ "$ref": "#/components/parameters/SkillId" }],
+      "put": {
+        "tags": ["resources"],
+        "summary": "Replace a Resource's Tags",
+        "description": "Requires at least the writer role — the same bar as publishing. A full replace, not incremental: the given names become exactly this Resource's Tags, and any Tag it previously carried that isn't in the list is detached (never deleted from the catalog itself, ADR-0011). Each name is normalised (trimmed, lowercased) and resolved to an existing catalog Tag or a newly created one — this is the only way a brand new Tag comes into existence. A name repeated in the list, even under different casing, still resolves to one Tag.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["tags"],
+                "properties": {
+                  "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The full desired set of tag names, by name — not by id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Resource's resolved Tags after the replace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["tags"],
+                  "properties": {
+                    "tags": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Readers cannot edit a Resource's Tags",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/ResourceNotFound" }
+        }
+      }
+    },
+    "/tags": {
+      "get": {
+        "tags": ["tags"],
+        "summary": "List the Tag catalog",
+        "description": "Every Tag in the Registry, alphabetical by name — registry-wide, not scoped to any one Skill (ADR-0011). What a tag editor's autocomplete filters against. Unauthenticated (ADR-0013).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The whole Tag catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tags/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/TagId" }],
+      "patch": {
+        "tags": ["tags"],
+        "summary": "Rename a Tag",
+        "description": "Requires at least the admin role — stricter than replacing a Skill's Tags, because a rename reaches every Skill carrying this Tag, not just one (ADR-0011). Every reference is by id, so nothing but this Tag's `name` column changes. Conflict detection relies on the database's own unique constraint, so two concurrent renames to the same name can't both succeed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The renamed Tag",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Tag" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may rename a Tag",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/TagNotFound" },
+          "409": {
+            "description": "A different Tag already holds this name",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/imports/{provider}/skill-files": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "post": {
+        "tags": ["imports"],
+        "summary": "Read a Skill's files from a project the caller's Connection can see",
+        "description": "Requires at least the `writer` role. Fetches a folder from a project — **private ones included** — using the calling writer's own Connection, and returns its files for the browser to publish through the usual pipeline (ADR-0024).\n\nWhat the grant reaches is the repositories an owner selected when the Registry's app was installed, **not** everything the writer can read.\n\nThe body carries the project's parts and deliberately **no URL**: the server builds every provider request itself from these fields and the provider's pinned API base, so this route cannot be aimed at another host (ADR-0020). The provider comes from the **path** and is written over anything the body claims. Every field is re-validated here — `project` is checked segment by segment, which is what allows a GitLab nested-group path while still refusing traversal.\n\nPreconditions are checked in order: an Integration for the provider, then a Connection for the caller. An Integration's absence is an Admin's problem and is refused before a Connection is so much as selected.\n\nA writer with **no** Connection does not need this route — the browser reads public projects anonymously and always has (ADR-0010), which is what lets a Registry with no Integration at all still import a public Skill. Nothing here writes to a provider: every request the walk makes is a `GET`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project", "ref", "path"],
+                "properties": {
+                  "project": {
+                    "type": "string",
+                    "example": "acme/skills",
+                    "description": "The project's path: `owner/repo` for GitHub, or `group/subgroup/project` for GitLab, which has nested groups. Every segment must match `^[A-Za-z0-9._-]+$` and be none of `.`, `..`, or `-`; no leading or trailing slash. GitHub is held to exactly two segments."
+                  },
+                  "ref": {
+                    "type": ["string", "null"],
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "description": "Branch, tag, or commit. `null` uses the project's default branch. A ref containing `/` is not supported — a browse URL is ambiguous between the ref and the folder path."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "The folder within the project, `\"\"` for its root. No leading or trailing slash, and no `.` or `..` segment before or after percent-decoding."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The folder's files, at paths relative to the folder itself",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SkillFiles" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "409": {
+            "description": "A precondition the caller or an Admin has to satisfy: no Integration for this provider (`integration_not_configured`), no Connection for the caller (`not_connected`), a grant that can no longer be refreshed (`connection_expired` — which says *reconnect*, never sign in again), or the Registry's app not being installed on the project's owner (`app_not_installed`).\n\n`app_not_installed` is diagnosed by asking `GET /user/installations` after a 404, because a project the app cannot see answers 404 exactly as a mistyped one does — and a writer who is not an organisation owner cannot install it themselves, only request it. The message names the owner and carries the install link.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "422": {
+            "description": "The folder the caller named cannot be published as a Skill (`import_rejected`): it is empty, genuinely missing at that ref, or holds more files or bytes than an Artifact may.\n\nA 4xx and not a 502, deliberately: nothing failed upstream. The provider answered perfectly well and the answer is that this folder is not a Skill, so retrying will never succeed — and a mistyped URL, the commonest failure of all, must not count toward a deployment's server-error rate.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "502": {
+            "description": "The provider genuinely failed (`import_failed`): it rate-limited the request, could not be reached, or returned a file from a host outside its own allowlist.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/identity-providers": {
+      "get": {
+        "tags": ["identity-providers"],
+        "summary": "List every configured Identity Provider",
+        "description": "Requires at least the admin role. Includes disabled Providers, and never includes a client secret.",
+        "responses": {
+          "200": {
+            "description": "Every configured Identity Provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/IdentityProvider" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      },
+      "post": {
+        "tags": ["identity-providers"],
+        "summary": "Configure an Identity Provider",
+        "description": "Requires at least the admin role. At most one Provider per kind (ADR-0017). A Provider may be created enabled, but only with a permitted organisation set — with just-in-time provisioning that gate is the only control on who gets an account (ADR-0015).\n\nThere is no issuer URL to supply: Better Auth knows each kind's endpoints (ADR-0016), so what an Admin configures is the credential pair and the organisation to admit.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["kind", "display_name", "client_id", "client_secret"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["google", "microsoft", "github"],
+                    "description": "The Provider's identity, and immutable after creation (ADR-0017)."
+                  },
+                  "display_name": { "type": "string", "minLength": 1 },
+                  "client_id": { "type": "string", "minLength": 1 },
+                  "client_secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Stored as given, and never returned by any response."
+                  },
+                  "permitted_organisations": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 50, "description": "Organisations this Provider admits — Workspace domains, Entra tenant ids, or GitHub organisation logins by kind. A login is admitted if it matches any one of them, case-insensitively. An empty array means no organisation check runs at all and everyone the provider authenticates gets a reader account (ADR-0021)." },
+                  "enabled": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The configured Identity Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IdentityProvider" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "409": {
+            "description": "An Identity Provider of that kind is already configured (`kind_taken`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/identity-providers/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/IdentityProviderId" }],
+      "patch": {
+        "tags": ["identity-providers"],
+        "summary": "Change an Identity Provider's configuration",
+        "description": "Requires at least the admin role, and is also how a Provider is enabled and disabled. `kind` cannot be changed: it is the Provider's identity (ADR-0017), so altering it would silently repoint a live configuration rather than configure a second one. Omitting `client_secret` leaves the stored one untouched, which is what lets a Provider be edited without its secret ever being read back.\n\nChanges reach logins by two routes, and the difference matters (ADR-0019): `enabled` and `permitted_organisations` are read on every login and take effect immediately, while new credentials take effect once the auth instance is rebuilt on the next request to its routes. A stale instance can therefore fail a login through a Provider added moments ago, but can never admit someone a disabled Provider should have refused.\n\nThere is deliberately no delete route. Disabling is how a Provider is taken out of service — deleting one would lock out everyone who signs in through it over a mistyped click.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "display_name": { "type": "string", "minLength": 1 },
+                  "client_id": { "type": "string", "minLength": 1 },
+                  "client_secret": { "type": "string", "minLength": 1 },
+                  "permitted_organisations": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 50, "description": "Organisations this Provider admits — Workspace domains, Entra tenant ids, or GitHub organisation logins by kind. A login is admitted if it matches any one of them, case-insensitively. An empty array means no organisation check runs at all and everyone the provider authenticates gets a reader account (ADR-0021)." },
+                  "enabled": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Identity Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IdentityProvider" } } }
+          },
+          "400": {
+            "description": "Invalid request body",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": { "$ref": "#/components/responses/IdentityProviderNotFound" }
+        }
+      }
+    },
+    "/integrations": {
+      "get": {
+        "tags": ["integrations"],
+        "summary": "List every configured Integration",
+        "description": "Requires at least the admin role.\n\nAn Integration's existence is the only switch Importing has: it is available for exactly those Git Providers with a row, and there is deliberately no `import_enabled` flag above it (ADR-0024). An operator who wants this Registry to hold no repository credentials for anybody creates no Integration.\n\nThis is not an Identity Provider and is configured separately. Signing in with GitHub and Importing from GitHub are two registrations that share nothing but a vendor, so either may exist without the other.\n\nNever includes a client secret. There is no unauthenticated counterpart to this route — unlike an Identity Provider, an Integration draws no button on a login page.",
+        "responses": {
+          "200": {
+            "description": "Every configured Integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Integration" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      },
+      "post": {
+        "tags": ["integrations"],
+        "summary": "Register a Git Provider",
+        "description": "Requires at least the admin role.\n\nAn Integration's existence is the only switch Importing has: it is available for exactly those Git Providers with at least one row, and there is deliberately no `import_enabled` flag above it (ADR-0024). An operator who wants this Registry to hold no repository credentials for anybody creates no Integration.\n\nThis is not an Identity Provider and is configured separately. Signing in with GitHub and Importing from GitHub are two registrations that share nothing but a vendor, so either may exist without the other.\n\nMore than one Integration may be registered for the same Git Provider — e.g. two different GitHub Apps — and a writer chooses which to connect through (ADR-0025). `provider` must name a Git Provider this Registry reads from; that list is `GIT_PROVIDERS` in the shared package, and a provider is added there rather than by migration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["provider", "display_name", "client_id", "client_secret"],
+                "properties": {
+                  "provider": { "type": "string", "enum": ["github", "gitlab"], "example": "github" },
+                  "display_name": { "type": "string", "maxLength": 100, "example": "GitHub" },
+                  "client_id": { "type": "string", "example": "Iv1.a1b2c3d4e5f6" },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Stored as given (ADR-0015). No response shape ever returns it."
+                  },
+                  "app_slug": {
+                    "type": "string",
+                    "nullable": true,
+                    "pattern": "^[A-Za-z0-9-]+$",
+                    "maxLength": 100,
+                    "example": "acme-skill-registry",
+                    "description": "Interpolated into the provider's installation URL, hence the narrow pattern. Omitted is the same as null: this provider has no installation step."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created Integration",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Integration" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" }
+        }
+      }
+    },
+    "/integrations/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The Integration's id."
+        }
+      ],
+      "patch": {
+        "tags": ["integrations"],
+        "summary": "Change an Integration's configuration",
+        "description": "Requires at least the admin role.\n\n`provider` is not on this request body at all: which Git Provider an app is for does not change once registered, only the app's own details do.\n\nOmitting `client_secret` leaves the stored one untouched, which is what lets an Admin edit an Integration without being shown its secret. `app_slug` distinguishes absent from null — absent leaves whatever is stored, null clears it.\n\nCredentials are read per use, so an edit takes effect on the next request with no restart (ADR-0019).\n\nThere is deliberately no delete route, matching `/identity-providers`. Removing an Integration that writers still hold Connections against would strand those credentials, and the `ON DELETE RESTRICT` on `connections.integration_id` refuses it at the database.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": { "type": "string", "maxLength": 100 },
+                  "client_id": { "type": "string" },
+                  "client_secret": { "type": "string" },
+                  "app_slug": { "type": "string", "nullable": true, "pattern": "^[A-Za-z0-9-]+$", "maxLength": 100 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Integration",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Integration" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailed" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/AdminOnly" },
+          "404": {
+            "description": "No Integration exists by that id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/connections": {
+      "get": {
+        "tags": ["connections"],
+        "summary": "List your own Connections",
+        "description": "Requires at least the `writer` role. Importing exists to publish, and a reader cannot publish — so a reader is refused rather than shown an empty list, and no connect action is offered to them.\n\nReturns only the caller's own Connections. No token appears in this shape, and there is no Admin variant that returns one: the tokens exist solely for the Registry to spend on that writer's behalf.",
+        "responses": {
+          "200": {
+            "description": "The caller's own Connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Connection" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" }
+        }
+      }
+    },
+    "/connections/{provider}/start": {
+      "parameters": [
+        { "$ref": "#/components/parameters/GitProvider" },
+        {
+          "name": "integration_id",
+          "in": "query",
+          "required": false,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Which Integration (app) to connect through, when the provider has more than one configured (ADR-0025). Omit when it has exactly one — there is nothing to choose."
+        }
+      ],
+      "get": {
+        "tags": ["connections"],
+        "summary": "Begin connecting a Git Provider",
+        "description": "Requires at least the `writer` role. Redirects to the provider's **installation** page rather than a plain authorize URL, which is what lets the writer choose which repositories the Registry may read in the same pass as authorizing it — and why the grant is an owner-chosen list rather than everything they can read.\n\nSets an httpOnly, `SameSite=Lax` cookie holding a nonce. `Lax` is required rather than chosen: the callback arrives as a top-level GET navigation from the provider, and `Strict` would withhold the cookie on exactly that request. The nonce is what makes the state single-use — a state lifted from a log or a referrer is useless in another browser.\n\nNot a JSON route: the response is a 302, and a browser is expected to follow it.",
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider's installation page, with a signed state",
+            "headers": {
+              "Location": { "schema": { "type": "string" } },
+              "Set-Cookie": {
+                "description": "The connect flow's nonce: httpOnly, SameSite=Lax, five-minute lifetime.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "That Git Provider has no credentialed flow at all, or more than one Integration is configured for it and `integration_id` was not given",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "409": { "$ref": "#/components/responses/IntegrationNotConfigured" }
+        }
+      }
+    },
+    "/connections/{provider}/callback": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "get": {
+        "tags": ["connections"],
+        "summary": "Complete a Connection from the provider's callback",
+        "description": "Requires at least the `writer` role. The provider redirects the writer here with `code` and `state`.\n\nThe state is verified and the nonce matched **before anything else** — no database read, no outbound request. This is the CSRF surface of the flow: without it an attacker could walk a victim's browser through their own authorization and attach their GitHub account to the victim's Registry account. A state that is missing, tampered with, expired, for another provider, minted for another User, or whose nonce does not match the browser's all yield the same `invalid_state`, because naming the failed check would tell an attacker which part of their forgery to fix.\n\nThe nonce cookie is cleared on every path out of this route, successful or not. That is what burns the state.\n\nOn success the grant is upserted on `(user_id, provider)` — reconnecting replaces rather than accumulating — and the writer is redirected back to settings.",
+        "parameters": [
+          { "name": "code", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "Connection stored; redirect back to settings",
+            "headers": { "Location": { "schema": { "type": "string" } } }
+          },
+          "400": {
+            "description": "The state could not be verified, or the provider is not connectable",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "409": { "$ref": "#/components/responses/IntegrationNotConfigured" },
+          "502": {
+            "description": "The provider refused to exchange the code, or would not identify the account",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/connections/{provider}": {
+      "parameters": [{ "$ref": "#/components/parameters/GitProvider" }],
+      "delete": {
+        "tags": ["connections"],
+        "summary": "Disconnect a Git Provider",
+        "description": "Requires at least the `writer` role. Deletes the Connection and nothing else — in particular it does not touch the writer's sign-in account, so withdrawing repository access can never lock anyone out.\n\n**This is Registry-local.** It stops *this Registry* using the grant; it does not withdraw the grant at the provider, which the writer must do in their own provider settings. Interface copy must say so — anything else is untrue.",
+        "responses": {
+          "204": { "description": "Disconnected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": { "$ref": "#/components/responses/WriterOnly" },
+          "404": {
+            "description": "The caller holds no Connection to that Git Provider",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session",
+        "description": "Signed session cookie, http-only, secure, strictly same-site. Carries only the User's id; the role is resolved from the database on every request (ADR-0005). Cannot be revoked before expiry."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A Token, used by the CLI. Looked up by hash on every request; revocable immediately."
+      }
+    },
+    "headers": {
+      "SessionCookie": {
+        "description": "Sets the session cookie",
+        "schema": { "type": "string" }
+      }
+    },
+    "parameters": {
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "integer", "minimum": 1, "default": 1 }
+      },
+      "Kind": {
+        "name": "kind",
+        "in": "path",
+        "required": true,
+        "description": "The Resource's Kind. Checked against the registered Kinds in the service (ADR-0026) — an unrecognised value is refused there, not by this path schema, so that refusal can be a field-named validation error rather than a bare 404.",
+        "schema": { "type": "string", "example": "skill" }
+      },
+      "SkillName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "The Skill's name, from its `SKILL.md` frontmatter.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        }
+      },
+      "SkillId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The Resource's id.",
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "TagId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The Tag's id.",
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "GitProvider": {
+        "name": "provider",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "enum": ["github", "gitlab"] },
+        "description": "A Git Provider this Registry reads from."
+      },
+      "IdentityProviderId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The Identity Provider's id.",
+        "schema": { "type": "string", "format": "uuid" }
+      }
+    },
+    "responses": {
+      "ExternalLoginRedirect": {
+        "description": "A redirect. On success, to the post-login destination with a session cookie set; on any failure, to `/login?error=…` with no session issued. Failures are deliberately not distinguished from one another — the person at the other end can act no differently either way, and naming the check that failed would tell an attacker which one they tripped. The reason reaches the logs.",
+        "headers": {
+          "Location": { "schema": { "type": "string" } }
+        }
+      },
+      "IdentityProviderNotFound": {
+        "description": "No Identity Provider by that id",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Unauthenticated": {
+        "description": "No valid session or Token. The web interface treats this as an expired session, discards cached state, and returns to login.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "WriterOnly": {
+      "description": "The caller's role is below writer. Importing exists to publish, and a reader cannot publish.",
+      "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+    },
+    "IntegrationNotConfigured": {
+      "description": "No Integration is configured for that Git Provider, so there is no credential to connect with. An Admin's problem: an Integration row's existence is the only switch Importing has (ADR-0024).",
+      "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+    },
+    "AdminOnly": {
+        "description": "Requires at least the admin role (admin or the superadmin)",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ResourceNotFound": {
+        "description": "No Resource by that id",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "TagNotFound": {
+        "description": "No Tag by that id",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "UserNotFound": {
+        "description": "No such User",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ValidationFailed": {
+        "description": "The request failed a validation rule. `code` names the rule and `field` names what broke it, so the CLI and the web interface can report the same specific reason.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "SuperadminProtected": {
+        "description": "Refused: this is the Superadmin. Their role is permanent and their account can never be changed or removed.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "schemas": {
+      "Role": {
+        "type": "string",
+        "enum": ["reader", "writer", "admin", "superadmin"],
+        "description": "reader: browse, search, read, retrieve Artifacts. writer: also publish, including replacing any Skill. admin: also delete Skills and manage readers and writers. superadmin: also create and manage Admins. There is exactly one superadmin — set once at `/setup` and never reassigned — so it is never a valid value in a request body; see AssignableRole."
+      },
+      "AssignableRole": {
+        "type": "string",
+        "enum": ["reader", "writer", "admin"],
+        "description": "The roles a request body may assign to a User. `superadmin` is excluded on purpose: it is set exactly once, by `/setup`, and no route ever grants, changes, or removes it afterwards."
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "first_name",
+          "last_name",
+          "role",
+          "must_change_password",
+          "created_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "role": { "$ref": "#/components/schemas/Role" },
+          "must_change_password": {
+            "type": "boolean",
+            "description": "True only for a User holding a password that was generated for them and not yet replaced. Meaningful only where a password exists — a User who authenticates through an identity provider has none (ADR-0007)."
+          },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Publisher": {
+        "type": "object",
+        "description": "Who last published a Skill. `email` is a snapshot taken at publish time and is always present; `user_id` and the names are null once that User has been removed.",
+        "required": ["user_id", "email", "first_name", "last_name"],
+        "properties": {
+          "user_id": { "type": ["string", "null"], "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "first_name": { "type": ["string", "null"] },
+          "last_name": { "type": ["string", "null"] }
+        }
+      },
+      "SkillDirectoryEntry": {
+        "type": "object",
+        "description": "One row of `GET /resources` (ticket 23, ADR-0026), sourced from the `resource_directory` view — deliberately not SkillSummary: `published_by_name` in place of the full Publisher object, and `updated_at` in place of `published_at`. `GET /resources/{id}` and `{kind}/by-name/{name}` are unaffected and still return SkillSummary/Skill.",
+        "required": ["id", "kind", "name", "description", "published_by_name", "updated_at", "installs", "tags"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "kind": {
+            "type": "string",
+            "example": "skill",
+            "description": "Plain text, not an enum: the catalog lists every Kind, and `skill` is the only value it can hold until a second one is registered (ADR-0026)."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "description": { "type": "string", "maxLength": 1024 },
+          "published_by_name": {
+            "type": "string",
+            "description": "A display-name snapshot taken at publish time (docs/data-model.md) — does not update if that User later renames themselves."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this Skill was last published, republished, or otherwise changed — not when it was first published (`published_at`, only on the detail read)."
+          },
+          "installs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Same field, same lag caveat as SkillSummary.installs (ADR-0012)."
+          },
+          "tags": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Tag" }
+          }
+        }
+      },
+      "SkillDirectoryStats": {
+        "type": "object",
+        "description": "Registry-wide counts for the catalog's hero stats. Unfiltered — unlike GET /resources's `total`, unaffected by any search term, Kind, or Tag selection.",
+        "required": ["skills", "publishers", "installs"],
+        "properties": {
+          "skills": { "type": "integer", "minimum": 0, "description": "Total Resource count, across every Kind." },
+          "publishers": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct Publishers who have published a Resource, counted by their email snapshot (docs/data-model.md) so a removed User's Resources still count."
+          },
+          "installs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total Install count across every Resource. Same lag caveat as SkillSummary.installs (ADR-0012); not comparable across Kinds once a second one exists (ADR-0028)."
+          }
+        }
+      },
+      "SkillSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "description",
+          "license",
+          "compatibility",
+          "metadata",
+          "allowed_tools",
+          "tags",
+          "published_by",
+          "published_at",
+          "installs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identity for reading, deleting, and downloading this Skill — generated once, on first publish, and never changes across republishes of the same `(kind, name)`. `name` remains how a Skill is published."
+          },
+          "kind": {
+            "type": "string",
+            "const": "skill",
+            "description": "Always \"skill\" on this shape — the Kind-specific fields below (`license`, `compatibility`, `metadata`, `allowed_tools`) only make sense for it (ADR-0026)."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "description": { "type": "string", "maxLength": 1024 },
+          "license": {
+            "type": ["string", "null"],
+            "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "compatibility": {
+            "type": ["string", "null"],
+            "maxLength": 500,
+            "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "metadata": {
+            "type": ["object", "null"],
+            "additionalProperties": { "type": "string" },
+            "description": "From the SKILL.md frontmatter, a mapping of string keys to string values. Null when the Skill never set it."
+          },
+          "allowed_tools": {
+            "type": ["string", "null"],
+            "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "tags": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Tag" },
+            "description": "Registry-owned, never parsed from or written into SKILL.md (ADR-0008), and never set by publishing — see `PUT /resources/{id}/tags`. Each Tag is drawn from the registry-wide catalog (ADR-0011); empty until something attaches one."
+          },
+          "published_by": { "$ref": "#/components/schemas/Publisher" },
+          "published_at": { "type": "string", "format": "date-time" },
+          "installs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many times this Skill has been installed — a download today, and eventually a CLI install too. 0 until the first one is ever recorded, never null. Reflects the last periodic refresh of the underlying materialized view (ADR-0012), not necessarily every Install recorded so far — this can lag reality by a short interval."
+          }
+        }
+      },
+      "Skill": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SkillSummary" },
+          {
+            "type": "object",
+            "required": ["body"],
+            "properties": {
+              "body": {
+                "type": "string",
+                "description": "The `SKILL.md` content below the frontmatter, as supplied by the publisher. Sanitise before rendering."
+              }
+            }
+          }
+        ]
+      },
+      "ArtifactFile": {
+        "type": "object",
+        "description": "One file of an Artifact: a path relative to the Skill's root, and the size of its bytes. Never any content — an Artifact's bytes go to and from object storage, never through this schema. Sent as the declared manifest when publishing, and returned as the actual one when reading (ADR-0032).",
+        "required": ["path", "size"],
+        "properties": {
+          "path": { "type": "string", "example": "references/style.md" },
+          "size": { "type": "integer", "minimum": 0, "description": "The file's byte length." }
+        }
+      },
+      "ArtifactManifest": {
+        "type": "object",
+        "description": "Every file an Artifact holds, `SKILL.md` first, listed back from object storage.",
+        "required": ["files"],
+        "properties": {
+          "files": { "type": "array", "items": { "$ref": "#/components/schemas/ArtifactFile" } }
+        }
+      },
+      "ArtifactUpload": {
+        "type": "object",
+        "description": "Where to write the Artifact: one presigned location per file of the manifest the request declared, in that same order. The bytes do not pass through this API (ADR-0001).",
+        "required": ["files", "expires_in_seconds"],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "url", "method", "headers"],
+              "properties": {
+                "path": { "type": "string", "description": "The declared file this destination is for.", "example": "SKILL.md" },
+                "url": { "type": "string", "format": "uri" },
+                "method": { "type": "string", "const": "PUT" },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Headers that must be sent verbatim for the presigned signature to verify."
+                }
+              }
+            }
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "description": "Shared by every URL above — they are all signed by the one call."
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "required": ["id", "name", "created_at", "last_used_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_used_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "TokenCreated": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Token" },
+          {
+            "type": "object",
+            "required": ["secret"],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "Shown once. Never cached by the web interface, and stored only as a hash by the Registry."
+              }
+            }
+          }
+        ]
+      },
+      "Tag": {
+        "type": "object",
+        "description": "A catalog Tag: a stable id plus its current name, shared by every Skill that carries it — renaming one (PATCH /tags/{id}) is visible everywhere it's attached, since every reference is by id, not name (ADR-0011).",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+            "description": "Always stored already lowercased and trimmed."
+          }
+        }
+      },
+      "PublicIdentityProvider": {
+        "type": "object",
+        "description": "What an unauthenticated visitor sees on the login page: enough to draw a button and start a flow, and nothing else. Must never grow a field that could carry a credential.",
+        "required": ["kind", "display_name"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["google", "microsoft", "github"],
+            "description": "The Provider's identity, and what a login is started against (ADR-0017)."
+          },
+          "display_name": { "type": "string", "description": "Shown on the login page as \"Continue with …\"." }
+        }
+      },
+      "IdentityProvider": {
+        "type": "object",
+        "description": "An Admin's view of a configured Identity Provider. `client_secret` is deliberately absent from this and every other response: it is written and never read back, so no response can leak it, not even to the Admin who set it.",
+        "required": [
+          "id",
+          "kind",
+          "display_name",
+          "client_id",
+          "permitted_organisations",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "kind": { "type": "string", "enum": ["google", "microsoft", "github"] },
+          "display_name": { "type": "string" },
+          "client_id": { "type": "string" },
+          "permitted_organisations": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The organisations allowed to sign in: Workspace domains (Google `hd`), tenant ids (Entra `tid`), or GitHub organisation logins. A login is admitted if what the Provider asserts matches any one of them, case-insensitively — a claim for the first two, a live `/user/orgs` check for GitHub, which issues no ID token (ADR-0018) — and never against the email address's suffix. An empty array is a configuration rather than a blank: no check runs, and everyone the provider authenticates gets a reader account here (ADR-0021)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the login page offers it and logins through it are accepted. Disabling is how a Provider is taken out of service; there is no delete."
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Integration": {
+        "type": "object",
+        "description": "The Registry's registration with a Git Provider, holding the credential pair a Connection is granted against (ADR-0024). `client_secret` is deliberately absent from this and every other response: it is written and never read back. More than one Integration may exist for the same `provider` (ADR-0025) — `id` is the row's identity.",
+        "required": ["id", "provider", "display_name", "client_id", "app_slug", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "provider": {
+            "type": "string",
+            "example": "github",
+            "description": "The Git Provider this app is for. Plain text rather than an enum, so registering a new provider is an insert and not a migration."
+          },
+          "display_name": { "type": "string", "example": "GitHub" },
+          "client_id": { "type": "string", "example": "Iv1.a1b2c3d4e5f6" },
+          "app_slug": {
+            "type": "string",
+            "nullable": true,
+            "example": "acme-skill-registry",
+            "description": "The app's slug at the provider, used to build its installation URL. Null for a provider with no installation step — only GitHub has one."
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SkillFiles": {
+        "type": "object",
+        "description": "A folder's files, ready to feed the publishing pipeline. Paths are relative to the folder that was imported, not the project root — the same shape a dropped folder produces.",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "content_base64"],
+              "properties": {
+                "path": { "type": "string", "example": "SKILL.md" },
+                "content_base64": {
+                  "type": "string",
+                  "description": "The file's bytes, base64-encoded. Base64 only because bytes have to cross JSON; the encoding belongs at the wire and nowhere else."
+                }
+              }
+            }
+          }
+        }
+      },
+      "Connection": {
+        "type": "object",
+        "description": "A writer's own grant of repository access (ADR-0024). There is no token field, and no variant of this shape has one — a Connection's tokens never leave the server in any response, on any route.",
+        "required": ["provider", "integration_id", "external_account_login", "created_at", "updated_at"],
+        "properties": {
+          "provider": { "type": "string", "example": "github" },
+          "integration_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Which Integration (app) this grant was issued through — a provider may have more than one configured (ADR-0025)."
+          },
+          "external_account_login": {
+            "type": "string",
+            "example": "ada-work",
+            "description": "The connected account at the provider. Present because a writer needs it: the connected account need not be the one they sign in with, and which account is connected is usually the answer to why an Import cannot see a repository."
+          },
+          "created_at": { "type": "string", "format": "date-time", "description": "When the grant was given — the consent's own timestamp." },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "A stable machine-readable identifier for what went wrong — for validation failures, the specific rule that failed."
+              },
+              "message": { "type": "string" },
+              "field": {
+                "type": "string",
+                "description": "The field or file that broke the rule, when there is one."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

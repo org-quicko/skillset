@@ -1,0 +1,38 @@
+{
+  "name": "@in-org-quicko/skillset-cli",
+  "version": "1.0.0",
+  "description": "CLI for publishing and managing Skills on a Skillset Registry.",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/org-quicko/skillset.git",
+    "directory": "apps/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "skillset": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run src/build.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@clack/prompts": "^1.2.0",
+    "@in-org-quicko/skillset-installer": "workspace:*",
+    "@in-org-quicko/skillset-shared": "workspace:*",
+    "@types/bun": "^1.4.0",
+    "commander": "^13.1.0",
+    "fflate": "^0.8.3",
+    "picocolors": "^1.1.1",
+    "typescript": "^5.7.2",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  }
+}
