@@ -1,6 +1,6 @@
 {
   "name": "@in-org-quicko/skillset-cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "CLI for publishing and managing Skills on a Skillset Registry.",
   "type": "module",
   "license": "AGPL-3.0-only",
