@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
-import { boolean, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appEnum, appTable } from "../schemaFactory.js";
 
-export const identityProviderKindEnum = pgEnum("identity_provider_kind", [
+export const identityProviderKindEnum = appEnum("identity_provider_kind", [
   "google",
   "microsoft",
   "github",
@@ -21,7 +22,7 @@ export const identityProviderKindEnum = pgEnum("identity_provider_kind", [
  * (ADR-0016), so what an Admin configures is the credential pair and the
  * organisations to admit — nothing about the protocol.
  */
-export const identityProviders = pgTable(
+export const identityProviders = appTable(
   "identity_providers",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

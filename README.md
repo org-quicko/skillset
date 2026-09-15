@@ -30,6 +30,17 @@ interface from the same origin at `http://localhost:3000`. After setting up, the
 See [`.env.example`](.env.example) for the full list of environment variables (database,
 storage/S3, `PUBLIC_URL`, logging, etc).
 
+### Which Postgres schema it uses
+
+Everything lives in the schema `DB_SCHEMA` names, defaulting to `public`. Set it when the database
+is shared with other applications, a schema each, rather than dedicated to this Registry — the
+schema is created on startup, and the shipped migrations name their schema through a placeholder
+that is resolved when they run, so one build runs against any schema. See
+[ADR-0036](docs/adr/0036-schema-placement-is-a-deployment-choice.md).
+
+Nothing else needs configuring for it: every query and every migration is schema-qualified from
+this one variable, so `DATABASE_URL` needs no `search_path`.
+
 ### Logging in through Google Workspace or Microsoft Entra
 
 Set `PUBLIC_URL` to the address the Registry is reached at, then add an Identity Provider under

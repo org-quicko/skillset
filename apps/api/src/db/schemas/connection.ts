@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 import { integrations } from "./integration";
 import { users } from "./user";
 
@@ -15,7 +16,7 @@ import { users } from "./user";
  * credential in the authentication table is the exact conflation ADR-0024
  * exists to undo.
  */
-export const connections = pgTable(
+export const connections = appTable(
   "connections",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { appEnum, appTable } from "../schemaFactory.js";
 import { resources } from "./resource";
 
 /**
@@ -9,7 +10,7 @@ import { resources } from "./resource";
  * about "where an Install came from" is Skill-specific, but renaming it is
  * out of this ticket's scope (spec: `.scratch/generic-resources/spec.md`).
  */
-export const resourceInstallSourceEnum = pgEnum("skill_install_source", ["web", "cli", "mcp"]);
+export const resourceInstallSourceEnum = appEnum("skill_install_source", ["web", "cli", "mcp"]);
 
 /**
  * The Install event log (ADR-0012, ADR-0028, spec: `.scratch/skill-analytics/spec.md`)
@@ -22,7 +23,7 @@ export const resourceInstallSourceEnum = pgEnum("skill_install_source", ["web", 
  * column that can only ever equal `created_at` would be a bare column, not
  * genuine consistency with the rest of the schema.
  */
-export const resourceInstallEvents = pgTable(
+export const resourceInstallEvents = appTable(
   "resource_install_events",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

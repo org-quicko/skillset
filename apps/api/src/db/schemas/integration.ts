@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 
 /**
  * The Registry's registration with a Git Provider, holding the credential
@@ -22,7 +23,7 @@ import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
  * is the row's identity (ADR-0025). A writer chooses which one to connect
  * through; `connections.integration_id` records which app a grant came from.
  */
-export const integrations = pgTable("integrations", {
+export const integrations = appTable("integrations", {
   id: uuid("id").primaryKey().default(sql`uuidv7()`),
   // The Git Provider this app is for: `github`, `gitlab`. Plain text rather
   // than an enum, so adding a provider is an insert and not a migration

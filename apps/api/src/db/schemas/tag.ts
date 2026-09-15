@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { check, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { check, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 
 /**
  * The Tag catalog — registry-wide, not scoped to any one Skill (ADR-0008,
@@ -8,7 +9,7 @@ import { check, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
  * unique index is enough to catch a collision; there's no need for a
  * case-insensitive functional index.
  */
-export const tags = pgTable(
+export const tags = appTable(
   "tags",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

@@ -1,12 +1,13 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 import { users } from "./user";
 
 /**
  * Better Auth's account model (ADR-0016) — one row per way a User can sign in.
  * Nothing in this codebase writes to this table directly.
  */
-export const accounts = pgTable(
+export const accounts = appTable(
   "accounts",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

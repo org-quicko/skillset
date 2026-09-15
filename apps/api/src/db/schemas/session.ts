@@ -1,12 +1,13 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 import { users } from "./user";
 
 /**
  * Better Auth's session model (ADR-0016). Nothing in this codebase writes to
  * this table directly — Better Auth owns every row.
  */
-export const sessions = pgTable(
+export const sessions = appTable(
   "sessions",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

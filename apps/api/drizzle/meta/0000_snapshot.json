@@ -1,12 +1,12 @@
 {
-  "id": "53b6dc9c-4c99-4bad-ab9b-c2bacb75bd3a",
+  "id": "5c9b0129-cc66-4cce-bdec-262b64d71240",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.accounts": {
+    "__db_schema__.accounts": {
       "name": "accounts",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -145,6 +145,7 @@
           "name": "accounts_user_id_users_id_fk",
           "tableFrom": "accounts",
           "tableTo": "users",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
             "user_id"
           ],
@@ -161,9 +162,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.sessions": {
+    "__db_schema__.sessions": {
       "name": "sessions",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -239,6 +240,7 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
             "user_id"
           ],
@@ -263,9 +265,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.users": {
+    "__db_schema__.users": {
       "name": "users",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -318,7 +320,7 @@
         "role": {
           "name": "role",
           "type": "user_role",
-          "typeSchema": "public",
+          "typeSchema": "__db_schema__",
           "primaryKey": false,
           "notNull": true
         },
@@ -356,7 +358,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"users\".\"role\" = 'superadmin'",
+          "where": "\"__db_schema__\".\"users\".\"role\" = 'superadmin'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -377,9 +379,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.verifications": {
+    "__db_schema__.verifications": {
       "name": "verifications",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -445,9 +447,135 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.identity_providers": {
+    "__db_schema__.connections": {
+      "name": "connections",
+      "schema": "__db_schema__",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "integration_id": {
+          "name": "integration_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_account_id": {
+          "name": "external_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_account_login": {
+          "name": "external_account_login",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "access_token": {
+          "name": "access_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token_expires_at": {
+          "name": "refresh_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "connections_user_id_users_id_fk": {
+          "name": "connections_user_id_users_id_fk",
+          "tableFrom": "connections",
+          "tableTo": "users",
+          "schemaTo": "__db_schema__",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "connections_integration_id_integrations_id_fk": {
+          "name": "connections_integration_id_integrations_id_fk",
+          "tableFrom": "connections",
+          "tableTo": "integrations",
+          "schemaTo": "__db_schema__",
+          "columnsFrom": [
+            "integration_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "connections_user_id_provider_key": {
+          "name": "connections_user_id_provider_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "provider"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "__db_schema__.identity_providers": {
       "name": "identity_providers",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -459,7 +587,7 @@
         "kind": {
           "name": "kind",
           "type": "identity_provider_kind",
-          "typeSchema": "public",
+          "typeSchema": "__db_schema__",
           "primaryKey": false,
           "notNull": true
         },
@@ -481,11 +609,12 @@
           "primaryKey": false,
           "notNull": true
         },
-        "permitted_organisation": {
-          "name": "permitted_organisation",
-          "type": "text",
+        "permitted_organisations": {
+          "name": "permitted_organisations",
+          "type": "text[]",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'{}'::text[]"
         },
         "enabled": {
           "name": "enabled",
@@ -522,17 +651,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "identity_providers_enabled_requires_organisation": {
-          "name": "identity_providers_enabled_requires_organisation",
-          "value": "NOT \"identity_providers\".\"enabled\" OR \"identity_providers\".\"permitted_organisation\" IS NOT NULL"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.skills": {
-      "name": "skills",
-      "schema": "",
+    "__db_schema__.integrations": {
+      "name": "integrations",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -540,6 +664,128 @@
           "primaryKey": true,
           "notNull": true,
           "default": "uuidv7()"
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_secret": {
+          "name": "client_secret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "app_slug": {
+          "name": "app_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "__db_schema__.rate_limits": {
+      "name": "rate_limits",
+      "schema": "__db_schema__",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_request": {
+          "name": "last_request",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "rate_limits_key_unique": {
+          "name": "rate_limits_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "__db_schema__.resources": {
+      "name": "resources",
+      "schema": "__db_schema__",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "name": {
           "name": "name",
@@ -557,31 +803,13 @@
           "name": "body",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
-        },
-        "license": {
-          "name": "license",
-          "type": "text",
-          "primaryKey": false,
           "notNull": false
         },
-        "compatibility": {
-          "name": "compatibility",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "metadata": {
-          "name": "metadata",
+        "payload": {
+          "name": "payload",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": false
-        },
-        "allowed_tools": {
-          "name": "allowed_tools",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "published_by": {
           "name": "published_by",
@@ -634,8 +862,8 @@
         }
       },
       "indexes": {
-        "skills_search_idx": {
-          "name": "skills_search_idx",
+        "resources_search_idx": {
+          "name": "resources_search_idx",
           "columns": [
             {
               "expression": "search",
@@ -649,11 +877,11 @@
           "method": "gin",
           "with": {}
         },
-        "skills_published_at_idx": {
-          "name": "skills_published_at_idx",
+        "resources_updated_at_idx": {
+          "name": "resources_updated_at_idx",
           "columns": [
             {
-              "expression": "published_at",
+              "expression": "updated_at",
               "isExpression": false,
               "asc": false,
               "nulls": "last"
@@ -666,10 +894,11 @@
         }
       },
       "foreignKeys": {
-        "skills_published_by_users_id_fk": {
-          "name": "skills_published_by_users_id_fk",
-          "tableFrom": "skills",
+        "resources_published_by_users_id_fk": {
+          "name": "resources_published_by_users_id_fk",
+          "tableFrom": "resources",
           "tableTo": "users",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
             "published_by"
           ],
@@ -682,26 +911,22 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "skills_name_unique": {
-          "name": "skills_name_unique",
+        "resources_kind_name_unique": {
+          "name": "resources_kind_name_unique",
           "nullsNotDistinct": false,
           "columns": [
+            "kind",
             "name"
           ]
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "skills_name_format": {
-          "name": "skills_name_format",
-          "value": "\"skills\".\"name\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(\"skills\".\"name\") <= 64"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.skill_install_events": {
-      "name": "skill_install_events",
-      "schema": "",
+    "__db_schema__.resource_install_events": {
+      "name": "resource_install_events",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -710,8 +935,8 @@
           "notNull": true,
           "default": "uuidv7()"
         },
-        "skill_id": {
-          "name": "skill_id",
+        "resource_id": {
+          "name": "resource_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -719,9 +944,15 @@
         "source": {
           "name": "source",
           "type": "skill_install_source",
-          "typeSchema": "public",
+          "typeSchema": "__db_schema__",
           "primaryKey": false,
           "notNull": true
+        },
+        "client_fingerprint": {
+          "name": "client_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -732,11 +963,11 @@
         }
       },
       "indexes": {
-        "skill_install_events_skill_id_idx": {
-          "name": "skill_install_events_skill_id_idx",
+        "resource_install_events_resource_id_idx": {
+          "name": "resource_install_events_resource_id_idx",
           "columns": [
             {
-              "expression": "skill_id",
+              "expression": "resource_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -746,15 +977,43 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "resource_install_events_dedupe_idx": {
+          "name": "resource_install_events_dedupe_idx",
+          "columns": [
+            {
+              "expression": "resource_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "client_fingerprint",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "((\"created_at\" AT TIME ZONE 'UTC')::date)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
-        "skill_install_events_skill_id_skills_id_fk": {
-          "name": "skill_install_events_skill_id_skills_id_fk",
-          "tableFrom": "skill_install_events",
-          "tableTo": "skills",
+        "resource_install_events_resource_id_resources_id_fk": {
+          "name": "resource_install_events_resource_id_resources_id_fk",
+          "tableFrom": "resource_install_events",
+          "tableTo": "resources",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
-            "skill_id"
+            "resource_id"
           ],
           "columnsTo": [
             "id"
@@ -769,12 +1028,12 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.skill_tags": {
-      "name": "skill_tags",
-      "schema": "",
+    "__db_schema__.resource_tags": {
+      "name": "resource_tags",
+      "schema": "__db_schema__",
       "columns": {
-        "skill_id": {
-          "name": "skill_id",
+        "resource_id": {
+          "name": "resource_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -801,8 +1060,8 @@
         }
       },
       "indexes": {
-        "skill_tags_tag_id_idx": {
-          "name": "skill_tags_tag_id_idx",
+        "resource_tags_tag_id_idx": {
+          "name": "resource_tags_tag_id_idx",
           "columns": [
             {
               "expression": "tag_id",
@@ -818,12 +1077,13 @@
         }
       },
       "foreignKeys": {
-        "skill_tags_skill_id_skills_id_fk": {
-          "name": "skill_tags_skill_id_skills_id_fk",
-          "tableFrom": "skill_tags",
-          "tableTo": "skills",
+        "resource_tags_resource_id_resources_id_fk": {
+          "name": "resource_tags_resource_id_resources_id_fk",
+          "tableFrom": "resource_tags",
+          "tableTo": "resources",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
-            "skill_id"
+            "resource_id"
           ],
           "columnsTo": [
             "id"
@@ -831,10 +1091,11 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "skill_tags_tag_id_tags_id_fk": {
-          "name": "skill_tags_tag_id_tags_id_fk",
-          "tableFrom": "skill_tags",
+        "resource_tags_tag_id_tags_id_fk": {
+          "name": "resource_tags_tag_id_tags_id_fk",
+          "tableFrom": "resource_tags",
           "tableTo": "tags",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
             "tag_id"
           ],
@@ -846,10 +1107,10 @@
         }
       },
       "compositePrimaryKeys": {
-        "skill_tags_skill_id_tag_id_pk": {
-          "name": "skill_tags_skill_id_tag_id_pk",
+        "resource_tags_resource_id_tag_id_pk": {
+          "name": "resource_tags_resource_id_tag_id_pk",
           "columns": [
-            "skill_id",
+            "resource_id",
             "tag_id"
           ]
         }
@@ -859,9 +1120,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.tags": {
+    "__db_schema__.tags": {
       "name": "tags",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -907,14 +1168,14 @@
       "checkConstraints": {
         "tags_name_format": {
           "name": "tags_name_format",
-          "value": "\"tags\".\"name\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(\"tags\".\"name\") <= 32"
+          "value": "\"__db_schema__\".\"tags\".\"name\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(\"__db_schema__\".\"tags\".\"name\") <= 32"
         }
       },
       "isRLSEnabled": false
     },
-    "public.tokens": {
+    "__db_schema__.tokens": {
       "name": "tokens",
-      "schema": "",
+      "schema": "__db_schema__",
       "columns": {
         "id": {
           "name": "id",
@@ -999,6 +1260,7 @@
           "name": "tokens_user_id_users_id_fk",
           "tableFrom": "tokens",
           "tableTo": "users",
+          "schemaTo": "__db_schema__",
           "columnsFrom": [
             "user_id"
           ],
@@ -1017,9 +1279,9 @@
     }
   },
   "enums": {
-    "public.user_role": {
+    "__db_schema__.user_role": {
       "name": "user_role",
-      "schema": "public",
+      "schema": "__db_schema__",
       "values": [
         "reader",
         "writer",
@@ -1027,21 +1289,22 @@
         "superadmin"
       ]
     },
-    "public.identity_provider_kind": {
+    "__db_schema__.identity_provider_kind": {
       "name": "identity_provider_kind",
-      "schema": "public",
+      "schema": "__db_schema__",
       "values": [
         "google",
         "microsoft",
         "github"
       ]
     },
-    "public.skill_install_source": {
+    "__db_schema__.skill_install_source": {
       "name": "skill_install_source",
-      "schema": "public",
+      "schema": "__db_schema__",
       "values": [
         "web",
-        "cli"
+        "cli",
+        "mcp"
       ]
     }
   },
@@ -1050,11 +1313,17 @@
   "roles": {},
   "policies": {},
   "views": {
-    "public.skill_directory": {
+    "__db_schema__.resource_directory": {
       "columns": {
         "id": {
           "name": "id",
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1101,15 +1370,15 @@
           "notNull": false
         }
       },
-      "name": "skill_directory",
-      "schema": "public",
+      "name": "resource_directory",
+      "schema": "__db_schema__",
       "isExisting": true,
       "materialized": false
     },
-    "public.skill_analytics": {
+    "__db_schema__.resource_analytics": {
       "columns": {
-        "skill_id": {
-          "name": "skill_id",
+        "resource_id": {
+          "name": "resource_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -1121,8 +1390,8 @@
           "notNull": true
         }
       },
-      "name": "skill_analytics",
-      "schema": "public",
+      "name": "resource_analytics",
+      "schema": "__db_schema__",
       "isExisting": true,
       "materialized": true
     }

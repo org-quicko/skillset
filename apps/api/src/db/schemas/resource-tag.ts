@@ -1,4 +1,5 @@
-import { index, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 import { resources } from "./resource";
 import { tags } from "./tag";
 
@@ -8,7 +9,7 @@ import { tags } from "./tag";
  * deletes a Tag today (ADR-0011) — a future one shouldn't have to remember to
  * clean this table up too.
  */
-export const resourceTags = pgTable(
+export const resourceTags = appTable(
   "resource_tags",
   {
     resource_id: uuid("resource_id")

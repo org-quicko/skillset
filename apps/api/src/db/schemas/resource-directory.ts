@@ -1,4 +1,5 @@
-import { integer, jsonb, pgView, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, jsonb, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appView } from "../schemaFactory.js";
 import { tsvector } from "./column-types";
 
 /**
@@ -21,7 +22,7 @@ import { tsvector } from "./column-types";
  * `resources.search` — Drizzle has no `CREATE VIEW` generator either, and
  * this is declared `.existing()` so Drizzle only types queries against it.
  */
-export const resourceDirectory = pgView("resource_directory", {
+export const resourceDirectory = appView("resource_directory", {
   id: uuid("id").notNull(),
   kind: text("kind").notNull(),
   name: text("name").notNull(),

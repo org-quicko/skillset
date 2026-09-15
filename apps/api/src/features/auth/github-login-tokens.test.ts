@@ -6,6 +6,7 @@ import { createAuth } from "./instance.js";
 import { createLogger } from "../../lib/logger.js";
 import { deriveKeys } from "../../lib/secrets.js";
 import { accounts, connections, integrations, users, type UserRow } from "../../db/schemas/index.js";
+import { dbSchema } from "../../db/schemaFactory.js";
 import {
   seedUserWithPassword,
   startTestContext,
@@ -212,7 +213,7 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
         scope: "read:user,user:email,read:org,repo",
       });
 
-      await context.sql`UPDATE "accounts" SET "access_token" = NULL WHERE "provider_id" = 'github'`;
+      await context.db.update(accounts).set({ access_token: null }).where(eq(accounts.provider_id, "github"));
 
       const [row] = await storedAccount("github");
       expect(row?.access_token).toBeNull();
@@ -272,7 +273,7 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
       });
 
       await context.sql`
-        UPDATE "accounts"
+        UPDATE ${context.sql(dbSchema)}."accounts"
         SET "access_token" = NULL,
             "refresh_token" = NULL,
             "access_token_expires_at" = NULL,
@@ -293,10 +294,12 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
     it("was applied by the migrator, which ran twice at start-up", async () => {
       // `startTestContext` runs migrations twice on purpose, so a migration
       // that is not idempotent fails the whole suite rather than one case.
+      // Bookkeeping lives alongside the objects it describes, in the schema
+      // DB_SCHEMA names, so two apps sharing a database keep separate ledgers.
       const applied = await context.sql<{ hash: string }[]>`
-        SELECT hash FROM drizzle.__drizzle_migrations ORDER BY created_at
+        SELECT hash FROM ${context.sql(dbSchema)}.__drizzle_migrations ORDER BY created_at
       `;
-      expect(applied.length).toBeGreaterThanOrEqual(6);
+      expect(applied.length).toBeGreaterThanOrEqual(2);
     });
   });
 

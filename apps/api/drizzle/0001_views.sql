@@ -1,30 +1,37 @@
 -- Drizzle has no CREATE VIEW / CREATE MATERIALIZED VIEW generator, so both
 -- views are declared `.existing()` in the schema (see
--- src/db/schemas/skill-analytics.ts and skill-directory.ts) and created here by
--- hand. skill_directory reads from skill_analytics, so the order matters.
+-- src/db/schemas/resource-analytics.ts and resource-directory.ts) and created
+-- here by hand. resource_directory reads from resource_analytics, so the
+-- order matters.
+--
+-- "__db_schema__" is the sentinel every generated migration carries in place
+-- of a real schema name; runMigrations substitutes it (see
+-- src/db/schemaName.ts). Hand-written SQL has to spell it out the same way,
+-- because nothing qualifies these names for us.
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS "skill_analytics" AS
-  SELECT "skill_id", count(*)::integer AS "install_count"
-  FROM "skill_install_events"
-  GROUP BY "skill_id";
+CREATE MATERIALIZED VIEW "__db_schema__"."resource_analytics" AS
+  SELECT "resource_id", count(*)::integer AS "install_count"
+  FROM "__db_schema__"."resource_install_events"
+  GROUP BY "resource_id";
 --> statement-breakpoint
-CREATE OR REPLACE VIEW "skill_directory" AS
+CREATE VIEW "__db_schema__"."resource_directory" AS
   SELECT
-    "s"."id",
-    "s"."name",
-    "s"."description",
-    "s"."published_by_name",
-    "s"."updated_at",
-    "s"."search",
-    COALESCE("sa"."install_count", 0) AS "install_count",
+    "r"."id",
+    "r"."kind",
+    "r"."name",
+    "r"."description",
+    "r"."published_by_name",
+    "r"."updated_at",
+    "r"."search",
+    COALESCE("ra"."install_count", 0) AS "install_count",
     COALESCE(
       (
         SELECT jsonb_agg(jsonb_build_object('id', "t"."id", 'name', "t"."name") ORDER BY "t"."name")
-        FROM "skill_tags" "st"
-        JOIN "tags" "t" ON "t"."id" = "st"."tag_id"
-        WHERE "st"."skill_id" = "s"."id"
+        FROM "__db_schema__"."resource_tags" "rt"
+        JOIN "__db_schema__"."tags" "t" ON "t"."id" = "rt"."tag_id"
+        WHERE "rt"."resource_id" = "r"."id"
       ),
       '[]'::jsonb
     ) AS "tags"
-  FROM "skills" "s"
-  LEFT JOIN "skill_analytics" "sa" ON "sa"."skill_id" = "s"."id";
+  FROM "__db_schema__"."resources" "r"
+  LEFT JOIN "__db_schema__"."resource_analytics" "ra" ON "ra"."resource_id" = "r"."id";

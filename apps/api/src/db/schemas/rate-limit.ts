@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { bigint, integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { bigint, integer, text, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 
 /**
  * Better Auth's rate-limit counters (ISSUE-7). Nothing in this codebase reads
@@ -12,7 +13,7 @@ import { bigint, integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
  * instead, so the password sign-in limit holds across every replica and
  * survives a redeploy.
  */
-export const rateLimits = pgTable("rate_limits", {
+export const rateLimits = appTable("rate_limits", {
   id: uuid("id").primaryKey().default(sql`uuidv7()`),
   // `<ip>|<path>`, or `no-trusted-ip|<path>` when no client address can be
   // resolved — see `advanced.ipAddress` in features/auth/instance.ts.

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { boolean, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { appEnum, appTable } from "../schemaFactory.js";
 
 // Column names and TS property keys are both snake_case, matching the wire
 // (docs/openapi.json) 1:1 — there is no separate camelCase domain shape to
@@ -7,9 +8,9 @@ import { boolean, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "dr
 // `@better-auth/cli generate` (see src/db/schemas/README.md) and then mapped
 // back to that convention in `auth/instance.ts`.
 
-export const userRoleEnum = pgEnum("user_role", ["reader", "writer", "admin", "superadmin"]);
+export const userRoleEnum = appEnum("user_role", ["reader", "writer", "admin", "superadmin"]);
 
-export const users = pgTable(
+export const users = appTable(
   "users",
   {
     // Postgres 18's native uuidv7() (this repo runs postgres:18-alpine) —

@@ -1,11 +1,12 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 
 /**
  * Better Auth's verification model (ADR-0016) — short-lived values keyed by an
  * identifier. Nothing in this codebase writes to this table directly.
  */
-export const verifications = pgTable(
+export const verifications = appTable(
   "verifications",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),

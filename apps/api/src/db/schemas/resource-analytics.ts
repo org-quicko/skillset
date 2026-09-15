@@ -1,4 +1,5 @@
-import { integer, pgMaterializedView, uuid } from "drizzle-orm/pg-core";
+import { integer, uuid } from "drizzle-orm/pg-core";
+import { appMaterializedView } from "../schemaFactory.js";
 
 /**
  * A materialized view of running install counts per Resource, aggregated
@@ -15,7 +16,7 @@ import { integer, pgMaterializedView, uuid } from "drizzle-orm/pg-core";
  * itself (docs/data-model.md), the same as it did against the plain table
  * this view replaced.
  */
-export const resourceAnalytics = pgMaterializedView("resource_analytics", {
+export const resourceAnalytics = appMaterializedView("resource_analytics", {
   resource_id: uuid("resource_id").notNull(),
   install_count: integer("install_count").notNull(),
 }).existing();

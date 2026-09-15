@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 import { tsvector } from "./column-types";
 import { users } from "./user";
 
@@ -8,7 +9,7 @@ import { users } from "./user";
  * (ADR-0026). One row per Resource, one Artifact per row for a Kind that has
  * one (ADR-0027).
  */
-export const resources = pgTable(
+export const resources = appTable(
   "resources",
   {
     // Stable identity for the API's read/delete/artifact routes (ticket 16),

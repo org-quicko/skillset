@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { appTable } from "../schemaFactory.js";
 import { users } from "./user";
 
-export const tokens = pgTable(
+export const tokens = appTable(
   "tokens",
   {
     id: uuid("id").primaryKey().default(sql`uuidv7()`),
