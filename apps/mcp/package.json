@@ -1,6 +1,6 @@
 {
   "name": "@in-org-quicko/skillset-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "MCP server for searching, installing, and publishing Skills on a Skillset Registry.",
   "type": "module",
   "license": "AGPL-3.0-only",

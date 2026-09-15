@@ -14,12 +14,12 @@ import {
 import { installSkill, resolveInstallTarget, type InstallContext, type LinkResult } from "@in-org-quicko/skillset-installer";
 
 /** The project root, environment, and home directory an install is resolved and written against. */
-export type AddSkillsContext = InstallContext;
+export type InstallSkillsContext = InstallContext;
 
-export interface AddSkillsDeps {
+export interface InstallSkillsDeps {
   fetchImpl: typeof fetch;
   registry: string;
-  ctx: AddSkillsContext;
+  ctx: InstallSkillsContext;
   scope: Scope;
   /** The resolved Agent and the rung that resolved it — `agentId: null` installs canonically and links nothing. */
   detection: AgentDetection;
@@ -27,14 +27,14 @@ export interface AddSkillsDeps {
   overwrite: boolean;
 }
 
-/** {@link addSkills}'s result: the Agent detection that governed the batch, and one outcome per Skill. */
-export interface AddSkillsResult {
+/** {@link installSkills}'s result: the Agent detection that governed the batch, and one outcome per Skill. */
+export interface InstallSkillsResult {
   detection: AgentDetection;
-  outcomes: AddSkillOutcome[];
+  outcomes: InstallSkillOutcome[];
 }
 
-/** One Skill's outcome from {@link addSkills}. */
-export type AddSkillOutcome =
+/** One Skill's outcome from {@link installSkills}. */
+export type InstallSkillOutcome =
   | {
       name: string;
       status: "installed";
@@ -105,7 +105,7 @@ async function pathExists(path: string): Promise<boolean> {
  * contains, where it would have gone, and its `SKILL.md` body — for the Skill to be read or
  * fetched some other way.
  *
- * A pure function of its arguments, kept separate from {@link addOneSkill} so the exact shape
+ * A pure function of its arguments, kept separate from {@link installOneSkill} so the exact shape
  * of a fallback result is directly testable without needing a real Agent row with no
  * directory — the current hand-curated table (ADR-0031) has none.
  */
@@ -115,7 +115,7 @@ export function buildFallbackOutcome(
   registry: string,
   intendedDirectory: string,
   manifest: ArtifactManifest,
-): AddSkillOutcome {
+): InstallSkillOutcome {
   return {
     name,
     status: "fallback",
@@ -132,7 +132,7 @@ export function buildFallbackOutcome(
  * resolving the target, and to a refusal right before the download so a refused or
  * unresolvable Skill never reaches the network for its Artifact.
  */
-async function addOneSkill(deps: AddSkillsDeps, name: string): Promise<AddSkillOutcome> {
+async function installOneSkill(deps: InstallSkillsDeps, name: string): Promise<InstallSkillOutcome> {
   const { fetchImpl, registry, ctx, scope, overwrite } = deps;
   const agentId = deps.detection.agentId;
 
@@ -206,7 +206,7 @@ async function addOneSkill(deps: AddSkillsDeps, name: string): Promise<AddSkillO
  * directory to resolve and write paths against, the Scope, the resolved Agent `detection`,
  * and whether an existing install may be overwritten.
  * @param names - The Skill names to install, exactly as given to the tool.
- * @returns The governing Agent `detection` and one {@link AddSkillOutcome} per entry in
+ * @returns The governing Agent `detection` and one {@link InstallSkillOutcome} per entry in
  * `names`, in the same order. One Skill failing — an unknown name, a refused download, a bad
  * Artifact — never stops the rest of the batch.
  *
@@ -220,7 +220,7 @@ async function addOneSkill(deps: AddSkillsDeps, name: string): Promise<AddSkillO
  *
  * @example
  * ```ts
- * const { detection, outcomes } = await addSkills(
+ * const { detection, outcomes } = await installSkills(
  *   { fetchImpl: fetch, registry: "https://registry.example", ctx, scope: "project",
  *     detection: { agentId: "claude-code", step: "client-identity" }, overwrite: false },
  *   ["code-review", "typo-name"],
@@ -228,10 +228,10 @@ async function addOneSkill(deps: AddSkillsDeps, name: string): Promise<AddSkillO
  * // -> outcomes: [{ name: "code-review", status: "installed", ... }, { name: "typo-name", status: "error", ... }]
  * ```
  */
-export async function addSkills(deps: AddSkillsDeps, names: readonly string[]): Promise<AddSkillsResult> {
-  const outcomes: AddSkillOutcome[] = [];
+export async function installSkills(deps: InstallSkillsDeps, names: readonly string[]): Promise<InstallSkillsResult> {
+  const outcomes: InstallSkillOutcome[] = [];
   for (const name of names) {
-    outcomes.push(await addOneSkill(deps, name));
+    outcomes.push(await installOneSkill(deps, name));
   }
   return { detection: deps.detection, outcomes };
 }

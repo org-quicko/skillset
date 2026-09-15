@@ -208,16 +208,16 @@ export const IDENTITY_PROVIDER_GUIDANCE: Record<
     organisationTooltip:
       "Matched against the account's Workspace domain, not the email address's suffix. For example: " +
       "example.com, example.org",
-    organisationSupport: "Anyone whose domain matches gets a reader account. Leave empty to let anyone sign in with Google Workspace.",
+    organisationSupport: "Anyone whose domain matches gets a reader account. Leave empty to let anyone sign in with Google.",
   },
   microsoft: {
-    label: "Microsoft Entra",
+    label: "Microsoft",
     organisation: "Permitted tenant ids",
     organisationTooltip:
       "Matched against the tenant's ID, found in the Entra admin center. Listing more than one switches " +
       "sign-in to the multi-tenant endpoint, so each tenant must consent to the app separately.",
     organisationSupport:
-      "Anyone whose tenant matches gets a reader account. Leave empty to let anyone sign in with Microsoft Entra.",
+      "Anyone whose tenant matches gets a reader account. Leave empty to let anyone sign in with Microsoft.",
   },
   github: {
     label: "GitHub",

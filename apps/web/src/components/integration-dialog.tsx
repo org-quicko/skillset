@@ -1,10 +1,11 @@
 import { INTEGRATION_DESCRIPTION_MAX_LENGTH, type Integration } from "@in-org-quicko/skillset-shared";
-import { PlusIcon } from "lucide-react";
+import { InfoIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCreateIntegration, useUpdateIntegration } from "@/hooks/use-integrations";
 import { apiErrorMessage } from "@/lib/api";
 
@@ -131,7 +132,20 @@ export function IntegrationDialog({
           />
         </FormField>
 
-        <FormField htmlFor="integration_app_slug" label="App slug">
+        <FormField
+          htmlFor="integration_app_slug"
+          label={
+            <span className="flex items-center gap-1.5">
+              App slug
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <InfoIcon className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent>App slug should be the name of the Github App</TooltipContent>
+              </Tooltip>
+            </span>
+          }
+        >
           <Input
             id="integration_app_slug"
             value={appSlug}
@@ -159,7 +173,6 @@ export function IntegrationDialog({
               value={clientSecret}
               onChange={(event) => setClientSecret(event.target.value)}
               disabled={pending}
-              placeholder={isEdit ? "Leave blank to keep the stored secret" : ""}
               // Not the viewer's own login password — "new-password" is what
               // reliably stops a browser from offering to autofill it with
               // their saved site credentials.

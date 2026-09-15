@@ -251,9 +251,20 @@ function FormDialogHeader({
  * A `FormDialog`'s scrollable field area — 32px below the header, 24px
  * between whatever it's given, and capped so `FormDialogFooter` always stays
  * on-surface instead of being pushed out by a long field list.
+ *
+ * @remarks
+ * `overflow-y-auto` alone makes the browser compute `overflow-x` as `auto`
+ * too (the CSS spec forces a non-`visible` pair when only one axis is set),
+ * which clips a focused field's ring box-shadow against this element's own
+ * edge. `px-1 -mx-1` gives the ring room to render without shifting the
+ * fields' visual alignment with the header above.
  */
 function FormDialogBody({ children }: { children: ReactNode }) {
-  return <div className="scrollbar-hidden mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">{children}</div>
+  return (
+    <div className="scrollbar-hidden -mx-1 mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1">
+      {children}
+    </div>
+  )
 }
 
 /** A `FormDialogFooter`'s primary action — the one thing besides Cancel that submits or confirms. */

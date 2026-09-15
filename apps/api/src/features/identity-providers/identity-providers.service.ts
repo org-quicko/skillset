@@ -101,7 +101,7 @@ export class IdentityProvidersService {
    * ```ts
    * const provider = await identityProviders.create({
    *   kind: "google",
-   *   display_name: "Google Workspace",
+   *   display_name: "Google",
    *   client_id: "…",
    *   client_secret: "…",
    *   permitted_organisations: ["example.com", "example.org"],

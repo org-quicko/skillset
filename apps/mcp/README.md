@@ -29,14 +29,14 @@ Or configure it in an MCP client's config, e.g.:
 | --- | --- | --- |
 | `--registry <url>` / `SKILLSET_REGISTRY` | *(required)* | The Registry to talk to |
 | `--token <secret>` / `SKILLSET_TOKEN` | *(none)* | Required only for `publish_skill`; reads need no credential |
-| `--scope <project\|user>` | `project` | Where `add_skills` installs to |
+| `--scope <project\|user>` | `project` | Where `install_skills` installs to |
 | `--agent <id>` | *(auto-detected)* | Overrides Agent detection |
 | `--log-level <debug\|info\|warn\|error>` | `warn` | Diagnostics verbosity (stderr only) |
 
 ### Tools
 
 - `search_skills` — search the Registry for Skills
-- `add_skills` — download and install one or more Skills for the detected (or given) Agent
+- `install_skills` — download and install one or more Skills for the detected (or given) Agent
 - `publish_skill` — publish a Skill to the Registry (requires a Token)
 
 ## License

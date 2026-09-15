@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: labsatquicko/skillset:latest
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:${PORT:-3000}"

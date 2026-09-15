@@ -1,7 +1,7 @@
 {
   "name": "@in-org-quicko/skillset-api",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/server.ts",
