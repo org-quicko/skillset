@@ -21,12 +21,12 @@ which is a heavier cost than the one ADR-0033 weighed against it.
 **Keep the server credential-less; make `publish_skill` validate locally and stop.** Considered
 first, since it needs no ADR change at all — the tool would run the same local checks
 `buildSkillBundle` already runs and report the Skill ready to publish, leaving the actual `PUT` to
-`skillset publish`. Rejected: it does not do what the name promises, and it recreates the exact
+`sqillset publish`. Rejected: it does not do what the name promises, and it recreates the exact
 inconvenience the whole server exists to remove — needing a terminal for the one Skill a User just
 finished writing, right after using the credential-less half of this same server to find and add
 every other one.
 
-**Read the CLI's stored config (`~/.skillset/config.json`)**, so publishing needs no configuration
+**Read the CLI's stored config (`~/.sqillset/config.json`)**, so publishing needs no configuration
 of its own. Rejected for the reason ADR-0033 already gave it by name: a process an Agent launches
 unattended silently gaining whatever role the User's own logged-in session has is a larger blast
 radius than a Token scoped to this one server, and ties this workspace's configuration to the CLI's
@@ -39,7 +39,7 @@ version of one tool.
 
 ## Decision
 
-`--token` / `SKILLSET_TOKEN` are read, the same way `--registry` / `SKILLSET_REGISTRY` already are
+`--token` / `SQILLSET_TOKEN` are read, the same way `--registry` / `SQILLSET_REGISTRY` already are
 — `--token` wins when both are given. The Token is carried on `McpConfig` but reaches the network on
 exactly one path: the `authorization: Bearer` header `publish_skill` sends. `search_skills` and
 `add_skills` are unchanged — they still send no such header on any request, so a User who never
@@ -51,7 +51,7 @@ validation pass — the same "no Skill found" shape ADR-0033's sibling ticket al
 absent case.
 
 Publishing an existing name overwrites it completely (ADR-0002); there is no separate confirmation
-step here the way `skillset publish` has for a multi-Skill directory, because this tool takes one
+step here the way `sqillset publish` has for a multi-Skill directory, because this tool takes one
 directory and publishes exactly the Skill at it — no discovery walk, no batch.
 
 ## Consequences

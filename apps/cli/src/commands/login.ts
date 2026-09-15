@@ -1,4 +1,4 @@
-import { UserSchema, type Role } from "@in-org-quicko/skillset-shared";
+import { UserSchema, type Role } from "@in-org-quicko/sqillset-shared";
 import { writeConfig, type Config } from "../config.js";
 import { ApiError, registryFetch, type RegistryClient } from "../http.js";
 
@@ -21,7 +21,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
  * Refuses to store a Token for a Registry it would be sent to in the clear.
  *
  * @remarks
- * `skillset login --registry http://...` stored the Token and then sent it in
+ * `sqillset login --registry http://...` stored the Token and then sent it in
  * an `authorization` header on every call afterwards, readable by anything on
  * the path (ISSUE-22). The Token carries its owner's full role, so that is a
  * writer's publish rights on an open network.

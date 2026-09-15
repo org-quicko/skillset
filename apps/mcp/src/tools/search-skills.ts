@@ -1,4 +1,4 @@
-import { SkillDirectoryPageSchema } from "@in-org-quicko/skillset-shared";
+import { SkillDirectoryPageSchema } from "@in-org-quicko/sqillset-shared";
 
 /** What a caller of {@link searchSkills} may narrow a search by. */
 export interface SearchSkillsParams {
@@ -18,7 +18,7 @@ export interface SearchSkillsResult {
  *
  * @param fetchImpl - The `fetch` implementation to send the request with — injected so this
  * function is testable without a real network call or a running MCP client.
- * @param registryUrl - The Registry's base URL, as configured by `--registry`/`SKILLSET_REGISTRY`.
+ * @param registryUrl - The Registry's base URL, as configured by `--registry`/`SQILLSET_REGISTRY`.
  * @param params - The search's `query`, an optional Tag id to filter by, and an optional cap on
  * how many results come back.
  * @returns Each matching Skill's `name` and `description`, or an empty array when nothing matches.

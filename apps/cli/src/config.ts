@@ -10,11 +10,11 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export const NOT_LOGGED_IN_MESSAGE =
-  "Not logged in. Run `skillset login` or set SKILLSET_REGISTRY and SKILLSET_TOKEN.";
+  "Not logged in. Run `sqillset login` or set SQILLSET_REGISTRY and SQILLSET_TOKEN.";
 
 /** Reads need no Token (ADR-0013), so they fail on the Registry's location alone. */
 export const NO_REGISTRY_MESSAGE =
-  "No Registry configured. Run `skillset login` or set SKILLSET_REGISTRY.";
+  "No Registry configured. Run `sqillset login` or set SQILLSET_REGISTRY.";
 
 /** Where to reach the Registry, and the Token to authenticate with when one is available. */
 export interface RegistryAccess {
@@ -26,9 +26,9 @@ export interface RegistryAccess {
 /**
  * Decides where the config file lives.
  *
- * @param env - The process environment; `SKILLSET_CONFIG_PATH` wins, then the conventional
- * per-OS location (`%APPDATA%\\skillset\\config.json` on Windows,
- * `$XDG_CONFIG_HOME/skillset/config.json` or `~/.config/skillset/config.json` elsewhere).
+ * @param env - The process environment; `SQILLSET_CONFIG_PATH` wins, then the conventional
+ * per-OS location (`%APPDATA%\\sqillset\\config.json` on Windows,
+ * `$XDG_CONFIG_HOME/sqillset/config.json` or `~/.config/sqillset/config.json` elsewhere).
  * @returns An absolute path, which need not exist yet.
  *
  * @remarks
@@ -38,15 +38,15 @@ export interface RegistryAccess {
  * @example
  * ```ts
  * resolveConfigPath({ XDG_CONFIG_HOME: "/home/dev/.config" });
- * // -> "/home/dev/.config/skillset/config.json"
+ * // -> "/home/dev/.config/sqillset/config.json"
  * ```
  */
 export function resolveConfigPath(env: NodeJS.ProcessEnv): string {
-  if (env.SKILLSET_CONFIG_PATH) return env.SKILLSET_CONFIG_PATH;
-  if (env.APPDATA) return join(env.APPDATA, "skillset", "config.json");
+  if (env.SQILLSET_CONFIG_PATH) return env.SQILLSET_CONFIG_PATH;
+  if (env.APPDATA) return join(env.APPDATA, "sqillset", "config.json");
 
   const configDir = env.XDG_CONFIG_HOME || join(env.HOME ?? env.USERPROFILE ?? "", ".config");
-  return join(configDir, "skillset", "config.json");
+  return join(configDir, "sqillset", "config.json");
 }
 
 /**
@@ -118,7 +118,7 @@ export async function writeConfig(configPath: string, config: Config): Promise<v
 /**
  * Combines the environment and the config file into the credentials a write needs.
  *
- * @param env - The process environment; `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` each win
+ * @param env - The process environment; `SQILLSET_REGISTRY` and `SQILLSET_TOKEN` each win
  * over the corresponding config-file field, so the same command works in CI with no login
  * step.
  * @param fileConfig - What {@link readConfig} returned, or `null` when nothing is stored.
@@ -126,7 +126,7 @@ export async function writeConfig(configPath: string, config: Config): Promise<v
  *
  * @example
  * ```ts
- * resolveCredentials({ SKILLSET_TOKEN: "t" }, { registry: "https://registry.example", token: "stored" });
+ * resolveCredentials({ SQILLSET_TOKEN: "t" }, { registry: "https://registry.example", token: "stored" });
  * // -> { registry: "https://registry.example", token: "t" }
  * ```
  */
@@ -147,21 +147,21 @@ export function resolveCredentials(env: NodeJS.ProcessEnv, fileConfig: Config | 
  *
  * @remarks
  * A stored Token belongs to the Registry it was stored against, so it is only offered
- * back when the resolved Registry is still that one. Overriding just `SKILLSET_REGISTRY`
+ * back when the resolved Registry is still that one. Overriding just `SQILLSET_REGISTRY`
  * used to keep the file's Token and send it to whatever host the variable named, handing
- * one Registry's credential to another. `SKILLSET_TOKEN` is unconditional — naming a
+ * one Registry's credential to another. `SQILLSET_TOKEN` is unconditional — naming a
  * Token is stating which one to use.
  *
  * @example
  * ```ts
- * resolveRegistryAccess({ SKILLSET_REGISTRY: "https://registry.example" }, null);
+ * resolveRegistryAccess({ SQILLSET_REGISTRY: "https://registry.example" }, null);
  * // -> { registry: "https://registry.example", token: undefined }
  * ```
  */
 export function resolveRegistryAccess(env: NodeJS.ProcessEnv, fileConfig: Config | null): RegistryAccess | null {
-  const registry = env.SKILLSET_REGISTRY ?? fileConfig?.registry;
+  const registry = env.SQILLSET_REGISTRY ?? fileConfig?.registry;
   if (!registry) return null;
-  if (env.SKILLSET_TOKEN) return { registry, token: env.SKILLSET_TOKEN };
+  if (env.SQILLSET_TOKEN) return { registry, token: env.SQILLSET_TOKEN };
 
   const storedIsSameRegistry = fileConfig !== null && sameRegistry(registry, fileConfig.registry);
   return { registry, token: storedIsSameRegistry ? fileConfig.token : undefined };

@@ -40,9 +40,9 @@ export interface DerivedKeys {
   connectionState: string;
 }
 
-/** One HKDF-SHA256 key, hex, bound to `skillset:<purpose>`. */
+/** One HKDF-SHA256 key, hex, bound to `sqillset:<purpose>`. */
 function derive(secret: string, purpose: string): string {
-  return Buffer.from(hkdfSync("sha256", secret, "", `skillset:${purpose}`, 32)).toString("hex");
+  return Buffer.from(hkdfSync("sha256", secret, "", `sqillset:${purpose}`, 32)).toString("hex");
 }
 
 /**

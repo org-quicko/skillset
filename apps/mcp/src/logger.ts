@@ -29,7 +29,7 @@ export function createLogger(level: LogLevel): Logger {
 
   const write = (messageLevel: LogLevel, message: string): void => {
     if (LOG_LEVELS.indexOf(messageLevel) < threshold) return;
-    process.stderr.write(`[skillset-mcp] [${messageLevel}] ${message}\n`);
+    process.stderr.write(`[sqillset-mcp] [${messageLevel}] ${message}\n`);
   };
 
   return {

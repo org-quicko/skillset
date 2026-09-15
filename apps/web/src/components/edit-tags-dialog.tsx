@@ -1,4 +1,4 @@
-import { validateTagName, type Tag } from "@in-org-quicko/skillset-shared";
+import { validateTagName, type Tag } from "@in-org-quicko/sqillset-shared";
 import { XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";

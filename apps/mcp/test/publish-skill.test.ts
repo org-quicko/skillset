@@ -13,7 +13,7 @@ const SKILL_MD = "---\nname: code-review\ndescription: Reviews code.\n---\nHow t
 const HELPER_SH = "#!/bin/sh\necho hi\n";
 
 async function makeSkillDir(extra?: (dir: string) => Promise<void>): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "skillset-mcp-publish-"));
+  const dir = await mkdtemp(join(tmpdir(), "sqillset-mcp-publish-"));
   await writeFile(join(dir, "SKILL.md"), SKILL_MD);
   if (extra) await extra(dir);
   return dir;
@@ -73,7 +73,7 @@ function baseDeps(overrides: Partial<PublishSkillDeps> & Pick<PublishSkillDeps, 
  */
 describe("publishSkill stays inside the project", () => {
   it("refuses a relative path that climbs out of the project, and makes no network call", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skillset-mcp-contained-"));
+    const root = await mkdtemp(join(tmpdir(), "sqillset-mcp-contained-"));
     try {
       // A real Skill outside the project, so the refusal is about containment
       // and not about the directory being empty.
@@ -94,7 +94,7 @@ describe("publishSkill stays inside the project", () => {
   });
 
   it("refuses an absolute path outside the project", async () => {
-    const project = await mkdtemp(join(tmpdir(), "skillset-mcp-contained-"));
+    const project = await mkdtemp(join(tmpdir(), "sqillset-mcp-contained-"));
     const outside = await makeSkillDir();
     try {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
@@ -110,7 +110,7 @@ describe("publishSkill stays inside the project", () => {
   });
 
   it("refuses a symlink that points out of the project, which a string check would walk past", async () => {
-    const project = await mkdtemp(join(tmpdir(), "skillset-mcp-contained-"));
+    const project = await mkdtemp(join(tmpdir(), "sqillset-mcp-contained-"));
     const outside = await makeSkillDir();
     try {
       await symlink(outside, join(project, "skills"), "dir");
@@ -131,7 +131,7 @@ describe("publishSkill stays inside the project", () => {
   });
 
   it("says so plainly when the path names nothing at all", async () => {
-    const project = await mkdtemp(join(tmpdir(), "skillset-mcp-contained-"));
+    const project = await mkdtemp(join(tmpdir(), "sqillset-mcp-contained-"));
     try {
       const { fetch: fetchImpl } = stubFetch(() => jsonResponse(200, {}));
       await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), "skills/nope")).rejects.toThrow(
@@ -145,7 +145,7 @@ describe("publishSkill stays inside the project", () => {
 
 describe("publishSkill", () => {
   it("errors clearly when the directory holds no SKILL.md, and makes no network call", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skillset-mcp-publish-"));
+    const dir = await mkdtemp(join(tmpdir(), "sqillset-mcp-publish-"));
     try {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
 
@@ -157,7 +157,7 @@ describe("publishSkill", () => {
   });
 
   it("errors naming the broken rule when the Skill fails local validation, before contacting the Registry", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skillset-mcp-publish-"));
+    const dir = await mkdtemp(join(tmpdir(), "sqillset-mcp-publish-"));
     try {
       await writeFile(join(dir, "SKILL.md"), "no frontmatter here\n");
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
@@ -218,7 +218,7 @@ describe("publishSkill", () => {
   });
 
   it("publishes the Skill at a given path, resolved against cwd", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skillset-mcp-publish-"));
+    const root = await mkdtemp(join(tmpdir(), "sqillset-mcp-publish-"));
     try {
       await mkdir(join(root, "skills", "code-review"), { recursive: true });
       await writeFile(

@@ -3,7 +3,7 @@ import {
   IntegrationListSchema,
   IntegrationSchema,
   IntegrationUpdateSchema,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { createRouter } from "../../lib/factory.js";
 import { uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { timestamp } from "./timestamp.js";
 
 /**
- * The kinds of Provider Skillset knows how to talk to, and — since there is
+ * The kinds of Provider Sqillset knows how to talk to, and — since there is
  * at most one Provider of each (ADR-0017) — the key a Provider is identified
  * by. Google and Microsoft assert the organisation in a claim; GitHub has no ID
  * token and is gated on a live membership check instead (ADR-0018).
@@ -46,11 +46,11 @@ export const LOGIN_REFUSAL_MESSAGE: Record<string, string> = {
     "Signing in with a third-party account is currently switched off. Use your password, or ask an administrator.",
   provider_not_configured: "Signing in with a third-party account is not configured. Use your password instead.",
   organisation_not_permitted:
-    "Your organisation isn't allowed to sign in with Skillset. Ask an administrator to add it, or use your password.",
+    "Your organisation isn't allowed to sign in with Sqillset. Ask an administrator to add it, or use your password.",
   oauth_app_not_approved:
     "GitHub didn't report any organisation for your account. If your organisation restricts third-party " +
-    "applications, an owner needs to approve Skillset's OAuth app before anyone can sign in with GitHub.",
-  no_email_from_provider: "The provider didn't share an email address. Skillset needs one to identify your account.",
+    "applications, an owner needs to approve Sqillset's OAuth app before anyone can sign in with GitHub.",
+  no_email_from_provider: "The provider didn't share an email address. Sqillset needs one to identify your account.",
   email_not_verified:
     "Your provider reports that your email address has not been verified. Verify it with your provider and try " +
     "again, or use your password.",
@@ -85,7 +85,7 @@ export type PublicIdentityProviderList = z.infer<typeof PublicIdentityProviderLi
  * GitHub organisation logins, depending on kind.
  *
  * @remarks
- * A list, because one Skillset instance may serve several domains or several GitHub
+ * A list, because one Sqillset instance may serve several domains or several GitHub
  * organisations, and an empty list is meaningful rather than merely unset — it
  * means this Provider performs no organisation check at all. See
  * `isUngated`.

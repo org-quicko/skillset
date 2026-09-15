@@ -1,4 +1,4 @@
-import { AGENT_IDS, type AgentId } from "@in-org-quicko/skillset-shared";
+import { AGENT_IDS, type AgentId } from "@in-org-quicko/sqillset-shared";
 
 /** Where an install goes: `install_skills`'s target Scope. */
 export const SCOPES = ["project", "user"] as const;
@@ -16,7 +16,7 @@ const DEFAULT_LOG_LEVEL: LogLevel = "warn";
  *
  * `--token <secret>` puts the secret in the process list, where every other
  * process on the machine can read it, and in the `.mcp.json` that configures
- * this server — which is usually checked in (ISSUE-22). `SKILLSET_TOKEN` is
+ * this server — which is usually checked in (ISSUE-22). `SQILLSET_TOKEN` is
  * the documented way, and this is what lets the server say so out loud when
  * the flag is used instead.
  */
@@ -74,15 +74,15 @@ function readFlag(argv: readonly string[], flag: string): string | undefined {
  * @param argv - The flags to parse, e.g. `process.argv.slice(2)`.
  * @param env - The environment to read fallbacks from, e.g. `process.env`.
  * @returns The resolved `registry`, `scope`, `agentId` (`undefined` unless `--agent` was
- * given), `logLevel`, `token` (`undefined` unless `--token` or `SKILLSET_TOKEN` was given), and
+ * given), `logLevel`, `token` (`undefined` unless `--token` or `SQILLSET_TOKEN` was given), and
  * `tokenSource`, which records which of the two it came from.
- * @throws ConfigError if `--registry` is absent and `SKILLSET_REGISTRY` is not set, if
+ * @throws ConfigError if `--registry` is absent and `SQILLSET_REGISTRY` is not set, if
  * `--scope` or `--log-level` is given a value outside their accepted sets, or if `--agent` is
  * given but names no Agent in the table.
  *
  * @remarks
- * `--registry` wins over `SKILLSET_REGISTRY` when both are present, and `--token` wins over
- * `SKILLSET_TOKEN` the same way. Every tool but `publish_skill` still sends no `authorization`
+ * `--registry` wins over `SQILLSET_REGISTRY` when both are present, and `--token` wins over
+ * `SQILLSET_TOKEN` the same way. Every tool but `publish_skill` still sends no `authorization`
  * header at all (ADR-0013) — a configured Token is read but otherwise ignored unless that one
  * tool is called (ADR-0035 reopens ADR-0033's "holds no credential" specifically for
  * publishing, which needs a writer Token; reads still need none). `--agent` is optional — when
@@ -95,9 +95,9 @@ function readFlag(argv: readonly string[], flag: string): string | undefined {
  * ```
  */
 export function parseConfig(argv: readonly string[], env: NodeJS.ProcessEnv): McpConfig {
-  const registry = readFlag(argv, "--registry") ?? env.SKILLSET_REGISTRY;
+  const registry = readFlag(argv, "--registry") ?? env.SQILLSET_REGISTRY;
   if (!registry) {
-    throw new ConfigError("A Registry is required: pass --registry <url> or set SKILLSET_REGISTRY.");
+    throw new ConfigError("A Registry is required: pass --registry <url> or set SQILLSET_REGISTRY.");
   }
 
   const rawScope = readFlag(argv, "--scope") ?? DEFAULT_SCOPE;
@@ -116,7 +116,7 @@ export function parseConfig(argv: readonly string[], env: NodeJS.ProcessEnv): Mc
   }
 
   const tokenFlag = readFlag(argv, "--token");
-  const token = tokenFlag ?? env.SKILLSET_TOKEN;
+  const token = tokenFlag ?? env.SQILLSET_TOKEN;
   const tokenSource: TokenSource = tokenFlag ? "flag" : token ? "environment" : "none";
 
   return { registry, scope: rawScope, agentId: rawAgent, logLevel: rawLogLevel, token, tokenSource };

@@ -4,7 +4,7 @@ import {
   isGitProvider,
   type ConnectableProvider,
   type GitProviderOAuth,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { deriveKeys, openClientSecret, openSecret, sealSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
@@ -29,7 +29,7 @@ const STATE_TTL_MS = 5 * 60_000;
 const REFRESH_MARGIN_MS = 60_000;
 
 /** Providers ask that a caller identify itself. */
-const USER_AGENT = "skillset";
+const USER_AGENT = "sqillset";
 
 /**
  * One Connection as the list route reports it.

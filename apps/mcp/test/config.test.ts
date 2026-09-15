@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { ConfigError, parseConfig } from "../src/config.js";
 
 describe("parseConfig", () => {
-  it("errors naming both --registry and SKILLSET_REGISTRY when neither is given", () => {
+  it("errors naming both --registry and SQILLSET_REGISTRY when neither is given", () => {
     expect(() => parseConfig([], {})).toThrow(ConfigError);
     try {
       parseConfig([], {});
@@ -10,18 +10,18 @@ describe("parseConfig", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(ConfigError);
       expect((error as Error).message).toContain("--registry");
-      expect((error as Error).message).toContain("SKILLSET_REGISTRY");
+      expect((error as Error).message).toContain("SQILLSET_REGISTRY");
     }
   });
 
-  it("falls back to SKILLSET_REGISTRY when --registry is absent", () => {
-    const config = parseConfig([], { SKILLSET_REGISTRY: "https://registry.example" });
+  it("falls back to SQILLSET_REGISTRY when --registry is absent", () => {
+    const config = parseConfig([], { SQILLSET_REGISTRY: "https://registry.example" });
     expect(config.registry).toBe("https://registry.example");
   });
 
   it("prefers --registry when both are given", () => {
     const config = parseConfig(["--registry", "https://flag.example"], {
-      SKILLSET_REGISTRY: "https://env.example",
+      SQILLSET_REGISTRY: "https://env.example",
     });
     expect(config.registry).toBe("https://flag.example");
   });
@@ -71,21 +71,21 @@ describe("parseConfig", () => {
     }
   });
 
-  it("leaves token undefined when neither --token nor SKILLSET_TOKEN is given", () => {
+  it("leaves token undefined when neither --token nor SQILLSET_TOKEN is given", () => {
     const config = parseConfig(["--registry", "https://registry.example"], {});
     expect(config.token).toBeUndefined();
   });
 
-  it("falls back to SKILLSET_TOKEN when --token is absent", () => {
+  it("falls back to SQILLSET_TOKEN when --token is absent", () => {
     const config = parseConfig(["--registry", "https://registry.example"], {
-      SKILLSET_TOKEN: "env-token",
+      SQILLSET_TOKEN: "env-token",
     });
     expect(config.token).toBe("env-token");
   });
 
   it("prefers --token when both are given", () => {
     const config = parseConfig(["--registry", "https://registry.example", "--token", "flag-token"], {
-      SKILLSET_TOKEN: "env-token",
+      SQILLSET_TOKEN: "env-token",
     });
     expect(config.token).toBe("flag-token");
   });

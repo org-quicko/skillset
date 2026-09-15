@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
-import { type AgentId, SkillSchema } from "@in-org-quicko/skillset-shared";
+import { type AgentId, SkillSchema } from "@in-org-quicko/sqillset-shared";
 import { installSkills, buildFallbackOutcome, type InstallSkillOutcome, type InstallSkillsDeps } from "../src/tools/install-skills.js";
 import { jsonResponse, stubFetch, type RecordedCall } from "./helpers.js";
 
@@ -54,8 +54,8 @@ function stubRegistry(options: RegistryStubOptions = {}) {
 }
 
 async function withTempRoots<T>(run: (roots: { cwd: string; homeDir: string }) => Promise<T>): Promise<T> {
-  const cwd = await mkdtemp(join(tmpdir(), "skillset-mcp-add-cwd-"));
-  const homeDir = await mkdtemp(join(tmpdir(), "skillset-mcp-add-home-"));
+  const cwd = await mkdtemp(join(tmpdir(), "sqillset-mcp-add-cwd-"));
+  const homeDir = await mkdtemp(join(tmpdir(), "sqillset-mcp-add-home-"));
   try {
     return await run({ cwd, homeDir });
   } finally {

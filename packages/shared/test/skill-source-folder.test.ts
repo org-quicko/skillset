@@ -147,7 +147,7 @@ describe("Reading a Skill folder from GitHub", () => {
         (url) => url.startsWith("https://api.github.com/") || url.startsWith("https://raw.githubusercontent.com/"),
       ),
     ).toBe(true);
-    expect(new Set(github.userAgents)).toEqual(new Set(["skillset"]));
+    expect(new Set(github.userAgents)).toEqual(new Set(["sqillset"]));
     // A fixed host that follows a redirect is not a fixed host.
     expect(new Set(github.redirects)).toEqual(new Set(["manual" as RequestRedirect]));
   });

@@ -1,4 +1,4 @@
-import type { IdentityProviderKind } from "@in-org-quicko/skillset-shared";
+import type { IdentityProviderKind } from "@in-org-quicko/sqillset-shared";
 
 function GitlabIcon(props: React.SVGProps<SVGSVGElement>) {
   return (

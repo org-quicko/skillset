@@ -5,7 +5,7 @@ import {
   type PasswordReplace,
   type UserCreate,
   type UserUpdateName,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { and, count, desc, eq, ne } from "drizzle-orm";
 import { getPasswordCredential, setPasswordCredential } from "../auth/credential.js";
 import { generateInitialPassword, hashPassword, verifyPassword } from "../auth/password.js";

@@ -10,8 +10,8 @@ import {
   type ArtifactManifest,
   type Scope,
   type Skill,
-} from "@in-org-quicko/skillset-shared";
-import { installSkill, resolveInstallTarget, type InstallContext, type LinkResult } from "@in-org-quicko/skillset-installer";
+} from "@in-org-quicko/sqillset-shared";
+import { installSkill, resolveInstallTarget, type InstallContext, type LinkResult } from "@in-org-quicko/sqillset-installer";
 
 /** The project root, environment, and home directory an install is resolved and written against. */
 export type InstallSkillsContext = InstallContext;
@@ -214,7 +214,7 @@ async function installOneSkill(deps: InstallSkillsDeps, name: string): Promise<I
  * Sends no `authorization` header on any request: this server holds no credential
  * (ADR-0013). Every downloaded Artifact is validated by `extractSkillFiles` before a single
  * byte is written (ADR-0001). An existing install is left alone unless `deps.overwrite` is
- * set — a divergence from `skillset add`'s silent overwrite that lives here, in the tool
+ * set — a divergence from `sqillset add`'s silent overwrite that lives here, in the tool
  * handler, rather than in the shared installer. The `detection` is echoed back so the caller
  * can report which Agent was chosen and which rung of the ladder chose it.
  *

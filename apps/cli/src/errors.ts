@@ -1,4 +1,4 @@
-import { formatSkillValidationError, SkillValidationError } from "@in-org-quicko/skillset-shared";
+import { formatSkillValidationError, SkillValidationError } from "@in-org-quicko/sqillset-shared";
 
 /**
  * Turns a shared-rules validation failure into the one-line, rule-naming message the CLI

@@ -1,4 +1,4 @@
-import { UserSchema, type Role } from "@in-org-quicko/skillset-shared";
+import { UserSchema, type Role } from "@in-org-quicko/sqillset-shared";
 import { registryFetch } from "../http.js";
 import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 

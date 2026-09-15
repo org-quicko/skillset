@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
-import type { Role as UserRole } from "@in-org-quicko/skillset-shared";
+import type { Role as UserRole } from "@in-org-quicko/sqillset-shared";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
 import { tokens, users } from "../../db/schemas/index.js";

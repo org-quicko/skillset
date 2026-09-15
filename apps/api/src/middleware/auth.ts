@@ -1,4 +1,4 @@
-import { roleMeets, type Role } from "@in-org-quicko/skillset-shared";
+import { roleMeets, type Role } from "@in-org-quicko/sqillset-shared";
 import { createMiddleware } from "hono/factory";
 import type { UserRow } from "../db/schemas/index.js";
 import type { Credential } from "../features/auth/authenticator.js";

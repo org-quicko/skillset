@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 type Tab = "command" | "prompt";
 
 /**
- * The Installation panel: a copyable `skillset add` command, or a
+ * The Installation panel: a copyable `sqillset add` command, or a
  * natural-language prompt to hand an agent, switched by a tab in the header.
  *
  * @param name - The Skill's name, interpolated into both the command and the prompt.
@@ -19,8 +19,8 @@ export function SkillInstallCard({ name }: { name: string }) {
 
   useEffect(() => () => clearTimeout(resetTimer.current), []);
 
-  const command = `skillset add ${name}`;
-  const prompt = `Install the ${name} skill from the Skillset registry.`;
+  const command = `sqillset add ${name}`;
+  const prompt = `Install the ${name} skill from the Sqillset registry.`;
   const text = tab === "command" ? command : prompt;
 
   async function copy() {

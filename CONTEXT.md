@@ -1,4 +1,4 @@
-# Skillset
+# Sqillset
 
 A self-hosted registry for the things a coding agent loads — Skills, MCP Servers, and Plugins.
 Resources are published from the CLI or the web interface, stored as rows and (for the Kinds that
@@ -17,7 +17,7 @@ _Avoid_: Package, entry, item, asset, artifact (which is the files, not the thin
 **Kind**:
 Which of the three things a Resource is — `skill`, `mcp-server`, or `plugin`. A Kind fixes the
 shape of the payload, the rules `name` and `description` must satisfy, whether there is an
-Artifact, and what `skillset add` does. Stored as plain text rather than an enum, so a fourth
+Artifact, and what `sqillset add` does. Stored as plain text rather than an enum, so a fourth
 Kind is an insert rather than a migration (ADR-0026, following ADR-0024).
 _Avoid_: Type, category, class, resource type
 
@@ -84,7 +84,7 @@ The files of a Resource of a Kind that has one — Skill and Plugin. Uploaded di
 storage by the client, one object per file, under a prefix keyed by the Resource's `id`
 (ADR-0026, ADR-0032). An MCP Server has no Artifact at all (ADR-0027). A **zip** is one
 *representation* of an Artifact rather than the Artifact itself: the Registry assembles one on
-demand for `skillset add`, the web Download control, and a Marketplace `archive` source, and
+demand for `sqillset add`, the web Download control, and a Marketplace `archive` source, and
 stores none.
 _Avoid_: Bundle, package, tarball, blob, zip (which is a representation, not the thing)
 
@@ -108,7 +108,7 @@ _Avoid_: Download (as the countable unit — Download is the action, Install is 
 
 **Marketplace**:
 The `.claude-plugin/marketplace.json` document the Registry serves so an off-the-shelf agent can
-install from it natively, without `skillset` (ADR-0030). It lists Skills and Plugins as plugin
+install from it natively, without `sqillset` (ADR-0030). It lists Skills and Plugins as plugin
 entries with `archive` sources; MCP Servers are not listed, because listing one would mean
 synthesising bytes the Registry deliberately does not have.
 _Avoid_: Index, catalog (which is the Registry's own browse surface), discovery, feed

@@ -13,8 +13,8 @@ const files = [
 
 /** Separate roots so a "project" install and a "user" install can never be confused for one another. */
 async function withTempRoots<T>(run: (roots: { cwd: string; homeDir: string }) => Promise<T>): Promise<T> {
-  const cwd = await mkdtemp(join(tmpdir(), "skillset-install-cwd-"));
-  const homeDir = await mkdtemp(join(tmpdir(), "skillset-install-home-"));
+  const cwd = await mkdtemp(join(tmpdir(), "sqillset-install-cwd-"));
+  const homeDir = await mkdtemp(join(tmpdir(), "sqillset-install-home-"));
   try {
     return await run({ cwd, homeDir });
   } finally {
@@ -228,7 +228,7 @@ describe("installSkill — atomic install via staging (ticket 47)", () => {
 
       const after = await readdir(tmpdir());
       const newEntries = after.filter((entry) => !before.has(entry));
-      expect(newEntries.every((entry) => !entry.includes("skillset-staging"))).toBe(true);
+      expect(newEntries.every((entry) => !entry.includes("sqillset-staging"))).toBe(true);
     });
   });
 

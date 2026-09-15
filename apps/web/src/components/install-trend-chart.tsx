@@ -1,4 +1,4 @@
-import type { SkillInstallTrendPoint } from "@in-org-quicko/skillset-shared";
+import type { SkillInstallTrendPoint } from "@in-org-quicko/sqillset-shared";
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 const CHART_WIDTH = 300;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { validateSkillName } from "@in-org-quicko/skillset-shared";
+import { validateSkillName } from "@in-org-quicko/sqillset-shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { AppError, onError } from "./errors.js";

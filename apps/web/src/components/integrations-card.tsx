@@ -1,4 +1,4 @@
-import { GIT_PROVIDERS, type Integration } from "@in-org-quicko/skillset-shared";
+import { GIT_PROVIDERS, type Integration } from "@in-org-quicko/sqillset-shared";
 import { EllipsisIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { DeleteIntegrationDialog } from "@/components/delete-integration-dialog";
@@ -88,7 +88,7 @@ function IntegrationTile({
 }
 
 /**
- * An Admin's view of Skillset's registrations with Git Providers
+ * An Admin's view of Sqillset's registrations with Git Providers
  * (ADR-0024, ADR-0025).
  *
  * @remarks
@@ -99,7 +99,7 @@ function IntegrationTile({
  * wrong one.
  *
  * An Integration's existence is the only switch importing has — there is no
- * enable flag — so an operator who wants Skillset to hold no repository
+ * enable flag — so an operator who wants Sqillset to hold no repository
  * credentials for anybody simply registers nothing. More than one Integration
  * may exist for the same provider, each its own tile.
  */
@@ -122,7 +122,7 @@ export function IntegrationsCard() {
         <div className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">Integrations</h2>
           <p className="max-w-2xl text-xs text-muted-foreground">
-            Apps that let Skillset read content from repositories.
+            Apps that let Sqillset read content from repositories.
           </p>
         </div>
         <Button size="sm" onClick={() => openDialog(null)}>

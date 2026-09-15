@@ -24,7 +24,7 @@ export async function waitForDatabase(sql: postgres.Sql): Promise<void> {
   }
 }
 
-const MIGRATION_LOCK_KEY = advisoryLockKey("skillset:migrations");
+const MIGRATION_LOCK_KEY = advisoryLockKey("sqillset:migrations");
 
 // Resolved relative to this module rather than process.cwd(), so it's
 // correct regardless of where the process was launched from.

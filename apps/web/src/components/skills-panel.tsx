@@ -5,7 +5,7 @@ import {
   type Role,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";

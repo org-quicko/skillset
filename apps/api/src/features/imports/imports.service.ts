@@ -6,7 +6,7 @@ import {
   type Repository,
   type SkillFile,
   type SkillSourceLocation,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { AppNotInstalledError, ImportFailedError, ImportRejectedError } from "./imports.errors.js";
 import { ConnectionExpiredError } from "../connections/connections.errors.js";
 import { IntegrationNotConfiguredError } from "../integrations/integrations.errors.js";
@@ -373,7 +373,7 @@ export class ImportsService {
     let res: Response;
     try {
       res = await fetchImpl(url, {
-        headers: { accept: "application/json", authorization: `Bearer ${token}`, "user-agent": "skillset" },
+        headers: { accept: "application/json", authorization: `Bearer ${token}`, "user-agent": "sqillset" },
         redirect: "manual",
       });
     } catch {
@@ -493,7 +493,7 @@ export class ImportsService {
         headers: {
           accept: "application/json",
           authorization: `Bearer ${token}`,
-          "user-agent": "skillset",
+          "user-agent": "sqillset",
         },
         redirect: "manual",
       });

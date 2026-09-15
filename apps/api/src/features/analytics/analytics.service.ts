@@ -25,7 +25,7 @@ export class AnalyticsService {
 
   /**
    * Records one Install of a Skill — a Download of its Artifact, whether
-   * from the web interface, `skillset add`, or the MCP server, distinguished
+   * from the web interface, `sqillset add`, or the MCP server, distinguished
    * by `source` (`"web"`, `"cli"`, or `"mcp"`).
    *
    * @remarks

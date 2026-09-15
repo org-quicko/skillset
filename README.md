@@ -1,12 +1,12 @@
-# Skillset
+# Sqillset
 
-Skillset is a self-hosted registry for the resources a coding agent loads: **Skills**, **MCP
+Sqillset is a self-hosted registry for the resources a coding agent loads: **Skills**, **MCP
 Servers**, and **Plugins**. Your team publishes them from the CLI or the web interface, and
 discovers, previews, and installs them from either the web interface or an agent talking to
 the bundled MCP server — all under your own infrastructure, with your own access control.
 
 - **Skills** are directory bundles (a `SKILL.md` plus supporting files) that the Registry stores
-  as an Artifact and serves for `skillset add` or direct download.
+  as an Artifact and serves for `sqillset add` or direct download.
 - **MCP Servers** are pointers — a `server.json`-shaped record naming an npm/PyPI/OCI/NuGet/Cargo
   package or a remote URL. The Registry stores no bytes for these.
 - **Plugins** bundle several of the above (skills, commands, agents, hooks) behind a
@@ -42,21 +42,21 @@ whether or not a Provider is configured: it is the way back in if a client secre
 
 ## Using it
 
-Once a Registry is running, connect to it from either the `skillset` CLI or the MCP server —
+Once a Registry is running, connect to it from either the `sqillset` CLI or the MCP server —
 both talk to the same Registry over its API and need only a URL (and a token for writes).
 
 ### CLI
 
 ```bash
-npm install -g @in-org-quicko/skillset-cli
+npm install -g @in-org-quicko/sqillset-cli
 
-skillset login --registry <url>
-skillset publish [path]      # defaults to the current directory
-skillset add <name>          # install a Skill for a coding agent
-skillset whoami
+sqillset login --registry <url>
+sqillset publish [path]      # defaults to the current directory
+sqillset add <name>          # install a Skill for a coding agent
+sqillset whoami
 ```
 
-For CI, skip `login` and set `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` instead — see
+For CI, skip `login` and set `SQILLSET_REGISTRY` and `SQILLSET_TOKEN` instead — see
 [`apps/cli/README.md`](apps/cli/README.md).
 
 ### MCP server
@@ -66,27 +66,27 @@ Run directly with `npx`, or add it to an agent's MCP client config:
 ```json
 {
   "mcpServers": {
-    "skillset": {
+    "sqillset": {
       "command": "npx",
-      "args": ["-y", "@in-org-quicko/skillset-mcp", "--registry", "<url>"]
+      "args": ["-y", "@in-org-quicko/sqillset-mcp", "--registry", "<url>"]
     }
   }
 }
 ```
 
 It exposes `search_skills`, `install_skills`, and `publish_skill` (which needs `--token` /
-`SKILLSET_TOKEN`). See [`apps/mcp/README.md`](apps/mcp/README.md).
+`SQILLSET_TOKEN`). See [`apps/mcp/README.md`](apps/mcp/README.md).
 
 ## Development
 
 This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres), `apps/web`
-(Vite + React + Tailwind + shadcn/ui), `apps/cli` (the `skillset` command), `apps/mcp` (the MCP
+(Vite + React + Tailwind + shadcn/ui), `apps/cli` (the `sqillset` command), `apps/mcp` (the MCP
 server), and `packages/shared` (the rules and schemas all of them are built against).
 
 ```bash
 bun install
 bun run typecheck
 bun run test   # apps/api; spins up Postgres via testcontainers, needs Docker
-bun --filter @in-org-quicko/skillset-web dev
-bun --filter @in-org-quicko/skillset-api dev
+bun --filter @in-org-quicko/sqillset-web dev
+bun --filter @in-org-quicko/sqillset-api dev
 ```

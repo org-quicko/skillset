@@ -1,4 +1,4 @@
-import { ConnectionListSchema } from "@in-org-quicko/skillset-shared";
+import { ConnectionListSchema } from "@in-org-quicko/sqillset-shared";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import { createRouter } from "../../lib/factory.js";
@@ -13,7 +13,7 @@ import { requireAuth, requireRole } from "../../middleware/auth.js";
  * top-level GET navigation from the provider, and `Strict` would withhold the
  * cookie on exactly that request, breaking every connection attempt.
  */
-const STATE_COOKIE = "skillset_connection_state";
+const STATE_COOKIE = "sqillset_connection_state";
 const STATE_COOKIE_PATH = "/api/connections";
 
 /** Where a writer lands once the callback is done, successfully or not. */

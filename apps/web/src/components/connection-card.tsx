@@ -1,4 +1,4 @@
-import type { ConnectableProvider, Connection } from "@in-org-quicko/skillset-shared";
+import type { ConnectableProvider, Connection } from "@in-org-quicko/sqillset-shared";
 import { EllipsisIcon, ExternalLinkIcon, Link2OffIcon } from "lucide-react";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Panel } from "@/components/panel";
@@ -119,10 +119,10 @@ function ConnectedAccountRow({
  * a credential they could never use would be worse than useless.
  *
  * The card is also absent when nothing is connectable, which is the state of
- * a Skillset instance whose Admin has configured no Integration. There is
+ * a Sqillset instance whose Admin has configured no Integration. There is
  * nothing to connect to, so a Connect button could only fail when pressed.
  *
- * Disconnecting is local to this Skillset instance: it stops Skillset using
+ * Disconnecting is local to this Sqillset instance: it stops Sqillset using
  * the grant and does not withdraw it at the provider — that is done from the
  * provider's own account settings.
  */
@@ -140,7 +140,7 @@ export function ConnectionCard() {
       <div className="flex flex-col gap-1">
         <h2 className="text-sm font-medium">Connected Accounts</h2>
         <p className="max-w-2xl text-xs text-muted-foreground">
-          Accounts you&apos;ve connected so Skillset can read content from your private repositories.
+          Accounts you&apos;ve connected so Sqillset can read content from your private repositories.
         </p>
       </div>
 

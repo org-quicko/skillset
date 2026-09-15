@@ -1,4 +1,4 @@
-import { SKILL_FILE_NAME, type SkillFile } from "@in-org-quicko/skillset-shared";
+import { SKILL_FILE_NAME, type SkillFile } from "@in-org-quicko/sqillset-shared";
 
 const MARKDOWN_EXTENSIONS = [".md", ".markdown"];
 

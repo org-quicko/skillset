@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Role } from "@in-org-quicko/skillset-shared";
+import type { Role } from "@in-org-quicko/sqillset-shared";
 import { SearchIcon, XIcon } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { Reveal } from "@/components/reveal";

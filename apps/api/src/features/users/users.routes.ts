@@ -9,7 +9,7 @@ import {
   UserRoleUpdateSchema,
   UserSchema,
   UserUpdateNameSchema,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { z } from "zod";
 import { createRouter } from "../../lib/factory.js";
 import { uuidParam, validate } from "../../lib/validator.js";

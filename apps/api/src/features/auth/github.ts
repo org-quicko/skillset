@@ -1,7 +1,7 @@
 const GITHUB_API = "https://api.github.com";
 
 // GitHub refuses requests without one, and asks that it identify the caller.
-const USER_AGENT = "skillset";
+const USER_AGENT = "sqillset";
 
 /**
  * The scopes a GitHub login asks for.

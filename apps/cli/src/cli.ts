@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
-import { getAgent } from "@in-org-quicko/skillset-shared";
+import { getAgent } from "@in-org-quicko/sqillset-shared";
 import { Command } from "commander";
 import { homedir } from "node:os";
 import pc from "picocolors";
@@ -12,11 +12,11 @@ import { resolveConfigPath } from "./config.js";
 import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken } from "./ui.js";
 
 const program = new Command();
-program.name("skillset").description("Publish and manage Skills on Skillset.");
+program.name("sqillset").description("Publish and manage Skills on Sqillset.");
 program.addHelpText("beforeAll", bannerText());
 program.action(() => console.log(bannerText()));
 
-const label = (verb: string) => pc.bgCyan(pc.black(` skillset ${verb} `));
+const label = (verb: string) => pc.bgCyan(pc.black(` sqillset ${verb} `));
 
 program
   .command("login")
@@ -32,7 +32,7 @@ program
     let token = opts.token;
     if (!token) {
       if (process.stdin.isTTY !== true) {
-        fail(new Error("No terminal to prompt at. Pass --token, or set SKILLSET_REGISTRY and SKILLSET_TOKEN."));
+        fail(new Error("No terminal to prompt at. Pass --token, or set SQILLSET_REGISTRY and SQILLSET_TOKEN."));
         return;
       }
       token = await promptToken();

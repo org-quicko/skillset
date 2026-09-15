@@ -8,7 +8,7 @@ import {
   type SkillFile,
   type SkillFolderReason,
   type SkillSourceLocation,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { ApiError, apiFetch } from "@/lib/api";
 
 /**
@@ -34,7 +34,7 @@ const SENT_NO_TOKEN = new Set(["not_connected", "integration_not_configured"]);
  * surfaces the original refusal instead.
  */
 const ANONYMOUS_MESSAGES: Record<Exclude<SkillFolderReason, "not_found">, string> = {
-  unauthorized: "That request was refused, and Skillset can only see public projects for you.",
+  unauthorized: "That request was refused, and Sqillset can only see public projects for you.",
   rate_limited:
     "That request was rate-limited. Wait a bit and try again, or publish by uploading the folder directly.",
   request_failed: "That project host could not be reached. Try again, or publish by uploading the folder directly.",
@@ -206,7 +206,7 @@ async function discoverAnonymously(location: SkillSourceLocation): Promise<Skill
     if (!(error instanceof SkillFolderError)) throw error;
     if (error.reason === "not_found") {
       throw new Error(
-        "That project or folder could not be found. Skillset can only read public projects from " +
+        "That project or folder could not be found. Sqillset can only read public projects from " +
           "this host, so a private one has to be published by uploading its folder.",
       );
     }
@@ -229,7 +229,7 @@ async function readAnonymously(location: SkillSourceLocation): Promise<SkillFile
     if (!(error instanceof SkillFolderError)) throw error;
     if (error.reason === "not_found") {
       throw new Error(
-        "That project or folder could not be found. Skillset can only read public projects from " +
+        "That project or folder could not be found. Sqillset can only read public projects from " +
           "this host, so a private one has to be published by uploading its folder.",
       );
     }

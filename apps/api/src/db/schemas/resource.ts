@@ -31,7 +31,7 @@ export const resources = pgTable(
     // (ADR-0026); Skill's own shared validation still requires it.
     body: text("body"),
     // The Kind's own fields, validated by `ResourcePayloadSchema`'s
-    // discriminated union in @in-org-quicko/skillset-shared (ADR-0026). For `skill`,
+    // discriminated union in @in-org-quicko/sqillset-shared (ADR-0026). For `skill`,
     // this is the four optional Agent Skills spec fields — see
     // `SkillPayloadSchema`.
     payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),

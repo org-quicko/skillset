@@ -1,4 +1,4 @@
-import type { Publisher } from "@in-org-quicko/skillset-shared";
+import type { Publisher } from "@in-org-quicko/sqillset-shared";
 import { DownloadIcon, EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";

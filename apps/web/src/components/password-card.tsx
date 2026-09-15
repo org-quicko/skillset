@@ -1,4 +1,4 @@
-import { PASSWORD_MIN_LENGTH } from "@in-org-quicko/skillset-shared";
+import { PASSWORD_MIN_LENGTH } from "@in-org-quicko/sqillset-shared";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
 import { LabeledField } from "@/components/labeled-field";

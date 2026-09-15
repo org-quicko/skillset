@@ -7,9 +7,9 @@ override that stays out of the ordinary setup snippet, and with it omitted the s
 Agent from its surroundings (`.scratch/mcp-server/spec.md`, "Detecting the Agent"). The setup story
 for the non-technical User this feature exists for is now naming the Registry and nothing else.
 
-The detector lives in `@in-org-quicko/skillset-shared` (`src/agents/detect.ts`) and is driven by the existing
-Agent table — extended with an `envMarkers` field — not a second table. `@in-org-quicko/skillset-cli`'s
-`skillset add` uses the same function for its non-interactive path, so the CLI and the MCP server
+The detector lives in `@in-org-quicko/sqillset-shared` (`src/agents/detect.ts`) and is driven by the existing
+Agent table — extended with an `envMarkers` field — not a second table. `@in-org-quicko/sqillset-cli`'s
+`sqillset add` uses the same function for its non-interactive path, so the CLI and the MCP server
 cannot drift into disagreeing about what "detect the Agent" means.
 
 ## The ladder
@@ -43,8 +43,8 @@ JSON block and never opens the flag reference. The startup crash the User hit
 
 **Depend on `@vercel/detect-agent`.** Its `agents.json` is the best public catalogue of Agent
 environment markers and we cross-check every marker against it. But taking it as a dependency cuts
-against ADR-0033's reason for a separate `@in-org-quicko/skillset-mcp` workspace (keep the dependency set to the
-MCP SDK, `zod`, and `@in-org-quicko/skillset-shared`) and against ADR-0031's stance on the Agent table itself —
+against ADR-0033's reason for a separate `@in-org-quicko/sqillset-mcp` workspace (keep the dependency set to the
+MCP SDK, `zod`, and `@in-org-quicko/sqillset-shared`) and against ADR-0031's stance on the Agent table itself —
 not vendored, each row verified against its Agent's own documentation rather than diffed against
 someone else's release. Its ids (`claude_code`, `gemini_cli`) also do not match ours
 (`claude-code`, `gemini-cli`), so a mapping layer would be needed regardless. We curate our own
@@ -66,13 +66,13 @@ the first `add_skills` call — the one tool that needs an Agent — and cached.
 **The installer accepts `agentId: null`.** `resolveInstallTarget` and `installSkill` widen their
 `agentId` parameter, and `WriteReport.agent` widens to `AgentId | null`. A `null` Agent resolves the
 Agent directory to the canonical directory, so the existing "reads `.agents/skills` directly" branch
-produces the link-nothing install with no new code path. `skillset add` with an explicit `--agent`
+produces the link-nothing install with no new code path. `sqillset add` with an explicit `--agent`
 is unaffected.
 
 **`add_skills` returns `{ detection, outcomes }`.** The batch result carries the governing detection
 alongside the per-Skill outcomes, so the caller can report which Agent was chosen and how.
 
-**`skillset add` no longer requires `--agent` outside a terminal.** With no flag and no TTY it
+**`sqillset add` no longer requires `--agent` outside a terminal.** With no flag and no TTY it
 detects instead of erroring; `--scope` is still required there (a Scope cannot be detected). The
 interactive prompt is unchanged.
 

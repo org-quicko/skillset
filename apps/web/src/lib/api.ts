@@ -1,4 +1,4 @@
-import { ApiError, apiErrorFrom, parseApiResponse } from "@in-org-quicko/skillset-shared";
+import { ApiError, apiErrorFrom, parseApiResponse } from "@in-org-quicko/sqillset-shared";
 import type { z } from "zod";
 import { queryClient } from "./query-client";
 import { discardSessionState } from "./query-keys";

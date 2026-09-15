@@ -6,7 +6,7 @@ import {
   SKILL_DIRECTORY_MIN_PAGE_SIZE,
   SKILL_DIRECTORY_SORT_FIELDS,
   SKILL_DIRECTORY_SORT_ORDERS,
-} from "@in-org-quicko/skillset-shared";
+} from "@in-org-quicko/sqillset-shared";
 import { z } from "zod";
 
 /** Reused rather than rebuilt per element — the `tag_id` filter below runs it over every value. */

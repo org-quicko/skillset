@@ -14,7 +14,7 @@ import type { SkillSourceLocation } from "./skill-source-location.js";
  * treats `user-agent` as a forbidden header name and drops it, which is
  * harmless, and the server genuinely needs it.
  */
-const USER_AGENT = "skillset";
+const USER_AGENT = "sqillset";
 
 /** GitLab pages its tree listing; this is its maximum page size. */
 const GITLAB_PAGE_SIZE = 100;

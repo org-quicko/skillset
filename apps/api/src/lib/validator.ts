@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { SkillValidationError, TagValidationError } from "@in-org-quicko/skillset-shared";
+import { SkillValidationError, TagValidationError } from "@in-org-quicko/sqillset-shared";
 import type { ValidationTargets } from "hono";
 import { z } from "zod";
 import { AppError, ValidationError } from "./errors.js";
@@ -87,7 +87,7 @@ export function uuidParam<Name extends string>(name: Name, notFound: () => Error
  * A schema member checked by one of the shared Skill or Tag rule functions.
  *
  * @remarks
- * The rules in `@in-org-quicko/skillset-shared` are the single source of what a Skill or Tag
+ * The rules in `@in-org-quicko/sqillset-shared` are the single source of what a Skill or Tag
  * may be, and each failure names the rule it broke. Wrapping them here lets a
  * request schema reuse them unchanged, and `validate` answers a failure with
  * that rule as the error code instead of a generic `validation_failed`.
