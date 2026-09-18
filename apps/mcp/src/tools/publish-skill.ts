@@ -10,7 +10,7 @@ import {
   SkillValidationError,
   type SkillBundle,
   type SkillFile,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 
 export interface PublishSkillDeps {
   fetchImpl: typeof fetch;
@@ -161,7 +161,7 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
       throw new Error("This Token is not allowed to publish — publishing needs the writer role or higher.");
     }
     if (apiError.status === 401) {
-      throw new Error("Token rejected — configure a current one (--token or SQILLSET_TOKEN).");
+      throw new Error("Token rejected — configure a current one (--token or SKILLSET_TOKEN).");
     }
     throw apiError;
   }
@@ -210,7 +210,7 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
  *
  * @remarks
  * Republishing an already-published name overwrites it completely rather than versioning
- * (ADR-0002) — the same behaviour `sqillset publish` has always had, now available without a
+ * (ADR-0002) — the same behaviour `skillset publish` has always had, now available without a
  * terminal. Unlike `search_skills` and `install_skills`, this sends an `authorization` header:
  * publishing needs a writer Token, which is why it is the one tool this server is configured
  * with a Token for at all (ADR-0035).

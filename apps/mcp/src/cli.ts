@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   if (config.tokenSource === "flag") {
     logger.warn(
       "--token puts the Token in this machine's process list and in the .mcp.json that configures this server, " +
-        "which is usually checked in. Set SQILLSET_TOKEN in the environment instead.",
+        "which is usually checked in. Set SKILLSET_TOKEN in the environment instead.",
     );
   }
 
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const server = createServer(config, fetch, logger, ctx);
   await server.connect(new StdioServerTransport());
   logger.info(
-    `sqillset-mcp connected, registry=${config.registry} scope=${config.scope} agent-override=${config.agentId ?? "none (detected)"} ` +
+    `skillset-mcp connected, registry=${config.registry} scope=${config.scope} agent-override=${config.agentId ?? "none (detected)"} ` +
       `token=${config.token ? "configured" : "none (publish_skill will refuse)"}`,
   );
 }

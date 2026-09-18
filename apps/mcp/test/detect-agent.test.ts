@@ -15,8 +15,8 @@ const config = (agentId?: McpConfig["agentId"]): McpConfig => ({
 });
 
 async function withTempRoot<T>(run: (root: { cwd: string; homeDir: string }) => Promise<T>): Promise<T> {
-  const cwd = await mkdtemp(join(tmpdir(), "sqillset-detect-cwd-"));
-  const homeDir = await mkdtemp(join(tmpdir(), "sqillset-detect-home-"));
+  const cwd = await mkdtemp(join(tmpdir(), "skillset-detect-cwd-"));
+  const homeDir = await mkdtemp(join(tmpdir(), "skillset-detect-home-"));
   try {
     return await run({ cwd, homeDir });
   } finally {

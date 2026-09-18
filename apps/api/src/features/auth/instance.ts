@@ -1,4 +1,4 @@
-import { ORGANISATION_CLAIM, isUngated, type IdentityProviderKind } from "@in-org-quicko/sqillset-shared";
+import { ORGANISATION_CLAIM, isUngated, type IdentityProviderKind } from "@in-org-quicko/skillset-shared";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq, max } from "drizzle-orm";
@@ -382,7 +382,7 @@ export function organisationGate(db: Database, logger: Logger) {
  */
 export function createAuth(deps: BetterAuthDependencies, providers: IdentityProviderRow[]) {
   return betterAuth({
-    appName: "Sqillset",
+    appName: "Skillset",
     secret: deps.secret,
     baseURL: deps.publicUrl,
     basePath: AUTH_BASE_PATH,

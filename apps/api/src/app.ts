@@ -44,7 +44,7 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
  *
  * @remarks
  * The default is deliberately loose: the web interface fires several requests
- * per page and a `sqillset add` run fires a few per Skill, so this is a
+ * per page and a `skillset add` run fires a few per Skill, so this is a
  * ceiling on a script, not a quota. The two overrides are the routes where one
  * request costs far more than a database read — assembling a zip reads every
  * file of an Artifact, and an import fans out to the Git provider's API on

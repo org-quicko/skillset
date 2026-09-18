@@ -5,32 +5,32 @@ import { join } from "node:path";
 import { readConfig, resolveConfigPath, resolveCredentials, resolveRegistryAccess, writeConfig } from "../src/config.js";
 
 describe("resolveConfigPath", () => {
-  it("prefers SQILLSET_CONFIG_PATH over everything else", () => {
-    expect(resolveConfigPath({ SQILLSET_CONFIG_PATH: "/custom/config.json", APPDATA: "C:\\AppData" })).toBe(
+  it("prefers SKILLSET_CONFIG_PATH over everything else", () => {
+    expect(resolveConfigPath({ SKILLSET_CONFIG_PATH: "/custom/config.json", APPDATA: "C:\\AppData" })).toBe(
       "/custom/config.json",
     );
   });
 
   it("uses APPDATA on Windows", () => {
     expect(resolveConfigPath({ APPDATA: "C:\\Users\\dev\\AppData\\Roaming" })).toBe(
-      join("C:\\Users\\dev\\AppData\\Roaming", "sqillset", "config.json"),
+      join("C:\\Users\\dev\\AppData\\Roaming", "skillset", "config.json"),
     );
   });
 
   it("uses XDG_CONFIG_HOME when set and APPDATA is absent", () => {
     expect(resolveConfigPath({ XDG_CONFIG_HOME: "/home/dev/.config-custom" })).toBe(
-      join("/home/dev/.config-custom", "sqillset", "config.json"),
+      join("/home/dev/.config-custom", "skillset", "config.json"),
     );
   });
 
   it("falls back to HOME/.config", () => {
-    expect(resolveConfigPath({ HOME: "/home/dev" })).toBe(join("/home/dev", ".config", "sqillset", "config.json"));
+    expect(resolveConfigPath({ HOME: "/home/dev" })).toBe(join("/home/dev", ".config", "skillset", "config.json"));
   });
 });
 
 describe("readConfig / writeConfig", () => {
   it("returns null when no file exists yet", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       expect(await readConfig(join(dir, "config.json"))).toBeNull();
     } finally {
@@ -39,7 +39,7 @@ describe("readConfig / writeConfig", () => {
   });
 
   it("round-trips a written config, creating parent directories", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "nested", "config.json");
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
@@ -50,7 +50,7 @@ describe("readConfig / writeConfig", () => {
   });
 
   it("throws a clear error on invalid JSON", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       await Bun.write(configPath, "not json");
@@ -61,7 +61,7 @@ describe("readConfig / writeConfig", () => {
   });
 
   it("throws a clear error when the file is missing a registry or token", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       await Bun.write(configPath, JSON.stringify({ registry: "https://registry.example" }));
@@ -80,32 +80,32 @@ describe("resolveCredentials", () => {
   });
 
   it("prefers the env Token over the file's", () => {
-    expect(resolveCredentials({ SQILLSET_TOKEN: "env-token" }, fileConfig)).toEqual({
+    expect(resolveCredentials({ SKILLSET_TOKEN: "env-token" }, fileConfig)).toEqual({
       registry: "https://file.example",
       token: "env-token",
     });
   });
 
   it("keeps the stored Token when the env names the Registry it was stored against", () => {
-    expect(resolveCredentials({ SQILLSET_REGISTRY: "https://file.example/" }, fileConfig)).toEqual({
+    expect(resolveCredentials({ SKILLSET_REGISTRY: "https://file.example/" }, fileConfig)).toEqual({
       registry: "https://file.example/",
       token: "file-token",
     });
   });
 
   it("never sends the stored Token to a different Registry", () => {
-    expect(resolveCredentials({ SQILLSET_REGISTRY: "https://env.example" }, fileConfig)).toBeNull();
+    expect(resolveCredentials({ SKILLSET_REGISTRY: "https://env.example" }, fileConfig)).toBeNull();
   });
 
   it("returns null when neither source has both pieces", () => {
     expect(resolveCredentials({}, null)).toBeNull();
-    expect(resolveCredentials({ SQILLSET_REGISTRY: "https://env.example" }, null)).toBeNull();
+    expect(resolveCredentials({ SKILLSET_REGISTRY: "https://env.example" }, null)).toBeNull();
   });
 });
 
 describe("resolveRegistryAccess", () => {
   it("needs only a Registry, since reads need no Token (ADR-0013)", () => {
-    expect(resolveRegistryAccess({ SQILLSET_REGISTRY: "https://env.example" }, null)).toEqual({
+    expect(resolveRegistryAccess({ SKILLSET_REGISTRY: "https://env.example" }, null)).toEqual({
       registry: "https://env.example",
       token: undefined,
     });
@@ -120,7 +120,7 @@ describe("resolveRegistryAccess", () => {
 
   it("drops the stored Token when the env points at another Registry, rather than forwarding it", () => {
     expect(
-      resolveRegistryAccess({ SQILLSET_REGISTRY: "https://other.example" }, {
+      resolveRegistryAccess({ SKILLSET_REGISTRY: "https://other.example" }, {
         registry: "https://file.example",
         token: "file-token",
       }),
@@ -129,7 +129,7 @@ describe("resolveRegistryAccess", () => {
 
   it("treats a trailing slash and a capitalised host as the same Registry", () => {
     expect(
-      resolveRegistryAccess({ SQILLSET_REGISTRY: "https://File.Example/" }, {
+      resolveRegistryAccess({ SKILLSET_REGISTRY: "https://File.Example/" }, {
         registry: "https://file.example",
         token: "file-token",
       }),
@@ -138,6 +138,6 @@ describe("resolveRegistryAccess", () => {
 
   it("returns null only when no Registry is known at all", () => {
     expect(resolveRegistryAccess({}, null)).toBeNull();
-    expect(resolveRegistryAccess({ SQILLSET_TOKEN: "orphan-token" }, null)).toBeNull();
+    expect(resolveRegistryAccess({ SKILLSET_TOKEN: "orphan-token" }, null)).toBeNull();
   });
 });

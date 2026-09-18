@@ -1,4 +1,4 @@
-import { SetupInitSchema, SetupStateSchema, UserSchema } from "@in-org-quicko/sqillset-shared";
+import { SetupInitSchema, SetupStateSchema, UserSchema } from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
 import { validate } from "../../lib/validator.js";
 

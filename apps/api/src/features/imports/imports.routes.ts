@@ -4,7 +4,7 @@ import {
   SkillFilesSchema,
   SkillSourceLocationSchema,
   SkillSourcesSchema,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 import { z } from "zod";
 import { createRouter } from "../../lib/factory.js";
 import { JsonObjectSchema, parseValue, validate } from "../../lib/validator.js";

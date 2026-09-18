@@ -6,7 +6,7 @@ import {
   SkillPublishedSchema,
   SkillSchema,
   SkillTagsSchema,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
 import { uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
@@ -147,7 +147,7 @@ export const resourcesRoutes = createRouter()
   // records exactly one Install (ADR-0012, ADR-0028).
   .get(`/${ID}/artifact`, resourceId, async (c) => {
     // `?source=` identifies the caller: the web's Download button sends none,
-    // `sqillset add` sends `cli`. Anything missing or unrecognised counts as
+    // `skillset add` sends `cli`. Anything missing or unrecognised counts as
     // `web` rather than refusing the download, so an old client keeps working.
     const rawSource = c.req.query("source");
     const source: InstallSource = rawSource && isInstallSource(rawSource) ? rawSource : "web";

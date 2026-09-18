@@ -3,7 +3,7 @@ import {
   type IdentityProviderCreate,
   type IdentityProviderUpdate,
   type PublicIdentityProvider,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 import { asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
 import { firstRow } from "../../db/rows.js";

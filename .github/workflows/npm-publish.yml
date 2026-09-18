@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - dir: apps/cli
-            package: "@in-org-quicko/sqillset-cli"
+            package: "@in-org-quicko/skillset-cli"
           - dir: apps/mcp
-            package: "@in-org-quicko/sqillset-mcp"
+            package: "@in-org-quicko/skillset-mcp"
     steps:
       - uses: actions/checkout@v4
 

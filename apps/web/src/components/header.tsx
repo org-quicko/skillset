@@ -1,4 +1,4 @@
-import { roleMeets, type User } from "@in-org-quicko/sqillset-shared";
+import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
 import { LogOutIcon, SettingsIcon, UploadIcon } from "lucide-react";
 import { useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";
@@ -49,7 +49,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
           onClick={() => navigate("/")}
           className="cursor-pointer font-wordmark text-2xl tracking-[0.04em] uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
-          SQILLSET
+          SKILLSET
         </button>
 
         <div className="flex items-center gap-4">

@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Sqillset API",
+    "title": "Skillset API",
     "version": "0.1.0",
     "description": "A self-hosted Registry for Agent Skills. This is the contract the CLI depends on; the web interface uses the same routes and has no private data path of its own.\n\n**Conventions.** Every JSON key on the wire is snake_case, which means wire keys line up with Postgres column names. TypeScript types, interfaces, and classes are camelCase, so conversion happens once at the boundary in the shared module rather than ad hoc per call site.\n\n**Uploaded Artifact bytes never pass through this API.** An Artifact is stored as its files, one object each; publishing returns one presigned upload target per file, and the caller writes each directly. The API therefore validates the metadata and the file *manifest* a caller claims about a Skill, never the bytes themselves (ADR-0001, ADR-0032). Reads are the other way round: `GET /resources/{id}/artifact` assembles a zip from those files, and `GET /resources/{id}/files/{path}` serves one of them, so Artifact bytes do pass through on the way out."
   },

@@ -1,4 +1,4 @@
-import { PASSWORD_MIN_LENGTH } from "@in-org-quicko/sqillset-shared";
+import { PASSWORD_MIN_LENGTH } from "@in-org-quicko/skillset-shared";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,7 @@ export function BootstrapForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Set up Sqillset</CardTitle>
+        <CardTitle>Set up Skillset</CardTitle>
         <CardDescription>Be the first to sign up, and you&apos;ll become Superadmin.</CardDescription>
       </CardHeader>
       <CardContent>

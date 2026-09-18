@@ -119,7 +119,7 @@ describe("Artifact manifest validation (ADR-0032)", () => {
 /**
  * The zip is a representation the API assembles on demand rather than
  * something it stores (ADR-0032), so what matters is that it round-trips
- * through the extractor `sqillset add` uses.
+ * through the extractor `skillset add` uses.
  */
 describe("Assembling an Artifact into a zip (ADR-0032)", () => {
   it("round-trips every file, at its own path, byte for byte", () => {

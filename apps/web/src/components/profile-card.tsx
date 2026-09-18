@@ -1,4 +1,4 @@
-import type { User } from "@in-org-quicko/sqillset-shared";
+import type { User } from "@in-org-quicko/skillset-shared";
 import { useEffect, useRef, useState } from "react";
 import { InfoRow } from "@/components/info-row";
 import { ChangePasswordDialog } from "@/components/password-card";

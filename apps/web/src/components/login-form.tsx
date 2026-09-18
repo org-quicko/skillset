@@ -1,4 +1,4 @@
-import { loginRefusalMessage, type PublicIdentityProvider } from "@in-org-quicko/sqillset-shared";
+import { loginRefusalMessage, type PublicIdentityProvider } from "@in-org-quicko/skillset-shared";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
@@ -57,7 +57,7 @@ export function LoginForm() {
             onClick={() => navigate("/")}
             className="cursor-pointer font-wordmark text-2xl tracking-[0.04em] uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            SQILLSET
+            SKILLSET
           </button>
         </div>
       </header>

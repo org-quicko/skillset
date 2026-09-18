@@ -13,7 +13,7 @@ FROM deps AS build-web
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/web apps/web
-RUN bun run --filter '@in-org-quicko/sqillset-web' build
+RUN bun run --filter '@in-org-quicko/skillset-web' build
 
 FROM oven/bun:1.4.2-slim AS runtime
 WORKDIR /app

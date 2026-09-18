@@ -69,10 +69,10 @@ async function main() {
   // it at all; `bodyLimit` in app.ts is the per-route half of the same
   // ceiling (ISSUE-20). Bun's own default is 128 MB.
   Bun.serve({ fetch: app.fetch, port: config.port, maxRequestBodySize: MAX_REQUEST_BODY_BYTES });
-  logger.info({ port: config.port, analytics_refresh_cron: config.analyticsRefreshCron }, "Sqillset listening");
+  logger.info({ port: config.port, analytics_refresh_cron: config.analyticsRefreshCron }, "Skillset listening");
 }
 
 main().catch((error) => {
-  logger.fatal({ err: error }, "Sqillset failed to start");
+  logger.fatal({ err: error }, "Skillset failed to start");
   process.exit(1);
 });

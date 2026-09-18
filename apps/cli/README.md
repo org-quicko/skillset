@@ -1,32 +1,32 @@
-# @in-org-quicko/sqillset-cli
+# @in-org-quicko/skillset-cli
 
-Command-line client for publishing and managing Skills on a [Sqillset](https://github.com/org-quicko/sqillset) Registry.
+Command-line client for publishing and managing Skills on a [Skillset](https://github.com/org-quicko/skillset) Registry.
 
 ## Install
 
 ```sh
-npm install -g @in-org-quicko/sqillset-cli
+npm install -g @in-org-quicko/skillset-cli
 ```
 
-This installs a `sqillset` binary.
+This installs a `skillset` binary.
 
 ## Usage
 
 ```sh
-sqillset login --registry <url>
-sqillset publish [path]      # defaults to the current directory
-sqillset add <name>          # install a Skill for a coding agent
-sqillset whoami
+skillset login --registry <url>
+skillset publish [path]      # defaults to the current directory
+skillset add <name>          # install a Skill for a coding agent
+skillset whoami
 ```
 
 Credentials are stored per-Registry after `login`. For CI, skip `login` and set:
 
 ```sh
-SQILLSET_REGISTRY=<url>
-SQILLSET_TOKEN=<token>
+SKILLSET_REGISTRY=<url>
+SKILLSET_TOKEN=<token>
 ```
 
-`SQILLSET_REGISTRY` and `SQILLSET_TOKEN` always override the stored config.
+`SKILLSET_REGISTRY` and `SKILLSET_TOKEN` always override the stored config.
 
 ## License
 

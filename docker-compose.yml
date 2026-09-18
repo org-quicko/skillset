@@ -1,6 +1,6 @@
 services:
   app:
-    # image: labsatquicko/sqillset:latest
+    # image: labsatquicko/skillset:latest
     build: .
     restart: unless-stopped
     ports:

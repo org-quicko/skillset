@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import type { Role } from "@in-org-quicko/sqillset-shared";
+import type { Role } from "@in-org-quicko/skillset-shared";
 import { eq } from "drizzle-orm";
 import { connections, integrations, users } from "../../db/schemas/index.js";
 import { deriveKeys, openClientSecret } from "../../lib/secrets.js";

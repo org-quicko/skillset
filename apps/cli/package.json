@@ -1,19 +1,19 @@
 {
-  "name": "@in-org-quicko/sqillset-cli",
+  "name": "@in-org-quicko/skillset-cli",
   "version": "1.0.0",
-  "description": "CLI for publishing and managing Skills on a Sqillset Registry.",
+  "description": "CLI for publishing and managing Skills on a Skillset Registry.",
   "type": "module",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/org-quicko/sqillset.git",
+    "url": "git+https://github.com/org-quicko/skillset.git",
     "directory": "apps/cli"
   },
   "publishConfig": {
     "access": "public"
   },
   "bin": {
-    "sqillset": "./dist/cli.js"
+    "skillset": "./dist/cli.js"
   },
   "files": [
     "dist"
@@ -25,8 +25,8 @@
   },
   "devDependencies": {
     "@clack/prompts": "^1.2.0",
-    "@in-org-quicko/sqillset-installer": "workspace:*",
-    "@in-org-quicko/sqillset-shared": "workspace:*",
+    "@in-org-quicko/skillset-installer": "workspace:*",
+    "@in-org-quicko/skillset-shared": "workspace:*",
     "@types/bun": "^1.4.0",
     "commander": "^13.1.0",
     "fflate": "^0.8.3",

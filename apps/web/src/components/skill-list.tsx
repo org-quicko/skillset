@@ -3,7 +3,7 @@ import {
   type Role,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 import { ArrowDownIcon, ArrowUpIcon, SearchXIcon, UploadIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PublishSkillForm } from "@/components/publish-skill-form";

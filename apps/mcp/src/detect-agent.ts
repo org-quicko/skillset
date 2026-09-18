@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { type AgentDetection, detectAgent, nonUniversalProjectSkillsDirs } from "@in-org-quicko/sqillset-shared";
-import type { InstallContext } from "@in-org-quicko/sqillset-installer";
+import { type AgentDetection, detectAgent, nonUniversalProjectSkillsDirs } from "@in-org-quicko/skillset-shared";
+import type { InstallContext } from "@in-org-quicko/skillset-installer";
 import type { McpConfig } from "./config.js";
 
 /**

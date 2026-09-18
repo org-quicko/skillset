@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { AgentDetection } from "@in-org-quicko/sqillset-shared";
+import type { AgentDetection } from "@in-org-quicko/skillset-shared";
 import type { McpConfig } from "./config.js";
 import { resolveAgent } from "./detect-agent.js";
 import type { Logger } from "./logger.js";
@@ -15,7 +15,7 @@ import { searchSkills } from "./tools/search-skills.js";
 // resolving the word "Skill" against the catalog it was born knowing about. Hence the
 // framing here: not "search Skills" but "this catalog is remote, and you cannot see it".
 const SERVER_INSTRUCTIONS =
-  "Sqillset is this team's remote Skill Registry. It is a network service, and its contents are " +
+  "Skillset is this team's remote Skill Registry. It is a network service, and its contents are " +
   "NOT part of your built-in Skill catalog, your bundled/plugin Skills, or anything on this " +
   "filesystem — you cannot see, list, or name a single Skill in it without calling search_skills.\n\n" +
   "Whenever the user asks about Skills — whether one exists, to find/search/browse/list Skills, to " +
@@ -32,9 +32,9 @@ const SearchSkillsInputSchema = {
     .string()
     .min(1)
     .describe(
-      "A task description or an exact Skill name to find in the shared Sqillset catalog. Examples: `adapter`, `write-adapters`, `review pull requests`, or `write changelogs`.",
+      "A task description or an exact Skill name to find in the shared Skillset catalog. Examples: `adapter`, `write-adapters`, `review pull requests`, or `write changelogs`.",
     ),
-  tag: z.string().optional().describe("Optional Tag id to narrow the Sqillset search."),
+  tag: z.string().optional().describe("Optional Tag id to narrow the Skillset search."),
   limit: z.number().int().positive().optional().describe("Optional maximum number of matching Skills to return."),
 };
 
@@ -93,7 +93,7 @@ const InstallSkillsInputSchema = {
  */
 export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger: Logger, ctx: InstallSkillsContext): McpServer {
   const server = new McpServer(
-    { name: "sqillset-mcp", version: "0.0.0", title: "Sqillset Skill Catalog" },
+    { name: "skillset-mcp", version: "0.0.0", title: "Skillset Skill Catalog" },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
@@ -111,12 +111,12 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
   server.registerTool(
     "search_skills",
     {
-      title: "Search Sqillset Skills",
+      title: "Search Skillset Skills",
       description:
         "Search this team's REMOTE Skill Registry over the network. Its Skills are a different set from your " +
         "built-in Skill catalog and from any Skill on this filesystem, and none of them are visible to you until " +
         "this tool returns them. ALWAYS call this tool when the user asks whether a Skill exists, asks to " +
-        "find/search/locate/list a Skill, mentions Sqillset or the Registry, or describes a capability that may " +
+        "find/search/locate/list a Skill, mentions Skillset or the Registry, or describes a capability that may " +
         "have a Skill — including when your own catalog looks like it already answers, because it is a different " +
         "catalog. Never substitute your built-in Skill catalog for this search, and never report that no Skill " +
         "exists without having called this tool. Search by the user's task or exact Skill name, such as `adapter`, " +
@@ -168,11 +168,11 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
     {
       title: "Publish a Skill",
       description:
-        "Publish a Skill from this project to your team's shared Sqillset Registry, so install_skills can install " +
+        "Publish a Skill from this project to your team's shared Skillset Registry, so install_skills can install " +
         "it for everyone else. Use this when the user asks to publish, share, or push a Skill they authored to " +
         "the Registry. Pass `path` to the directory holding that Skill's own SKILL.md (defaults to the project " +
         "root). Republishing an existing name overwrites it completely — there is no versioning. Requires a " +
-        "writer Token to be configured on this server (--token or SQILLSET_TOKEN); if none is configured, this " +
+        "writer Token to be configured on this server (--token or SKILLSET_TOKEN); if none is configured, this " +
         "tool fails naming that as the reason rather than attempting the request.",
       annotations: {
         destructiveHint: true,
@@ -184,7 +184,7 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
       logger.debug(`publish_skill path=${path ?? "(project root)"}`);
       if (!config.token) {
         throw new Error(
-          "publish_skill needs a writer Token — configure one with --token <token> or the SQILLSET_TOKEN " +
+          "publish_skill needs a writer Token — configure one with --token <token> or the SKILLSET_TOKEN " +
             "environment variable, then restart this server.",
         );
       }

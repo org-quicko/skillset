@@ -1,4 +1,4 @@
-import { ASSIGNABLE_ROLES, type AssignableRole, type User } from "@in-org-quicko/sqillset-shared";
+import { ASSIGNABLE_ROLES, type AssignableRole, type User } from "@in-org-quicko/skillset-shared";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CreateUserDialog } from "@/components/create-user-dialog";

@@ -26,7 +26,7 @@ function fakeUser(overrides: Partial<Record<string, unknown>> = {}) {
  */
 describe("runLogin refuses to send a Token in the clear", () => {
   async function attempt(registry: string, insecure?: boolean) {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     const configPath = join(dir, "config.json");
     const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, fakeUser()));
     try {
@@ -66,7 +66,7 @@ describe("runLogin refuses to send a Token in the clear", () => {
 
 describe("runLogin", () => {
   it("stores the config and returns the resolved identity on a valid token", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       const { fetch: fetchImpl, calls } = stubFetch((url) => {
@@ -91,7 +91,7 @@ describe("runLogin", () => {
   });
 
   it("rejects a bad token without writing the config file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sqillset-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
     try {
       const configPath = join(dir, "config.json");
       const { fetch: fetchImpl } = stubFetch(() =>
@@ -114,7 +114,7 @@ describe("runLogin", () => {
     }) as unknown as typeof fetch;
 
     await expect(
-      runLogin({ fetch: fetchImpl, configPath: join(tmpdir(), "unused-sqillset-config.json") }, {
+      runLogin({ fetch: fetchImpl, configPath: join(tmpdir(), "unused-skillset-config.json") }, {
         registry: "https://nope.example",
         token: "x",
       }),

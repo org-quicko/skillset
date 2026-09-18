@@ -28,7 +28,7 @@ export async function waitForDatabase(sql: postgres.Sql): Promise<void> {
   }
 }
 
-const MIGRATION_LOCK_KEY = advisoryLockKey("sqillset:migrations");
+const MIGRATION_LOCK_KEY = advisoryLockKey("skillset:migrations");
 
 // Resolved relative to this module rather than process.cwd(), so it's
 // correct regardless of where the process was launched from.
@@ -53,7 +53,7 @@ const DEFAULT_MIGRATIONS_FOLDER = join(import.meta.dir, "../../drizzle");
  * @throws Error if the folder cannot be read or copied.
  */
 async function resolveMigrations(migrationsFolder: string, schemaName: string): Promise<string> {
-  const resolved = await mkdtemp(join(tmpdir(), "sqillset-migrations-"));
+  const resolved = await mkdtemp(join(tmpdir(), "skillset-migrations-"));
   await cp(migrationsFolder, resolved, { recursive: true });
 
   for (const entry of await readdir(resolved)) {

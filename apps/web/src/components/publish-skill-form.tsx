@@ -3,7 +3,7 @@ import {
   SkillValidationError,
   type SkillFile,
   type SkillSourceLocation,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 import { CircleAlertIcon, CircleCheckIcon, UploadIcon } from "lucide-react";
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { connectHref, useConnections, useRepositories } from "@/hooks/use-connections";

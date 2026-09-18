@@ -1,4 +1,4 @@
-import { SkillTagsSchema, TagListSchema, TagSchema } from "@in-org-quicko/sqillset-shared";
+import { SkillTagsSchema, TagListSchema, TagSchema } from "@in-org-quicko/skillset-shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { resourceQueryKey, resourcesListQueryKey, resourcesQueryKey, tagsListQueryKey } from "@/lib/query-keys";

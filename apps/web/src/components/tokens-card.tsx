@@ -1,4 +1,4 @@
-import type { Token, TokenCreated } from "@in-org-quicko/sqillset-shared";
+import type { Token, TokenCreated } from "@in-org-quicko/skillset-shared";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { IconSwap } from "@/components/icon-swap";

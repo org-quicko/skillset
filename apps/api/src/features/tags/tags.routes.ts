@@ -1,4 +1,4 @@
-import { TagListSchema, TagSchema, validateTagName } from "@in-org-quicko/sqillset-shared";
+import { TagListSchema, TagSchema, validateTagName } from "@in-org-quicko/skillset-shared";
 import { z } from "zod";
 import { createRouter } from "../../lib/factory.js";
 import { ruleSchema, uuidParam, validate } from "../../lib/validator.js";

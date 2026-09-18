@@ -11,7 +11,7 @@ import {
   type AgentId,
   type Scope,
   type SkillFile,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 
 /** How the chosen Agent's own directory was pointed at the canonical `.agents/skills` copy. */
 export type LinkResult =
@@ -98,8 +98,8 @@ export function sanitizeSkillDirectoryName(name: string): string {
  */
 async function writeSkillFiles(targetDir: string, files: SkillFile[]): Promise<void> {
   const parent = dirname(targetDir);
-  const stagingDir = join(parent, `.sqillset-staging-${basename(targetDir)}-${randomUUID()}`);
-  const trashDir = join(parent, `.sqillset-trash-${basename(targetDir)}-${randomUUID()}`);
+  const stagingDir = join(parent, `.skillset-staging-${basename(targetDir)}-${randomUUID()}`);
+  const trashDir = join(parent, `.skillset-trash-${basename(targetDir)}-${randomUUID()}`);
 
   try {
     await mkdir(stagingDir, { recursive: true });

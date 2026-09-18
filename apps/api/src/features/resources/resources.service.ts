@@ -9,7 +9,7 @@ import {
   type Page,
   type SkillFile,
   type SkillPayload,
-} from "@in-org-quicko/sqillset-shared";
+} from "@in-org-quicko/skillset-shared";
 import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
 import { firstRow } from "../../db/rows.js";
@@ -686,7 +686,7 @@ export class ResourcesService {
    *
    * @remarks
    * An Artifact is stored as its files (ADR-0032); a zip is the
-   * representation `sqillset add`, the web Download control, and a
+   * representation `skillset add`, the web Download control, and a
    * marketplace `archive` source all want, so the API builds one on demand.
    * This is the read path where Artifact bytes do pass through the API, which
    * is what ADR-0032 amends ADR-0001 to allow — uploading still bypasses it

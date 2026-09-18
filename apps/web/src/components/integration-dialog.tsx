@@ -1,4 +1,4 @@
-import { INTEGRATION_DESCRIPTION_MAX_LENGTH, type Integration } from "@in-org-quicko/sqillset-shared";
+import { INTEGRATION_DESCRIPTION_MAX_LENGTH, type Integration } from "@in-org-quicko/skillset-shared";
 import { InfoIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
@@ -12,7 +12,7 @@ import { apiErrorMessage } from "@/lib/api";
 const GithubIcon = PROVIDER_ICONS.github;
 
 /**
- * Configures an Integration — a GitHub App registered with Sqillset —
+ * Configures an Integration — a GitHub App registered with Skillset —
  * either a new one or an existing one.
  *
  * @remarks
@@ -98,7 +98,7 @@ export function IntegrationDialog({
       <FormDialogHeader
         icon={GithubIcon}
         title={isEdit ? `Edit ${integration.display_name}` : "Add GitHub app"}
-        description="A Github app created for Sqillset to access repositories."
+        description="A Github app created for Skillset to access repositories."
       />
 
       <FormDialogBody>
@@ -150,7 +150,7 @@ export function IntegrationDialog({
             id="integration_app_slug"
             value={appSlug}
             onChange={(event) => setAppSlug(event.target.value)}
-            placeholder="Eg. acme-sqillset"
+            placeholder="Eg. acme-skillset"
             disabled={pending}
           />
         </FormField>

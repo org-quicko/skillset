@@ -1,4 +1,4 @@
-import { isUngated, type IdentityProvider } from "@in-org-quicko/sqillset-shared";
+import { isUngated, type IdentityProvider } from "@in-org-quicko/skillset-shared";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { IdentityProviderDialog } from "@/components/identity-provider-dialog";

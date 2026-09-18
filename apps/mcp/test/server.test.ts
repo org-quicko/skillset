@@ -11,7 +11,7 @@ const noopLogger: Logger = {
   error: () => {},
 };
 
-describe("Sqillset MCP server instructions", () => {
+describe("Skillset MCP server instructions", () => {
   it("tells the client the Registry is remote and unlisted, so it searches instead of using its own catalog", async () => {
     const server = createServer(
       { registry: "https://registry.example", scope: "project", agentId: undefined, logLevel: "warn", token: undefined, tokenSource: "none" },
