@@ -98,11 +98,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : (
-            <Button size="sm" onClick={() => navigate(LOGIN_PATH)}>
-              Sign in
-            </Button>
-          )}
+          ) : null}
         </div>
       </div>
 
