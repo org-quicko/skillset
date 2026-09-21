@@ -43,11 +43,15 @@ async function main() {
   const webDist = join(import.meta.dir, "../../web/dist");
   const webRoot = (await Bun.file(join(webDist, "index.html")).exists()) ? webDist : undefined;
 
+  const mcpbFile = join(import.meta.dir, "../../mcp/skillset-mcp.mcpb");
+  const mcpbPath = (await Bun.file(mcpbFile).exists()) ? mcpbFile : undefined;
+
   const app = createApp({
     sql,
     db,
     storage,
     webRoot,
+    mcpbPath,
     betterAuthSecret: config.betterAuthSecret,
     publicUrl: config.publicUrl,
     trustedProxies: config.trustedProxies,

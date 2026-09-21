@@ -70,7 +70,7 @@ const envOrHomeRelative = (envKey: string, fallbackDir: string, suffix: string) 
   `${nonBlank(env[envKey]) ?? `${homeDir}/${fallbackDir}`}/${suffix}`;
 
 /**
- * Every Agent `skillset add` can install for, alphabetically — the order the searchable
+ * Every Agent `skillset install` can install for, alphabetically — the order the searchable
  * prompt lists them in.
  *
  * @remarks
@@ -204,7 +204,7 @@ export function agentSkillsDir(agentId: AgentId, scope: Scope, ctx: ResolveConte
  *
  * @remarks
  * Several Agents share `.agents/skills` outright (ADR-0022's canonical directory) —
- * installing once already serves every Agent this returns, which is what lets `add` say so
+ * installing once already serves every Agent this returns, which is what lets `install` say so
  * instead of leaving the next run to discover it (ticket 09).
  *
  * @param agentId - The Agent just installed for.

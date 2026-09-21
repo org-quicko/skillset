@@ -43,10 +43,17 @@ const SECRET = "test-only-secret-with-enough-entropy-to-be-quiet";
  * refused for a User who plainly exists.
  *
  * That is not hypothetical. `accounts.issuer` was missed exactly this way, and
- * because sign-in matches a password on provider id, issuer, and account id
+ * because sign-in matched a password on provider id, issuer, and account id
  * together, every credential was invisible and every login was refused as
  * "user not found". This test is the check that would have caught it at the
  * schema rather than in a browser.
+ *
+ * Better Auth 1.7.3 then reverted `issuer` — accounts are keyed on provider id
+ * and account id again — and the column outlived it as a `NOT NULL` nothing
+ * wrote, which refused every insert instead. Better Auth notices that one
+ * itself, but only logs it while resolving the context and throws at the
+ * insert, so the first thing to fail is a request in production. The second
+ * test below is what turns it into a failing build.
  */
 describe("Better Auth's model and the schema agree", () => {
   it("maps every field Better Auth expects onto a column that exists", async () => {
@@ -73,6 +80,37 @@ describe("Better Auth's model and the schema agree", () => {
     }
 
     expect(missing).toEqual([]);
+  });
+
+  it("declares no required column that Better Auth never writes", async () => {
+    const { db } = createDatabase(UNUSED_DATABASE_URL);
+    const auth = createAuth(
+      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
+      [],
+    );
+    const context = await auth.$context;
+
+    // The opposite direction to the test above, and the one that broke when
+    // Better Auth 1.7.3 dropped `issuer`: a column Better Auth has no field
+    // for is one it never supplies a value for, so declaring it `NOT NULL`
+    // with no default makes every insert into that table fail. Better Auth
+    // logs this during context resolution rather than throwing, which is why
+    // asserting on it here is worth the lines.
+    const unwritable: string[] = [];
+    for (const table of Object.values(context.tables)) {
+      const drizzleTable = TABLES[table.modelName];
+      if (!drizzleTable) continue;
+
+      const written = new Set(
+        Object.entries(table.fields).map(([field, attributes]) => attributes.fieldName ?? field),
+      );
+      for (const [name, column] of Object.entries(getTableColumns(drizzleTable))) {
+        if (written.has(name) || !column.notNull || column.hasDefault) continue;
+        unwritable.push(`${table.modelName}.${name}`);
+      }
+    }
+
+    expect(unwritable).toEqual([]);
   });
 
   it("points every model at a table this schema actually declares", async () => {

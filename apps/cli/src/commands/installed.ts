@@ -1,0 +1,76 @@
+import { SkillSchema, type Scope } from "@in-org-quicko/skillset-shared";
+import {
+  readInstalled as readInstalledAt,
+  type InstalledSkill,
+  type RegistryLookup,
+} from "@in-org-quicko/skillset-installer";
+import { ApiError, registryFetch, type RegistryClient } from "../http.js";
+import type { SessionDeps } from "../session.js";
+
+export { forgetInstall, recordInstall } from "@in-org-quicko/skillset-installer";
+export type { InstalledSkill } from "@in-org-quicko/skillset-installer";
+
+/** The filesystem context every lockfile-aware command resolves paths against. */
+export interface InstalledDeps extends SessionDeps {
+  cwd: string;
+  homeDir: string;
+}
+
+/** Turns a `--scope` flag into a Scope, defaulting to the project. */
+export function parseScopeFlag(value: string | undefined): Scope {
+  if (value === undefined) return "project";
+  if (value !== "project" && value !== "user") {
+    throw new Error(`Unknown scope "${value}" — choose from: project, user.`);
+  }
+  return value;
+}
+
+/**
+ * The Registry lookup `readInstalled` needs, over this CLI's own client.
+ *
+ * @remarks
+ * A 404 answers `undefined` rather than throwing: a Skill an Admin deleted
+ * is still installed locally, and reporting that is more useful than
+ * failing a whole listing over one row. Every other refusal still throws —
+ * a 500 or a 403 is not the same as "no longer published", and quietly
+ * reading it as one would hide a broken Registry behind a clean listing.
+ */
+function lookupThrough(client: RegistryClient): RegistryLookup {
+  return async (name) => {
+    try {
+      const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(name)}`, SkillSchema);
+      return skill.updated_at;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return undefined;
+      throw error;
+    }
+  };
+}
+
+/**
+ * Reads what is installed at `scope`, consulting `client` for each Skill's
+ * current state at the Registry.
+ *
+ * @param deps - Project root, home directory, and environment.
+ * @param client - The Registry to consult, or `null` to skip it — then
+ * nothing can read `outdated`.
+ * @param scope - Which Scope's lockfile to read.
+ * @returns One entry per Skill the lockfile records, alphabetical by name.
+ * @throws ApiError when the Registry refuses a lookup with anything but a 404.
+ * @throws RegistryUnreachableError when the Registry cannot be reached.
+ * @example
+ * ```ts
+ * const installed = await readInstalled(deps, client, "project");
+ * ```
+ */
+export async function readInstalled(
+  deps: InstalledDeps,
+  client: RegistryClient | null,
+  scope: Scope,
+): Promise<InstalledSkill[]> {
+  return readInstalledAt(
+    { cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir },
+    scope,
+    client ? lookupThrough(client) : null,
+  );
+}

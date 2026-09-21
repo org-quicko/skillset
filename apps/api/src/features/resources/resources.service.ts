@@ -55,6 +55,7 @@ const skillSelection = {
   body: resources.body,
   payload: resources.payload,
   published_at: resources.published_at,
+  updated_at: resources.updated_at,
   published_by: {
     user_id: users.id,
     email: resources.published_by_email,
@@ -84,6 +85,10 @@ interface SkillSummary {
   allowed_tools: string | null;
   tags: TagSummary[];
   published_at: Date;
+  // What a republish moves and `published_at` does not, so it — not
+  // `published_at` — is the signal a client compares its installed copy
+  // against to decide whether that copy is stale.
+  updated_at: Date;
   published_by: SkillPublisher;
   // Never null: 0 until an Install is recorded and a refresh has picked it
   // up (ADR-0012) — `resource_analytics` has no row for a Resource until then.
@@ -166,7 +171,7 @@ function prefixToken(lastToken: string | undefined): string | undefined {
 }
 
 /**
- * Builds the `search @@ …` condition for a non-blank search term.
+ * Builds the `tsquery` a search term matches and ranks against.
  *
  * @remarks
  * Finished words, `"quoted phrases"`, and `-exclusions` are parsed exactly as
@@ -176,28 +181,103 @@ function prefixToken(lastToken: string | undefined): string | undefined {
  * for (docs/adr/0004-postgres-over-sqlite.md). A term ending in a phrase or
  * exclusion falls back to the unmodified call.
  *
- * `search` is `resource_directory`'s copy of `resources.search`, which also
- * folds in `published_by_name` (docs/data-model.md), so a term matching only
- * a Resource's publisher still matches.
+ * Returned as the query on its own rather than as a finished `search @@ …`
+ * condition, because the same expression is needed twice — once to filter and
+ * once to rank — and building it twice would let the two drift.
  *
  * @param query - A trimmed, non-empty search term.
- * @returns A boolean SQL expression for a `where` clause.
+ * @returns A `tsquery`-valued SQL expression.
  * @example
- * buildSearchCondition("postgre") // matches "postgresql-migrations"
+ * buildTsQuery("postgre") // matches "postgresql-migrations"
  */
-function buildSearchCondition(query: string) {
+function buildTsQuery(query: string): SQL {
   const tokens = query.match(/-?"[^"]*"|-?\S+/g) ?? [];
   const prefix = prefixToken(tokens[tokens.length - 1]);
-  if (!prefix) return sql`${resourceDirectory.search} @@ websearch_to_tsquery('english', ${query})`;
+  if (!prefix) return sql`websearch_to_tsquery('english', ${query})`;
 
   const headTerm = tokens.slice(0, -1).join(" ");
-  // Parenthesised explicitly: `@@` and `&&` sit at the same precedence tier
-  // and associate left-to-right, so an unparenthesised
-  // `search @@ a && b` parses as `(search @@ a) && b` — a boolean `&&`
-  // tsquery, which Postgres rejects.
+  // Parenthesised so the `&&` binds as tsquery intersection. `@@` and `&&`
+  // sit at the same precedence tier and associate left-to-right, so an
+  // unparenthesised `search @@ a && b` parses as `(search @@ a) && b` — a
+  // boolean `&&` tsquery, which Postgres rejects.
   return headTerm
-    ? sql`${resourceDirectory.search} @@ (websearch_to_tsquery('english', ${headTerm}) && to_tsquery('english', ${prefix}))`
-    : sql`${resourceDirectory.search} @@ to_tsquery('english', ${prefix})`;
+    ? sql`(websearch_to_tsquery('english', ${headTerm}) && to_tsquery('english', ${prefix}))`
+    : sql`to_tsquery('english', ${prefix})`;
+}
+
+/**
+ * One way of matching a search term: which rows it selects, and how well
+ * each one matches.
+ *
+ * @remarks
+ * Two implementations, tried in that order — `buildExactMatcher` first, and
+ * `buildFuzzyMatcher` only when it found nothing. Both are expressed the
+ * same way so `runDirectoryPage` does not know which it was handed.
+ */
+interface SearchMatcher {
+  /** Narrows to the rows this matcher considers a match. */
+  condition: SQL;
+  /** How well each row matches, for `sort_by=relevance`. */
+  rank: SQL;
+}
+
+/**
+ * The full-text matcher: the ordinary path, and the only one for a term
+ * that finds anything.
+ *
+ * @remarks
+ * `ts_rank_cd` rather than `ts_rank`: cover density counts how close the
+ * matched lexemes are to each other, which is what separates a Skill about
+ * "code review" from one mentioning code in one paragraph and review in
+ * another.
+ *
+ * No weight array is passed, so Postgres's default `{0.1, 0.2, 0.4, 1.0}`
+ * for `{D, C, B, A}` applies — and `resources.search` is built with exactly
+ * that ordering in mind: name A, description B, body C, publisher D.
+ */
+function buildExactMatcher(query: string): SearchMatcher {
+  const tsQuery = buildTsQuery(query);
+  return {
+    condition: sql`${resourceDirectory.search} @@ ${tsQuery}`,
+    rank: sql`ts_rank_cd(${resourceDirectory.search}, ${tsQuery})`,
+  };
+}
+
+/**
+ * How close a trigram match has to be to count. Tuned against real misspellings
+ * rather than derived: `angulr` scores about 0.57 against
+ * `building-angular-applications`, so pg_trgm's own 0.6 default would miss the
+ * single-dropped-letter typo this exists for, while going much below 0.4 starts
+ * matching words that merely share a stem.
+ */
+const FUZZY_MATCH_THRESHOLD = 0.4;
+
+/**
+ * The trigram matcher: the fallback for a term full-text search could not
+ * match at all (ADR-0040).
+ *
+ * @remarks
+ * `word_similarity` rather than plain `similarity`, because the two strings
+ * are never the same length. `similarity('angulr', 'building-angular-applications')`
+ * compares whole strings and scores near zero; `word_similarity` compares the
+ * term against the best-matching extent *within* the target, which is the
+ * question actually being asked.
+ *
+ * Name and description only. The body is in the full-text vector but not here:
+ * trigram-scanning 14 KB of prose per row is expensive, and a typo's nearest
+ * match is overwhelmingly a Skill's name.
+ *
+ * The threshold is compared explicitly rather than through pg_trgm's `<%`
+ * operator, which would need `pg_trgm.word_similarity_threshold` set per
+ * session to be this lenient. The cost is that no trigram index applies and
+ * this is a sequential scan — accepted deliberately: it runs only when the
+ * indexed search already returned nothing, over a catalog one team publishes.
+ * A Registry where this shows up in practice wants the `<%` operator, the GUC,
+ * and a `gin_trgm_ops` index, together.
+ */
+function buildFuzzyMatcher(query: string): SearchMatcher {
+  const best = sql`GREATEST(word_similarity(${query}, ${resourceDirectory.name}), word_similarity(${query}, ${resourceDirectory.description}))`;
+  return { condition: sql`${best} >= ${FUZZY_MATCH_THRESHOLD}`, rank: best };
 }
 
 /** The install trend chart's fixed window — see `ResourcesService.getInstallTrend`. */
@@ -226,13 +306,20 @@ export class ResourcesService {
   /**
    * Lists Resources from `resource_directory` (ticket 23), one page at a
    * time, optionally narrowed by Kind, a full-text search term, and one or
-   * more Tags, and sorted by install count or last-updated.
+   * more Tags, and sorted by relevance, install count, or last-updated.
    *
    * @remarks
-   * `buildSearchCondition` documents how a term is matched. It stems rather
-   * than substring-matches, so `postgre` finds "postgresql" as a prefix but
-   * `sql` does not, and an unquoted hyphenated term matches any Resource
-   * carrying all of its words. A blank or missing term is no search at all.
+   * A search term is matched twice at most. `buildExactMatcher` runs first:
+   * full-text, which stems rather than substring-matches, so `postgre` finds
+   * "postgresql" as a prefix but `sql` does not, and an unquoted hyphenated
+   * term matches any Resource carrying all of its words. Only when that
+   * matches *nothing* does `buildFuzzyMatcher` run, matching trigrams against
+   * name and description so a typo still finds its Skill (ADR-0040).
+   *
+   * The fallback is all-or-nothing on purpose: it never reorders or pads a
+   * search that already found something, so a precise term keeps a precise
+   * answer and the second query is skipped entirely. A blank or missing term
+   * is no search at all, and takes neither path.
    *
    * `query.kind`, when set, narrows to that one Kind; omitted, every Kind is
    * listed together (ADR-0026) — with `skill` the only one registered, the
@@ -241,8 +328,9 @@ export class ResourcesService {
    * `query.tagIds`, when non-empty, narrows to Resources carrying at least
    * one of those Tags — checked against `resource_tags` directly, not
    * against `resource_directory.tags` (docs/data-model.md). Ordering is
-   * governed by `sortBy`/`sortOrder` even with a search term active; there
-   * is no relevance ranking.
+   * governed by `sortBy`/`sortOrder`, which the query schema defaults to
+   * `relevance` when there is a search term and `updated_at` when there is
+   * not.
    *
    * Every member arrives already coerced, defaulted, and within range —
    * `ResourceDirectoryQuerySchema` is what produces one, validated at the
@@ -259,9 +347,29 @@ export class ResourcesService {
    * ```
    */
   async list(query: ResourceDirectoryQuery): Promise<Page<ResourceDirectoryEntry>> {
+    const exact = await this.runDirectoryPage(query, query.q ? buildExactMatcher(query.q) : null);
+    // The fallback rescues a search that matched nothing at all; it never
+    // reorders or pads one that matched something (ADR-0040).
+    if (!query.q || exact.total > 0) return exact;
+    return this.runDirectoryPage(query, buildFuzzyMatcher(query.q));
+  }
+
+  /**
+   * Reads one page of the directory under a given way of matching.
+   *
+   * @param query - The validated query, for its paging, Kind, Tag and sort
+   * members. Its `q` is not read here — `matcher` already encodes it.
+   * @param matcher - How to match and rank the search term, or `null` when
+   * there is no search term at all.
+   * @returns One page, and how many rows matched in total.
+   */
+  private async runDirectoryPage(
+    query: ResourceDirectoryQuery,
+    matcher: SearchMatcher | null,
+  ): Promise<Page<ResourceDirectoryEntry>> {
     const { page, pageSize, tagIds, sortBy, sortOrder, kind } = query;
 
-    const matches = query.q ? buildSearchCondition(query.q) : undefined;
+    const matches = matcher?.condition;
     const kindFilter = kind ? eq(resourceDirectory.kind, kind) : undefined;
     const tagFilter =
       tagIds.length > 0
@@ -272,8 +380,25 @@ export class ResourcesService {
         : undefined;
     const where = and(kindFilter, matches, tagFilter);
 
-    const sortColumn = sortBy === "installs" ? resourceDirectory.install_count : resourceDirectory.updated_at;
-    const orderBy = sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
+    // `relevance` without a term never reaches here — the query schema
+    // rewrites it to `updated_at` — but the rank comes from `matcher`, so
+    // requiring one here keeps that guarantee local to this line rather than
+    // an assumption about a module two files away.
+    const sortExpression =
+      sortBy === "relevance" && matcher
+        ? matcher.rank
+        : sortBy === "installs"
+          ? resourceDirectory.install_count
+          : resourceDirectory.updated_at;
+    const ordering: SQL[] = [sortOrder === "asc" ? asc(sortExpression) : desc(sortExpression)];
+    // Rank ties are common — every Resource matching on the same single
+    // low-weight lexeme scores alike — so recency breaks them before `id`
+    // does, which is insertion order and reads as arbitrary to a reader.
+    if (sortBy === "relevance") ordering.push(desc(resourceDirectory.updated_at));
+    // Tiebreak on id (uuidv7, so insertion-ordered). Without one, rows
+    // sharing every preceding sort value have no stable order across
+    // requests, and infinite scroll repeats or skips rows.
+    ordering.push(asc(resourceDirectory.id));
 
     const rows = await this.db
       .select({
@@ -288,11 +413,7 @@ export class ResourcesService {
       })
       .from(resourceDirectory)
       .where(where)
-      // Tiebreak on id (uuidv7, so insertion-ordered). Without one, rows
-      // sharing a sort_by value — every never-installed Resource reads 0 —
-      // have no stable order across requests, and infinite scroll repeats or
-      // skips rows.
-      .orderBy(orderBy, asc(resourceDirectory.id))
+      .orderBy(...ordering)
       .limit(pageSize)
       .offset((page - 1) * pageSize);
 
@@ -433,6 +554,7 @@ export class ResourcesService {
       metadata: payload.metadata,
       allowed_tools: payload.allowed_tools,
       published_at: skill.published_at,
+      updated_at: skill.updated_at,
       published_by: skill.published_by,
       tags,
       installs,
@@ -686,7 +808,7 @@ export class ResourcesService {
    *
    * @remarks
    * An Artifact is stored as its files (ADR-0032); a zip is the
-   * representation `skillset add`, the web Download control, and a
+   * representation `skillset install`, the web Download control, and a
    * marketplace `archive` source all want, so the API builds one on demand.
    * This is the read path where Artifact bytes do pass through the API, which
    * is what ADR-0032 amends ADR-0001 to allow — uploading still bypasses it

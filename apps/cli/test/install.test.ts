@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
-import { runAdd, type AddDeps } from "../src/commands/add.js";
+import { runInstall, type InstallDeps } from "../src/commands/install.js";
 import { writeConfig } from "../src/config.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
 
@@ -18,6 +18,7 @@ function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
     body: "Body.\n",
     published_by: { user_id: "u1", email: "writer@example.com", first_name: "A", last_name: "B" },
     published_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     license: null,
     compatibility: null,
     metadata: null,
@@ -32,7 +33,7 @@ function validArtifactZip(): Uint8Array {
   return zipSync({ "SKILL.md": encoder.encode("---\nname: code-review\ndescription: Reviews code.\n---\nBody.\n") });
 }
 
-/** Answers the two requests `add` makes: the Skill's metadata, then its Artifact. */
+/** Answers the two requests `install` makes: the Skill's metadata, then its Artifact. */
 function stubRegistry(artifact: Uint8Array = validArtifactZip()) {
   return stubFetch((url) => {
     if (url === "https://registry.example/api/resources/skill/by-name/code-review") return jsonResponse(200, fakeSkill());
@@ -41,7 +42,7 @@ function stubRegistry(artifact: Uint8Array = validArtifactZip()) {
   });
 }
 
-function baseDeps(overrides: Partial<AddDeps> & { fetch: typeof fetch; configPath: string }): AddDeps {
+function baseDeps(overrides: Partial<InstallDeps> & { fetch: typeof fetch; configPath: string }): InstallDeps {
   return {
     env: {},
     cwd: "/unused",
@@ -68,12 +69,12 @@ async function withTempDirs<T>(run: (dirs: { configDir: string; cwd: string }) =
   }
 }
 
-describe("runAdd", () => {
+describe("runInstall", () => {
   it("errors when no Registry is configured, before any network call", async () => {
     await withTempDirs(async ({ configDir }) => {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
       await expect(
-        runAdd(baseDeps({ fetch: fetchImpl, configPath: join(configDir, "config.json") }), { name: "code-review" }),
+        runInstall(baseDeps({ fetch: fetchImpl, configPath: join(configDir, "config.json") }), { name: "code-review" }),
       ).rejects.toThrow(/No Registry configured/);
       expect(calls).toHaveLength(0);
     });
@@ -83,7 +84,7 @@ describe("runAdd", () => {
     await withTempDirs(async ({ configDir, cwd }) => {
       const { fetch: fetchImpl, calls } = stubRegistry();
 
-      const report = await runAdd(
+      const report = await runInstall(
         baseDeps({
           fetch: fetchImpl,
           configPath: join(configDir, "config.json"),
@@ -105,7 +106,7 @@ describe("runAdd", () => {
     await withTempDirs(async ({ configDir, cwd }) => {
       const { fetch: fetchImpl, calls } = stubRegistry();
 
-      await runAdd(
+      await runInstall(
         baseDeps({
           fetch: fetchImpl,
           configPath: join(configDir, "config.json"),
@@ -128,7 +129,7 @@ describe("runAdd", () => {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
 
       await expect(
-        runAdd(baseDeps({ fetch: fetchImpl, configPath, isTTY: false }), { name: "code-review" }),
+        runInstall(baseDeps({ fetch: fetchImpl, configPath, isTTY: false }), { name: "code-review" }),
       ).rejects.toThrow(/Not a terminal/);
       expect(calls).toHaveLength(0);
     });
@@ -140,7 +141,7 @@ describe("runAdd", () => {
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
       const { fetch: fetchImpl } = stubRegistry();
 
-      const report = await runAdd(
+      const report = await runInstall(
         baseDeps({
           fetch: fetchImpl,
           configPath,
@@ -163,7 +164,7 @@ describe("runAdd", () => {
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
       const { fetch: fetchImpl } = stubRegistry();
 
-      const report = await runAdd(
+      const report = await runInstall(
         baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd, isTTY: false }),
         { name: "code-review", scope: "project" },
       );
@@ -180,7 +181,7 @@ describe("runAdd", () => {
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
       const { fetch: fetchImpl } = stubRegistry();
 
-      const report = await runAdd(
+      const report = await runInstall(
         baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd, isTTY: false }),
         { name: "code-review", scope: "project", agent: "codex" },
       );
@@ -200,7 +201,7 @@ describe("runAdd", () => {
       await writeConfig(configPath, { registry: "https://registry.example", token: "secret" });
       const { fetch: fetchImpl } = stubRegistry();
 
-      const report = await runAdd(
+      const report = await runInstall(
         baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd, isTTY: false }),
         { name: "code-review", scope: "project", agent: "claude-code", copy: true },
       );
@@ -220,7 +221,7 @@ describe("runAdd", () => {
       const { fetch: fetchImpl } = stubRegistry();
 
       const seen: string[] = [];
-      const report = await runAdd(
+      const report = await runInstall(
         baseDeps({
           fetch: fetchImpl,
           configPath,
@@ -253,7 +254,7 @@ describe("runAdd", () => {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
 
       await expect(
-        runAdd(baseDeps({ fetch: fetchImpl, configPath }), { name: "code-review", scope: "project", agent: "not-a-real-agent" }),
+        runInstall(baseDeps({ fetch: fetchImpl, configPath }), { name: "code-review", scope: "project", agent: "not-a-real-agent" }),
       ).rejects.toThrow(/Unknown Agent/);
       expect(calls).toHaveLength(0);
     });
@@ -271,7 +272,7 @@ describe("runAdd", () => {
       const { fetch: fetchImpl } = stubRegistry(hostileZip);
 
       await expect(
-        runAdd(baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd }), {
+        runInstall(baseDeps({ fetch: fetchImpl, configPath, cwd, homeDir: cwd }), {
           name: "code-review",
           scope: "project",
           agent: "codex",

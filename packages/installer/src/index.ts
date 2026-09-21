@@ -47,7 +47,7 @@ export interface InstallOptions {
 /**
  * Reduces a Skill's name to something safe to use as a single directory name.
  *
- * The name arrives from the Registry, and `add` is the one place a hostile Artifact is
+ * The name arrives from the Registry, and `install` is the one place a hostile Artifact is
  * stopped (ticket 09), so it is treated as untrusted here rather than assumed to have
  * survived the publish-time rules: everything outside `a-z0-9-` becomes a hyphen, which
  * disposes of path separators, drive letters, `.`, and `..` in one pass.
@@ -295,3 +295,100 @@ export async function installSkill(
     };
   }
 }
+
+/** What {@link removeSkill} actually deleted, so a caller can report it precisely. */
+export interface RemoveReport {
+  /** The canonical directory that was removed, or `null` when there was nothing there. */
+  skillDirectory: string | null;
+  /** The Agent's own symlink or copy that was removed, or `null` when the Agent reads the canonical directory directly. */
+  link: string | null;
+}
+
+/**
+ * Removes an installed Skill: the canonical copy, and the Agent's own
+ * symlink or copy pointing at it.
+ *
+ * @remarks
+ * The inverse of {@link installSkill}, and deliberately forgiving — a Skill
+ * half-removed by hand, or installed for a different Agent than the one
+ * resolved now, should still come out rather than erroring on the first
+ * path that is already gone. Each removal is independent, and a path that
+ * does not exist is not a failure.
+ *
+ * The Agent's own path is only touched when it differs from the canonical
+ * directory; where an Agent reads `.agents/skills` directly (ADR-0022),
+ * removing the canonical copy has already removed it for that Agent, and
+ * deleting `agentDir` itself would take every other Skill with it.
+ *
+ * Nothing here reads or writes the lockfile — the caller owns that, because
+ * it also owns deciding whether the removal should have happened.
+ *
+ * @param ctx - Project root, environment, and home directory to resolve
+ * against.
+ * @param skillName - The Skill's name as the lockfile records it.
+ * @param scope - Which Scope to remove from.
+ * @param agentId - The Agent whose own directory to unlink, or `null` to
+ * remove only the canonical copy.
+ * @returns What was actually removed; `null` in a field means there was
+ * nothing there to remove.
+ * @throws Error when `skillName` sanitises to nothing, when `agentId` names
+ * no Agent (both via {@link resolveInstallTarget}), or when a path exists
+ * but cannot be deleted.
+ * @example
+ * ```ts
+ * await removeSkill(ctx, "code-review", "project", "claude-code");
+ * // -> { skillDirectory: "<cwd>/.agents/skills/code-review",
+ * //      link: "<cwd>/.claude/skills/code-review" }
+ * ```
+ */
+export async function removeSkill(
+  ctx: InstallContext,
+  skillName: string,
+  scope: Scope,
+  agentId: AgentId | null,
+): Promise<RemoveReport> {
+  const { directoryName, canonicalDir, canonicalTarget, agentDir } = resolveInstallTarget(ctx, skillName, scope, agentId);
+
+  const removedCanonical = await removeIfPresent(canonicalTarget);
+
+  // `agentDir === null` means this Agent has no directory at this Scope, so
+  // there was never a link to remove — not an error on the way out, unlike
+  // on the way in.
+  if (agentDir === null || normalize(agentDir) === canonicalDir) {
+    return { skillDirectory: removedCanonical ? canonicalTarget : null, link: null };
+  }
+
+  const linkPath = join(normalize(agentDir), directoryName);
+  const removedLink = await removeIfPresent(linkPath);
+  return { skillDirectory: removedCanonical ? canonicalTarget : null, link: removedLink ? linkPath : null };
+}
+
+/** Deletes `path` if it is there, reporting whether it was. `rm` with `force` cannot tell us, so the existence check is explicit. */
+async function removeIfPresent(path: string): Promise<boolean> {
+  try {
+    await rm(path, { recursive: true });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+export {
+  forgetInstall,
+  hashInstalledSkill,
+  hashSkillFiles,
+  LOCKFILE_NAME,
+  LOCKFILE_VERSION,
+  readInstalled,
+  readLockfile,
+  recordInstall,
+  resolveLockfilePath,
+  skillStatus,
+  writeLockfile,
+  type InstalledSkill,
+  type Lockfile,
+  type LockfileEntry,
+  type RegistryLookup,
+  type SkillStatus,
+} from "./lockfile.js";

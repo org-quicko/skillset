@@ -565,7 +565,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       description: "Read without a session.",
       body: "Body.\n",
     });
-    // The path `skillset add` takes with no Token configured (ADR-0013).
+    // The path `skillset install` takes with no Token configured (ADR-0013).
     const anonymous = await context.app.request("/api/resources/skill/by-name/by-name-anonymous-attempt");
     expect(anonymous.status).toBe(200);
     expect(((await anonymous.json()) as ApiSkill).name).toBe("by-name-anonymous-attempt");
@@ -1149,6 +1149,187 @@ describe("Searching Skills (ticket 10)", () => {
   });
 });
 
+describe("Ranking search results by relevance", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  // One term, planted in a different field of each Skill, with `updated_at`
+  // running the opposite way to the weighting. Ordering by date alone gives
+  // the exact reverse of the expected answer, so these assertions cannot
+  // pass by accident on the old behaviour.
+  const TERM = "orchestration";
+  const base = Date.UTC(2026, 3, 1);
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.db.insert(resources).values([
+      {
+        kind: "skill",
+        name: "orchestration-toolkit",
+        description: "Coordinates long-running jobs.",
+        body: "Body.\n",
+        payload: BLANK_SKILL_PAYLOAD,
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
+        published_at: new Date(base),
+        updated_at: new Date(base),
+      },
+      {
+        kind: "skill",
+        name: "pipeline-runner",
+        description: "Handles orchestration across a build pipeline.",
+        body: "Body.\n",
+        payload: BLANK_SKILL_PAYLOAD,
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
+        published_at: new Date(base + 60_000),
+        updated_at: new Date(base + 60_000),
+      },
+      {
+        kind: "skill",
+        name: "deploy-helper",
+        description: "Ships a build to an environment.",
+        body: "## Notes\n\nStep four hands off to the orchestration layer.\n",
+        payload: BLANK_SKILL_PAYLOAD,
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
+        published_at: new Date(base + 120_000),
+        updated_at: new Date(base + 120_000),
+      },
+    ]);
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function search(params: Record<string, string>): Promise<ApiPage> {
+    const res = await context.app.request(`/api/resources?${new URLSearchParams(params).toString()}`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as ApiPage;
+  }
+
+  // The gap this closes: a Skill used to be searchable only by how it was
+  // summarised, never by what it actually says.
+  it("finds a Skill on a term that appears only in its body", async () => {
+    const page = await search({ q: TERM, sort_by: "updated_at" });
+    expect(page.items.map((s) => s.name)).toContain("deploy-helper");
+  });
+
+  it("ranks a name match above a description match above a body match", async () => {
+    const page = await search({ q: TERM });
+    expect(page.items.map((s) => s.name)).toEqual([
+      "orchestration-toolkit",
+      "pipeline-runner",
+      "deploy-helper",
+    ]);
+  });
+
+  // Same three rows, same request but for the sort: proves the ordering
+  // above comes from the ranking and not from the seed order.
+  it("gives the reverse order when asked for updated_at instead", async () => {
+    const page = await search({ q: TERM, sort_by: "updated_at" });
+    expect(page.items.map((s) => s.name)).toEqual([
+      "deploy-helper",
+      "pipeline-runner",
+      "orchestration-toolkit",
+    ]);
+  });
+
+  it("ranks without being asked to, because a search term makes relevance the default", async () => {
+    const withoutSort = await search({ q: TERM });
+    const explicit = await search({ q: TERM, sort_by: "relevance" });
+    expect(withoutSort.items.map((s) => s.name)).toEqual(explicit.items.map((s) => s.name));
+  });
+});
+
+describe("Falling back to fuzzy matching (ADR-0040)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  const base = Date.UTC(2026, 4, 1);
+
+  function seed(name: string, description: string, offsetMinutes: number) {
+    return {
+      kind: "skill",
+      name,
+      description,
+      body: "Body.\n",
+      payload: BLANK_SKILL_PAYLOAD,
+      published_by: null,
+      published_by_email: "ada@example.com",
+      published_by_name: "Ada Lovelace",
+      published_at: new Date(base + offsetMinutes * 60_000),
+      updated_at: new Date(base + offsetMinutes * 60_000),
+    };
+  }
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.db.insert(resources).values([
+      seed("building-angular-applications", "Builds Angular applications.", 0),
+      seed("kubernetes-operator", "Writes a Kubernetes operator.", 1),
+      seed("changelog-writer", "Drafts a changelog entry.", 2),
+    ]);
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function search(params: Record<string, string>): Promise<ApiPage> {
+    const res = await context.app.request(`/api/resources?${new URLSearchParams(params).toString()}`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as ApiPage;
+  }
+
+  // The case this exists for: one dropped letter used to return nothing,
+  // because full-text search stems but does not forgive.
+  it.each([
+    ["a dropped letter", "angulr", "building-angular-applications"],
+    ["a transposition", "kubernets", "kubernetes-operator"],
+    ["a doubled letter", "changellog", "changelog-writer"],
+  ])("finds the Skill despite %s", async (_case, typo, expected) => {
+    const page = await search({ q: typo });
+    expect(page.items.map((s) => s.name)).toContain(expected);
+  });
+
+  it("still finds nothing for a term that resembles nothing", async () => {
+    expect(await search({ q: "zzzzqqqqxxxx" })).toMatchObject({ total: 0 });
+  });
+
+  // All-or-nothing: a term that matched exactly must keep its exact answer,
+  // never padded with near-misses.
+  it("does not widen a search that already matched", async () => {
+    const page = await search({ q: "changelog" });
+    expect(page.items.map((s) => s.name)).toEqual(["changelog-writer"]);
+  });
+
+  it("ranks fuzzy matches by how close they are", async () => {
+    const page = await search({ q: "kubernets" });
+    expect(page.items[0]?.name).toBe("kubernetes-operator");
+  });
+
+  // The fallback needs a term; an unfiltered listing must not run it.
+  it("lists everything, not nothing, when there is no term at all", async () => {
+    expect((await search({})).total).toBe(3);
+  });
+
+  it("honours an explicit sort over the fuzzy ranking", async () => {
+    const page = await search({ q: "angulr", sort_by: "updated_at" });
+    expect(page.items.map((s) => s.name)).toContain("building-angular-applications");
+  });
+});
+
 /**
  * Seam 1 again: the redirect target itself is a presigned URL from the fake
  * storage adapter, not something a request test asserts the shape of — what
@@ -1221,7 +1402,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     // The whole point of the new storage model is that the zip is derived,
     // not stored — so what matters is that it round-trips every file. Read
     // back through the shared extractor rather than a raw unzip, which also
-    // asserts the archive is one `skillset add` accepts.
+    // asserts the archive is one `skillset install` accepts.
     const files = extractSkillFiles(new Uint8Array(await res.arrayBuffer()));
     expect(files.map((file) => file.path).sort()).toEqual(["SKILL.md", "references/style.md"]);
     const style = files.find((file) => file.path === "references/style.md");
@@ -1291,7 +1472,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n" });
 
-    // What `skillset add` does against a Registry the User never logged in to (ADR-0013).
+    // What `skillset install` does against a Registry the User never logged in to (ADR-0013).
     const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`);
     expect(res.status).toBe(200);
   });

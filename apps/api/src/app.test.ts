@@ -82,6 +82,58 @@ describe("responses every route shares (ISSUE-8)", () => {
     const res = await context.app.request("/api/health");
     expect(res.headers.get("x-request-id")).toBeTruthy();
   });
+
+  it("serves the hand-written OpenAPI contract at the top level, not under /api", async () => {
+    const res = await context.app.request("/openapi.json");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { openapi: string; info: { title: string } };
+    expect(body.openapi).toBe("3.1.0");
+    expect(body.info.title).toBe("Skillset API");
+  });
+
+  it("describes the stdio MCP server at /mcp rather than speaking MCP itself", async () => {
+    const res = await context.app.request("/mcp");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { transport: string; remote: boolean; tools: { name: string }[] };
+    expect(body.transport).toBe("stdio");
+    expect(body.remote).toBe(false);
+    expect(body.tools.map((tool) => tool.name)).toContain("search_skills");
+  });
+
+  it("has nothing to serve at /mcp.mcpb until a build packs one (ADR-0037)", async () => {
+    // No `mcpbPath` was given to this context, matching ordinary development
+    // where nobody has run `apps/mcp`'s `package:mcpb` — the route must not
+    // exist rather than error looking for a file that isn't there.
+    const res = await context.app.request("/mcp.mcpb");
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("the packed MCP bundle, when a build produced one (ADR-0037)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  const mcpbPath = `${import.meta.dir}/../test/fixtures/fake.mcpb`;
+  const mcpbBytes = new TextEncoder().encode("a fake .mcpb archive for testing the download route, not a real one");
+
+  beforeAll(async () => {
+    await Bun.write(mcpbPath, mcpbBytes);
+    const started = await startTestContext({ mcpbPath });
+    container = started.container;
+    context = started.context;
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+    await Bun.file(mcpbPath).delete();
+  });
+
+  it("serves it as a download, byte for byte", async () => {
+    const res = await context.app.request("/mcp.mcpb");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="skillset-mcp.mcpb"');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(mcpbBytes);
+  });
 });
 
 describe("mutations and where they came from (ISSUE-17, ISSUE-20)", () => {

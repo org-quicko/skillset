@@ -38,7 +38,7 @@ Registry serving a zip that disagrees with the file listing, and nothing detects
 already accepts drift between the metadata claim and the Artifact; this would have added a second
 kind, between two things the Registry itself writes.
 
-**Dropping the zip entirely.** Also coherent, and briefly the plan: `skillreg add` would fetch the
+**Dropping the zip entirely.** Also coherent, and briefly the plan: `skillset install` would fetch the
 manifest and one presigned `GET` per file, writing them straight to disk, and most of `extract.ts`
 would go away with the archive it parses. Rejected on the browser: the web Download control would
 have to fetch each file and zip them client-side, and fetching a presigned URL from a page needs
@@ -66,7 +66,7 @@ manifest costs the client nothing it does not already know.
 before it signs an upload for it, so `validateArtifactManifest` refuses traversal, absolute paths,
 backslashes, null bytes, duplicates, a missing root `SKILL.md`, and the count and size limits —
 server-side, on every publish, from any client. Under ADR-0001 none of that was checkable: the
-paths lived inside bytes the API never opened, and `skillreg add` was the only thing that ever
+paths lived inside bytes the API never opened, and `skillset install` was the only thing that ever
 saw them. This is a strict gain, and it is worth being clear that it is a gain in *shape* and not
 in *content*: the sizes are the publisher's own claims, and nothing still checks that the bytes
 which arrive match them.
@@ -86,7 +86,7 @@ rather than stale, deliberately.
 
 **The zip is rebuilt on every download, and is not free.** Every file is read from storage and
 compressed per request, bounded by the 25 MiB of files a publish may declare. That is the price of
-one stored representation, and it is paid on a path — a human clicking Download, or `skillreg add`
+one stored representation, and it is paid on a path — a human clicking Download, or `skillset install`
 — where it is unlikely to be the slow part. It does mean a download is no longer a redirect the
 API is uninvolved in: it now occupies the application process for the length of the transfer.
 

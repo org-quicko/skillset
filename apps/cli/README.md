@@ -14,8 +14,13 @@ This installs a `skillset` binary.
 
 ```sh
 skillset login --registry <url>
+skillset search [query]      # what the team has published
+skillset info <name>         # read a Skill without installing it
+skillset install <name>      # install a Skill for a coding agent
+skillset list                # what's installed here, and whether it's current
+skillset update [names...]   # re-download whatever the Registry has moved on from
+skillset remove <name>       # uninstall a Skill
 skillset publish [path]      # defaults to the current directory
-skillset add <name>          # install a Skill for a coding agent
 skillset whoami
 ```
 

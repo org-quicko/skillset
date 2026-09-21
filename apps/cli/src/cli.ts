@@ -4,9 +4,15 @@ import { getAgent } from "@in-org-quicko/skillset-shared";
 import { Command } from "commander";
 import { homedir } from "node:os";
 import pc from "picocolors";
-import { runAdd } from "./commands/add.js";
+import { runInfo } from "./commands/info.js";
+import { runInstall } from "./commands/install.js";
+import type { SkillStatus } from "@in-org-quicko/skillset-installer";
+import { runList } from "./commands/list.js";
 import { runLogin } from "./commands/login.js";
 import { runPublish } from "./commands/publish.js";
+import { runRemove } from "./commands/remove.js";
+import { runSearch } from "./commands/search.js";
+import { runUpdate } from "./commands/update.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveConfigPath } from "./config.js";
 import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken } from "./ui.js";
@@ -14,7 +20,21 @@ import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken
 const program = new Command();
 program.name("skillset").description("Publish and manage Skills on Skillset.");
 program.addHelpText("beforeAll", bannerText());
-program.action(() => console.log(bannerText()));
+// A bare `skillset` prints the banner. Anything commander did not recognise
+// as a subcommand lands here too, and is named back rather than reported as
+// "too many arguments" — which is what a root action turns an unknown
+// command into, and is unreadable to someone whose muscle memory or CI still
+// holds a verb this CLI has since renamed.
+program
+  .argument("[command]")
+  .allowExcessArguments()
+  .action((command?: string) => {
+    if (command) {
+      console.error(pc.red(`Unknown command "${command}".`));
+      process.exitCode = 1;
+    }
+    console.log(bannerText());
+  });
 
 const label = (verb: string) => pc.bgCyan(pc.black(` skillset ${verb} `));
 
@@ -124,16 +144,17 @@ program
   });
 
 program
-  .command("add")
+  .command("install")
   .description("Download and install a Skill for a coding Agent.")
   .argument("<name>", "The Skill's name")
   .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
   .option("--scope <scope>", "Install scope: project or user")
   .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
-  .action(async (name: string, opts: { agent?: string; scope?: string; copy?: boolean }) => {
-    p.intro(label("add"));
+  .option("--force", "Replace an already-installed Skill even if it has local changes")
+  .action(async (name: string, opts: { agent?: string; scope?: string; copy?: boolean; force?: boolean }) => {
+    p.intro(label("install"));
     try {
-      const report = await runAdd(
+      const report = await runInstall(
         {
           fetch,
           configPath: resolveConfigPath(process.env),
@@ -144,7 +165,7 @@ program
           promptChoice,
           promptAgent,
         },
-        { name, agent: opts.agent, scope: opts.scope, copy: opts.copy },
+        { name, agent: opts.agent, scope: opts.scope, copy: opts.copy, force: opts.force },
       );
       p.log.success(`Installed ${pc.cyan(report.skillDirectory)}`);
       if (report.link.kind === "symlink") {
@@ -165,6 +186,191 @@ program
       }
       p.outro("Done");
     } catch (error) {
+      fail(error);
+    }
+  });
+
+/** How each status reads in the listing — the two that need a decision are the two that are coloured. */
+const STATUS_LABEL: Record<SkillStatus, string> = {
+  current: pc.dim("current"),
+  outdated: pc.yellow("outdated"),
+  modified: pc.magenta("modified"),
+  missing: pc.red("missing"),
+};
+
+program
+  .command("list")
+  .description("Show the Skills installed here, and whether each is current, outdated, locally modified, or missing.")
+  .option("--scope <scope>", "Which scope to list: project or user (default: project)")
+  .option("--offline", "Skip the Registry, so nothing is reported as outdated")
+  .action(async (opts: { scope?: string; offline?: boolean }) => {
+    p.intro(label("list"));
+    const s = p.spinner();
+    s.start("Reading installed Skills");
+    try {
+      const report = await runList(
+        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() },
+        { scope: opts.scope, offline: opts.offline },
+      );
+
+      if (report.skills.length === 0) {
+        s.stop(`No Skills installed at ${report.scope} scope`);
+        p.outro(pc.dim("Run `skillset install <name>` to install one."));
+        return;
+      }
+
+      s.stop(`${report.skills.length} Skill(s) at ${pc.cyan(report.scope)} scope`);
+      const width = Math.max(...report.skills.map((skill) => skill.name.length));
+      for (const skill of report.skills) {
+        p.log.message(`${skill.name.padEnd(width)}  ${STATUS_LABEL[skill.status]}`);
+      }
+      if (report.offline) {
+        p.log.warn("Registry not consulted — nothing here can be reported as outdated.");
+      }
+      p.outro(pc.dim(report.lockfilePath));
+    } catch (error) {
+      s.error(pc.red("Could not list installed Skills"));
+      fail(error);
+    }
+  });
+
+program
+  .command("update")
+  .description("Re-download installed Skills the Registry has moved on from. Updates every one when none is named.")
+  .argument("[names...]", "The Skills to update")
+  .option("--scope <scope>", "Which scope to update: project or user (default: project)")
+  .option("--force", "Update a Skill with local changes, discarding them")
+  .action(async (names: string[], opts: { scope?: string; force?: boolean }) => {
+    p.intro(label("update"));
+    const s = p.spinner();
+    s.start("Checking the Registry");
+    try {
+      const outcomes = await runUpdate(
+        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() },
+        { names, scope: opts.scope, force: opts.force },
+      );
+
+      const changed = outcomes.filter((o) => o.status === "updated" || o.status === "restored").length;
+      const failed = outcomes.filter((o) => o.status === "error").length;
+      s.stop(outcomes.length === 0 ? "Nothing installed to update" : `${changed} of ${outcomes.length} Skill(s) changed`);
+
+      for (const outcome of outcomes) {
+        if (outcome.status === "updated") p.log.success(`${pc.cyan(outcome.name)} updated`);
+        else if (outcome.status === "restored") p.log.success(`${pc.cyan(outcome.name)} restored — its files were missing`);
+        else if (outcome.status === "up-to-date") p.log.message(pc.dim(`${outcome.name} already current`));
+        else if (outcome.status === "gone") p.log.warn(`${outcome.name} is no longer on the Registry — left installed`);
+        else if (outcome.status === "skipped") {
+          p.log.warn(`${outcome.name} has local changes — pass --force to replace it`);
+        } else p.log.error(`${pc.red(outcome.name)}: ${outcome.message}`);
+      }
+
+      if (failed > 0) process.exitCode = 1;
+      p.outro(failed > 0 ? pc.red(`${failed} Skill(s) failed`) : "Done");
+    } catch (error) {
+      s.error(pc.red("Update failed"));
+      fail(error);
+    }
+  });
+
+program
+  .command("remove")
+  .description("Uninstall a Skill: its files, the Agent's link to it, and its lockfile entry.")
+  .argument("<name>", "The Skill's name")
+  .option("--scope <scope>", "Which scope to remove from: project or user (default: project)")
+  .action(async (name: string, opts: { scope?: string }) => {
+    p.intro(label("remove"));
+    try {
+      const report = await runRemove(
+        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() },
+        { name, scope: opts.scope },
+      );
+
+      if (!report.skillDirectory && !report.link && !report.forgotten) {
+        p.log.warn(`${name} was not installed at ${report.scope} scope — nothing to remove.`);
+        p.outro("Done");
+        return;
+      }
+
+      p.log.success(`Removed ${pc.cyan(name)}`);
+      if (report.skillDirectory) p.log.message(pc.dim(report.skillDirectory));
+      if (report.link) p.log.message(pc.dim(`unlinked ${report.link}`));
+      p.outro("Done");
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+program
+  .command("search")
+  .description("Search the Registry's catalog. Lists everything when given no term.")
+  .argument("[query]", "What to search for — a task, or an exact Skill name")
+  .option("--tag <name>", "Narrow to Skills carrying this Tag")
+  .option("--limit <n>", "Maximum number of results")
+  .action(async (query: string | undefined, opts: { tag?: string; limit?: string }) => {
+    p.intro(label("search"));
+    const s = p.spinner();
+    s.start(query ? `Searching for ${query}` : "Listing the catalog");
+    try {
+      const report = await runSearch(
+        { fetch, configPath: resolveConfigPath(process.env), env: process.env },
+        { query, tag: opts.tag, limit: opts.limit },
+      );
+
+      if (report.items.length === 0) {
+        s.stop("No Skills matched");
+        p.outro(pc.dim(query ? "Try a broader term, or run `skillset search` with none." : "Nothing published yet."));
+        return;
+      }
+
+      s.stop(`${report.total} Skill(s) matched`);
+      for (const item of report.items) {
+        p.log.message(`${pc.cyan(item.name)}\n${pc.dim(item.description)}`);
+      }
+      p.outro(
+        report.truncated
+          ? pc.dim(`Showing ${report.items.length} of ${report.total} — pass --limit for more.`)
+          : pc.dim("Run `skillset info <name>` to read one."),
+      );
+    } catch (error) {
+      s.error(pc.red("Search failed"));
+      fail(error);
+    }
+  });
+
+program
+  .command("info")
+  .description("Show a Skill's SKILL.md and details without installing it.")
+  .argument("<name>", "The Skill's name")
+  .option("--files", "Also list every file the Skill ships")
+  .action(async (name: string, opts: { files?: boolean }) => {
+    p.intro(label("info"));
+    const s = p.spinner();
+    s.start(`Reading ${name}`);
+    try {
+      const { skill, files } = await runInfo(
+        { fetch, configPath: resolveConfigPath(process.env), env: process.env },
+        { name, files: opts.files },
+      );
+
+      s.stop(pc.cyan(skill.name));
+      p.log.message(skill.description);
+      const facts = [
+        `published by ${skill.published_by.first_name ?? skill.published_by.email}`,
+        `updated ${skill.updated_at}`,
+        `${skill.installs} install(s)`,
+        ...(skill.tags.length > 0 ? [`tags: ${skill.tags.map((tag) => tag.name).join(", ")}`] : []),
+        ...(skill.license ? [`license: ${skill.license}`] : []),
+      ];
+      p.log.message(pc.dim(facts.join(" · ")));
+
+      if (files) {
+        p.log.message(pc.dim(files.map((file) => `  ${file.path}  ${file.size}B`).join("\n")));
+      }
+
+      p.log.message(skill.body);
+      p.outro(pc.dim(`skillset install ${skill.name}`));
+    } catch (error) {
+      s.error(pc.red("Could not read that Skill"));
       fail(error);
     }
   });

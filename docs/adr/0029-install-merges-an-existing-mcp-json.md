@@ -1,6 +1,6 @@
-# `add` Merges an Existing `.mcp.json`
+# `install` Merges an Existing `.mcp.json`
 
-`skillreg add` for an MCP Server writes a single entry into the **project's `.mcp.json`**, merging
+`skillset install` for an MCP Server writes a single entry into the **project's `.mcp.json`**, merging
 into whatever is already there, and names no Agent. Where it cannot — `--scope user`, or a
 refused write — it prints the JSON snippet to paste instead. The 76-entry Agent → directory table
 plays no part: it maps an Agent to a *skills* directory, and there is nothing to map an MCP Server
@@ -33,7 +33,7 @@ prompt in front of it.
 
 ## Consequences
 
-**This is the first time `add` writes into a file the developer already owns.** Every existing
+**This is the first time `install` writes into a file the developer already owns.** Every existing
 install path creates a fresh directory (`.agents/skills/<name>`) or a symlink beside it; nothing
 has ever had to merge. A repository's `.mcp.json` holds other people's servers, and corrupting it
 breaks their setup, not just this install. That needs care the Skill path never needed:
@@ -47,14 +47,14 @@ breaks their setup, not just this install. That needs care the Skill path never 
 - Formatting and key order outside `mcpServers` should survive the round trip as far as is
   practical, because a diff nobody asked for is how a tool loses trust in a shared repository.
 
-ADR-0001's parting observation — that `skillreg add` is where a hostile Artifact is actually
+ADR-0001's parting observation — that `skillset install` is where a hostile Artifact is actually
 stopped, because path-safety and entry-cap validation happen at extraction — has no counterpart
 for a merge. The threat is different in kind: not a hostile bundle escaping its directory, but a
 malformed write destroying a file the Registry did not create. The protections above are that
 threat's equivalent and should be treated as load-bearing, not defensive polish.
 
 **`--scope user` is unsupported for an MCP Server.** A user-level MCP config is per-Agent
-(`~/.claude.json` and friends), which is precisely the table this ADR refuses to invent. `add`
+(`~/.claude.json` and friends), which is precisely the table this ADR refuses to invent. `install`
 errors and prints the snippet, the same way ADR-0022 already errors rather than guessing for the
 two Agents with no user-level directory.
 

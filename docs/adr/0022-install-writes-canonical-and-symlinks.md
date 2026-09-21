@@ -1,6 +1,6 @@
-# `add` Writes One Canonical Copy And Symlinks The Agent To It
+# `install` Writes One Canonical Copy And Symlinks The Agent To It
 
-> **Amended by ADR-0029.** All of this is Skill-only. `add` for an MCP Server merges a
+> **Amended by ADR-0029.** All of this is Skill-only. `install` for an MCP Server merges a
 > project's `.mcp.json`, names no Agent, and never touches `.agents/skills`.
 
 > **Amended by ADR-0031.** The Agent table is no longer vendored wholesale from
@@ -8,7 +8,7 @@
 > *how* an install lands (the canonical directory, the symlink, the fallback to a copy) is
 > unaffected; only the table's source and size changed.
 
-`skillreg add` writes every Skill's files to the canonical `.agents/skills/<name>` directory,
+`skillset install` writes every Skill's files to the canonical `.agents/skills/<name>` directory,
 and for an Agent that reads somewhere else — `claude-code` at `.claude/skills`, `pi` at
 `.pi/skills` — it creates a symlink there pointing back at the canonical copy. The Agent list
 is the full ~76-entry table vendored from `vercel-labs/skills`, and the choice is made through
@@ -61,7 +61,7 @@ directly".
 rather than guessing.
 
 The Skill's own name (`SKILL.md` frontmatter, Registry-reported) is sanitised before it becomes
-a directory name, unchanged from ADR-0006. Artifact inspection (ADR-0001) is unchanged: `add` is
+a directory name, unchanged from ADR-0006. Artifact inspection (ADR-0001) is unchanged: `install` is
 still the only place a hostile Artifact is stopped.
 
 `.agents/skills` at "user" Scope is `~/.agents/skills`, matching upstream.

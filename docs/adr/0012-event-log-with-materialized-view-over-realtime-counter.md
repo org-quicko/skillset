@@ -10,7 +10,7 @@ single running total). This ADR reverses that call before it shipped.
 > The event-log-plus-materialized-view design below is otherwise unchanged.
 
 A Skill's install count is derived from `skill_install_events` — one immutable row per Install (a web
-Download today, a CLI `skillreg add` later), distinguished by a `source` column — via a `skill_analytics`
+Download today, a CLI `skillset install` later), distinguished by a `source` column — via a `skill_analytics`
 materialized view refreshed on a schedule (`node-cron`, interval set by `ANALYTICS_REFRESH_CRON`), rather
 than an atomic `install_count + 1` upsert on a live table read on every request. We chose this because a
 raw log is the only shape that can support install history or per-source breakdowns later without a

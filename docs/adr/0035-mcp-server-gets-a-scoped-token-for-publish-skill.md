@@ -1,7 +1,7 @@
 # The MCP Server Gets an Optional Token, Scoped to `publish_skill`
 
 `publish_skill` lets an Agent publish a Skill from the current project straight to the Registry,
-the missing counterpart to `search_skills` and `add_skills` (spec, "Publishing"). Publishing needs a
+the missing counterpart to `search_skills` and `install_skills` (spec, "Publishing"). Publishing needs a
 writer Token (ADR-0009 requires the same compliant frontmatter this checks locally; the Registry's
 role check is what a Token stands in for). This reopens ADR-0033's "holds no credential of any
 kind" — deliberately, and only for this one tool.
@@ -11,7 +11,7 @@ kind" — deliberately, and only for this one tool.
 ADR-0033 rejected a `--token` flag outright, not merely deferred it, on the reasoning that reads
 need no authentication (ADR-0013) so a Token would buy nothing, and holding one turns the server
 into something that can act *as* a User, unattended. Both points still hold for `search_skills` and
-`add_skills` — neither changes here. What has changed is that a third tool now exists whose entire
+`install_skills` — neither changes here. What has changed is that a third tool now exists whose entire
 purpose is a write the Registry will not perform without a Token: there is no read-only way to
 publish. Deferring credential support forever would mean `publish_skill` simply could not exist,
 which is a heavier cost than the one ADR-0033 weighed against it.
@@ -42,7 +42,7 @@ version of one tool.
 `--token` / `SKILLSET_TOKEN` are read, the same way `--registry` / `SKILLSET_REGISTRY` already are
 — `--token` wins when both are given. The Token is carried on `McpConfig` but reaches the network on
 exactly one path: the `authorization: Bearer` header `publish_skill` sends. `search_skills` and
-`add_skills` are unchanged — they still send no such header on any request, so a User who never
+`install_skills` are unchanged — they still send no such header on any request, so a User who never
 configures a Token loses nothing they had before.
 
 `publish_skill` checks `config.token` itself before doing any work and refuses immediately, naming
@@ -60,7 +60,7 @@ directory and publishes exactly the Skill at it — no discovery walk, no batch.
 shape — present as a field on every config, absent unless configured.
 
 **`--token`'s absence is not a startup error.** Unlike `--registry`, a Token is optional at the
-process level: `search_skills` and `add_skills` still work with none configured. The refusal lives
+process level: `search_skills` and `install_skills` still work with none configured. The refusal lives
 in `publish_skill`'s handler, checked on the first call to that tool rather than at connection time.
 
 **`packages/shared`'s existing `ApiError`/`apiErrorFrom`/`parseApiResponse` are reused as-is**, the

@@ -16,12 +16,6 @@ export const accounts = appTable(
     // provider — their own id for a password account.
     account_id: text("account_id").notNull(),
     provider_id: text("provider_id").notNull(),
-    // Who vouched for this account: the provider's issuer for an external
-    // login, or the synthetic `local:credential` for a password. Better Auth
-    // matches a credential on all three of provider, issuer, and account id,
-    // so an account missing this one is invisible to sign-in even though the
-    // row is plainly there.
-    issuer: text("issuer").notNull(),
     user_id: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -40,11 +34,11 @@ export const accounts = appTable(
   },
   (table) => [
     index("accounts_user_id_idx").on(table.user_id),
-    // One account per provider, issuer, and identity — the same triple Better
-    // Auth matches on, and what makes a repeated login find the existing
-    // account instead of adding a row each time. Also the `ON CONFLICT` target
+    // One account per provider and identity — the same pair Better Auth
+    // matches on, and what makes a repeated login find the existing account
+    // instead of adding a row each time. Also the `ON CONFLICT` target
     // `setPasswordCredential` upserts against.
-    uniqueIndex("accounts_provider_account_idx").on(table.provider_id, table.issuer, table.account_id),
+    uniqueIndex("accounts_provider_account_idx").on(table.provider_id, table.account_id),
   ],
 );
 

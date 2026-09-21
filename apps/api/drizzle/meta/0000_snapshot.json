@@ -27,12 +27,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "issuer": {
-          "name": "issuer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "user_id": {
           "name": "user_id",
           "type": "uuid",
@@ -117,12 +111,6 @@
           "columns": [
             {
               "expression": "provider_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "issuer",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

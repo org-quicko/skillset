@@ -9,19 +9,6 @@ import { accounts } from "../../db/schemas/index.js";
  */
 export const CREDENTIAL_PROVIDER_ID = "credential";
 
-/**
- * The synthetic issuer Better Auth gives providers that have none of their own
- * — `local:` plus the URL-encoded provider id.
- *
- * @remarks
- * Duplicated here rather than imported because Better Auth exports it only
- * from a deep internal path. It has to match exactly: sign-in finds a password
- * account by provider id, issuer, **and** account id together, so a credential
- * written without this is invisible to it and the login is refused as though
- * the User did not exist.
- */
-export const CREDENTIAL_ISSUER = `local:${encodeURIComponent(CREDENTIAL_PROVIDER_ID)}`;
-
 /** A Drizzle handle: the pool, or a transaction inside one. */
 type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
 
@@ -56,11 +43,10 @@ export async function setPasswordCredential(
       user_id: userId,
       account_id: userId,
       provider_id: CREDENTIAL_PROVIDER_ID,
-      issuer: CREDENTIAL_ISSUER,
       password: passwordHash,
     })
     .onConflictDoUpdate({
-      target: [accounts.provider_id, accounts.issuer, accounts.account_id],
+      target: [accounts.provider_id, accounts.account_id],
       set: { password: passwordHash, updated_at: new Date() },
     });
 }
@@ -85,13 +71,7 @@ export async function getPasswordCredential(db: Database, userId: string): Promi
   const [account] = await db
     .select({ password: accounts.password })
     .from(accounts)
-    .where(
-      and(
-        eq(accounts.user_id, userId),
-        eq(accounts.provider_id, CREDENTIAL_PROVIDER_ID),
-        eq(accounts.issuer, CREDENTIAL_ISSUER),
-      ),
-    )
+    .where(and(eq(accounts.user_id, userId), eq(accounts.provider_id, CREDENTIAL_PROVIDER_ID)))
     .limit(1);
   return account?.password ?? null;
 }

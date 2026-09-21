@@ -49,10 +49,19 @@ export const resources = appTable(
     published_at: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    // Folds in published_by_name (ticket 23) alongside name and description,
-    // so a search term matching only a Resource's publisher still returns it.
+    // Weighted so relevance ranking has something to rank on: a term in the
+    // name outranks the same term in the description, which outranks the body,
+    // which outranks the publisher's name. `ts_rank_cd`'s default weights
+    // ({D,C,B,A} = {0.1, 0.2, 0.4, 1.0}) give exactly that order, so nothing
+    // here has to pass its own array.
+    //
+    // `body` is included so a search matches what a Skill actually says and
+    // not only how it was summarised — a Skill's own SKILL.md is the largest
+    // and most specific thing the Registry holds about it. It is the lowest
+    // content weight because a passing mention should not outrank a Skill
+    // named for the term.
     search: tsvector("search").generatedAlwaysAs(
-      sql`to_tsvector('english', name || ' ' || coalesce(description, '') || ' ' || published_by_name)`,
+      sql`setweight(to_tsvector('english', name), 'A') || setweight(to_tsvector('english', coalesce(description, '')), 'B') || setweight(to_tsvector('english', coalesce(body, '')), 'C') || setweight(to_tsvector('english', published_by_name), 'D')`,
     ),
   },
   (table) => ({

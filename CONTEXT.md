@@ -17,7 +17,7 @@ _Avoid_: Package, entry, item, asset, artifact (which is the files, not the thin
 **Kind**:
 Which of the three things a Resource is — `skill`, `mcp-server`, or `plugin`. A Kind fixes the
 shape of the payload, the rules `name` and `description` must satisfy, whether there is an
-Artifact, and what `skillset add` does. Stored as plain text rather than an enum, so a fourth
+Artifact, and what `skillset install` does. Stored as plain text rather than an enum, so a fourth
 Kind is an insert rather than a migration (ADR-0026, following ADR-0024).
 _Avoid_: Type, category, class, resource type
 
@@ -84,7 +84,7 @@ The files of a Resource of a Kind that has one — Skill and Plugin. Uploaded di
 storage by the client, one object per file, under a prefix keyed by the Resource's `id`
 (ADR-0026, ADR-0032). An MCP Server has no Artifact at all (ADR-0027). A **zip** is one
 *representation* of an Artifact rather than the Artifact itself: the Registry assembles one on
-demand for `skillset add`, the web Download control, and a Marketplace `archive` source, and
+demand for `skillset install`, the web Download control, and a Marketplace `archive` source, and
 stores none.
 _Avoid_: Bundle, package, tarball, blob, zip (which is a representation, not the thing)
 
@@ -95,6 +95,24 @@ the Registry validate every path and enforce the file-count and size limits with
 bytes (ADR-0001, ADR-0032), and reading returns the *actual* one, listed back from storage. The
 two agree once an upload has finished, and the read is the one to trust.
 _Avoid_: File list, index, tree, contents
+
+**Lockfile**:
+A `skillset-lock.json` at a project root, or in a User's home directory for user Scope,
+recording every Skill installed *there*: its Resource id, the Registry's `updated_at` at the
+moment it was installed, a digest of the files that were written, when, and which Agent was
+linked. It is what makes an installed Skill's state answerable — whether the Registry has
+moved on, and whether anyone has edited the copy on disk — neither of which anything could
+tell before (ADR-0038). Advisory rather than authoritative: a missing or corrupt one reads as
+empty rather than failing an install, and nothing signs it.
+_Avoid_: Manifest (which is an Artifact's file list), lock, state file
+
+**Status**:
+How one installed Skill stands, as the Lockfile's two recorded signals answer it. `current` is
+unchanged on both. `outdated` means the Registry's `updated_at` has moved. `modified` means the
+files on disk no longer digest to what was written. `missing` means the Lockfile records a
+Skill whose directory is gone. A Skill that is both edited and stale reports `modified`,
+because that is the one needing a decision (ADR-0038).
+_Avoid_: State, drift, dirty
 
 **Install**:
 A recorded, countable instance of a Resource being obtained — one event per occurrence. What
@@ -121,7 +139,7 @@ _Avoid_: API key, credential, secret
 **Agent**:
 A coding agent that reads Skills from a conventional directory on a developer's machine.
 The offered list is a hand-curated Agent → directory table, each row verified against that
-Agent's own documentation (ADR-0031). `add` writes to the canonical `.agents/skills` and
+Agent's own documentation (ADR-0031). `install` writes to the canonical `.agents/skills` and
 symlinks the chosen Agent's own directory to it (ADR-0022). The table is about **Skills
 only**: an MCP Server is installed by merging a project's `.mcp.json` and names no Agent
 (ADR-0029).

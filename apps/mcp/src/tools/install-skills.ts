@@ -11,7 +11,14 @@ import {
   type Scope,
   type Skill,
 } from "@in-org-quicko/skillset-shared";
-import { installSkill, resolveInstallTarget, type InstallContext, type LinkResult } from "@in-org-quicko/skillset-installer";
+import {
+  hashSkillFiles,
+  installSkill,
+  recordInstall,
+  resolveInstallTarget,
+  type InstallContext,
+  type LinkResult,
+} from "@in-org-quicko/skillset-installer";
 
 /** The project root, environment, and home directory an install is resolved and written against. */
 export type InstallSkillsContext = InstallContext;
@@ -185,6 +192,14 @@ async function installOneSkill(deps: InstallSkillsDeps, name: string): Promise<I
 
   const report = await installSkill(ctx, skill.name, files, scope, agentId, { copy: false });
 
+  await recordInstall(ctx, scope, registry, skill.name, {
+    id: skill.id,
+    registry_updated_at: skill.updated_at,
+    content_hash: hashSkillFiles(files),
+    installed_at: new Date().toISOString(),
+    agent: report.agent,
+  });
+
   return {
     name,
     status: "installed",
@@ -213,10 +228,14 @@ async function installOneSkill(deps: InstallSkillsDeps, name: string): Promise<I
  * @remarks
  * Sends no `authorization` header on any request: this server holds no credential
  * (ADR-0013). Every downloaded Artifact is validated by `extractSkillFiles` before a single
- * byte is written (ADR-0001). An existing install is left alone unless `deps.overwrite` is
- * set — a divergence from `skillset add`'s silent overwrite that lives here, in the tool
- * handler, rather than in the shared installer. The `detection` is echoed back so the caller
- * can report which Agent was chosen and which rung of the ladder chose it.
+ * byte is written (ADR-0001). Each install is recorded in the Scope's lockfile, which is
+ * what later lets `installed_skills` and `update_skills` tell a stale copy from an edited
+ * one. An existing install is left alone unless `deps.overwrite` is set, and that check
+ * lives here in the tool handler rather than in the shared installer. It is stricter than
+ * `skillset install`'s, deliberately: the CLI refuses only a copy someone has edited, while
+ * this refuses any existing copy, because an Agent reinstalling on its own initiative is a
+ * weaker signal of intent than a person typing the command. The `detection` is echoed back
+ * so the caller can report which Agent was chosen and which rung of the ladder chose it.
  *
  * @example
  * ```ts

@@ -1,0 +1,47 @@
+{
+  "manifest_version": "0.3",
+  "name": "skill-registry",
+  "display_name": "Skill Registry",
+  "version": "1.0.0",
+  "description": "MCP server for searching, installing, and publishing Skills on a Skillset Registry.",
+  "long_description": "Search a team's self-hosted Skillset Registry, install Skills into this project for the detected Agent, and publish a Skill you authored back to the Registry. Reads need no credential; publishing needs a writer Token.",
+  "author": {
+    "name": "Quicko"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/org-quicko/skillset"
+  },
+  "license": "AGPL-3.0-only",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/cli.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/cli.js", "--registry", "${user_config.registry}"],
+      "env": {
+        "SKILLSET_TOKEN": "${user_config.token}"
+      }
+    }
+  },
+  "user_config": {
+    "registry": {
+      "type": "string",
+      "title": "Registry URL",
+      "description": "The self-hosted Skillset Registry to talk to.",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Writer Token",
+      "description": "Only needed to publish a Skill with publish_skill. Reads need no Token.",
+      "sensitive": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "runtimes": {
+      "node": ">=18"
+    }
+  }
+}

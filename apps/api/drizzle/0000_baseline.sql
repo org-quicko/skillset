@@ -5,7 +5,6 @@ CREATE TABLE "__db_schema__"."accounts" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
 	"account_id" text NOT NULL,
 	"provider_id" text NOT NULL,
-	"issuer" text NOT NULL,
 	"user_id" uuid NOT NULL,
 	"password" text,
 	"access_token" text,
@@ -165,7 +164,7 @@ ALTER TABLE "__db_schema__"."resource_tags" ADD CONSTRAINT "resource_tags_resour
 ALTER TABLE "__db_schema__"."resource_tags" ADD CONSTRAINT "resource_tags_tag_id_tags_id_fk" FOREIGN KEY ("tag_id") REFERENCES "__db_schema__"."tags"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "__db_schema__"."tokens" ADD CONSTRAINT "tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "__db_schema__"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "accounts_user_id_idx" ON "__db_schema__"."accounts" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "accounts_provider_account_idx" ON "__db_schema__"."accounts" USING btree ("provider_id","issuer","account_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "accounts_provider_account_idx" ON "__db_schema__"."accounts" USING btree ("provider_id","account_id");--> statement-breakpoint
 CREATE INDEX "sessions_user_id_idx" ON "__db_schema__"."sessions" USING btree ("user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_role_superadmin_index" ON "__db_schema__"."users" USING btree ("role") WHERE "__db_schema__"."users"."role" = 'superadmin';--> statement-breakpoint
 CREATE INDEX "verifications_identifier_idx" ON "__db_schema__"."verifications" USING btree ("identifier");--> statement-breakpoint

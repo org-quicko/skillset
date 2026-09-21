@@ -5,7 +5,7 @@ import { formatSkillValidationError, SkillValidationError } from "@in-org-quicko
  * prints (via `formatSkillValidationError`, shared with every other surface that catches one),
  * and passes anything else through untouched.
  *
- * Both the local check `publish` runs and the Artifact inspection `add` runs raise
+ * Both the local check `publish` runs and the Artifact inspection `install` runs raise
  * `SkillValidationError`, and both owe the User the rule's name rather than a bare sentence.
  *
  * @param error - Whatever was caught.

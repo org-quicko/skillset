@@ -15,6 +15,20 @@
       "when": 1789475503085,
       "tag": "0001_views",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789990721915,
+      "tag": "0002_search_weights",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789993110488,
+      "tag": "0003_trigram_search",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@
   "dependencies": {
     "@hono/zod-validator": "0.9.1",
     "@in-org-quicko/skillset-shared": "workspace:*",
-    "better-auth": "^1.7.2",
+    "better-auth": "^1.7.5",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
     "node-cron": "^4.6.0",

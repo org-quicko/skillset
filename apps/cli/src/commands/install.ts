@@ -9,7 +9,16 @@ import {
   type AgentId,
   type Scope,
 } from "@in-org-quicko/skillset-shared";
-import { installSkill, type WriteReport } from "@in-org-quicko/skillset-installer";
+import {
+  hashInstalledSkill,
+  hashSkillFiles,
+  installSkill,
+  readLockfile,
+  resolveInstallTarget,
+  resolveLockfilePath,
+  type WriteReport,
+} from "@in-org-quicko/skillset-installer";
+import { recordInstall } from "./installed.js";
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
@@ -20,7 +29,7 @@ export interface AgentChoice {
   displayName: string;
 }
 
-export interface AddDeps extends SessionDeps {
+export interface InstallDeps extends SessionDeps {
   cwd: string;
   homeDir: string;
   /** Whether a terminal is attached — decides whether a missing `--agent`/`--scope` can be prompted for. */
@@ -37,12 +46,44 @@ export interface AddDeps extends SessionDeps {
   promptAgent(choices: readonly AgentChoice[]): Promise<string>;
 }
 
-export interface AddOptions {
+export interface InstallOptions {
   name: string;
   agent?: string;
   scope?: string;
   /** `--copy`: write the Skill into the Agent's own directory rather than symlinking to `.agents/skills`. */
   copy?: boolean;
+  /** `--force`: install over a locally-modified copy, discarding the edits. */
+  force?: boolean;
+}
+
+/**
+ * Refuses to overwrite a Skill that has been edited since it was installed.
+ *
+ * @remarks
+ * Only a Skill the lockfile *recorded* can be judged: without a digest from
+ * install time there is nothing to compare against, so a directory that
+ * arrived some other way is left to the install to replace as it always
+ * did. The check is worth having anyway, because the case it catches — a
+ * User's own edits to a Skill they installed — is both the common one and
+ * the unrecoverable one (ADR-0002: no versions to restore from).
+ */
+async function refuseIfLocallyModified(
+  deps: InstallDeps,
+  scope: Scope,
+  skillName: string,
+  registry: string,
+): Promise<void> {
+  const lockfile = await readLockfile(resolveLockfilePath(scope, deps), registry);
+  const recorded = lockfile.skills[skillName];
+  if (!recorded) return;
+
+  const { canonicalTarget } = resolveInstallTarget({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skillName, scope, null);
+  const installedHash = await hashInstalledSkill(canonicalTarget);
+  if (installedHash === null || installedHash === recorded.content_hash) return;
+
+  throw new Error(
+    `${skillName} has local changes at ${canonicalTarget}. Pass --force to replace it and discard them.`,
+  );
 }
 
 const SCOPES: readonly Scope[] = ["project", "user"];
@@ -74,7 +115,7 @@ const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "
  * @returns The detected {@link AgentId}, or `null` when nothing resolved one — then the
  * install goes to `.agents/skills` and links nothing.
  */
-function detectAgentId(deps: Pick<AddDeps, "env" | "cwd" | "homeDir">): AgentId | null {
+function detectAgentId(deps: Pick<InstallDeps, "env" | "cwd" | "homeDir">): AgentId | null {
   const resolveCtx = { env: deps.env, homeDir: deps.homeDir, projectRoot: deps.cwd };
   const agentDirsPresent = nonUniversalProjectSkillsDirs(resolveCtx)
     .filter(({ dir }) => existsSync(dir))
@@ -110,10 +151,10 @@ function detectAgentId(deps: Pick<AddDeps, "env" | "cwd" | "homeDir">): AgentId 
  *
  * @example
  * ```ts
- * await runAdd(deps, { name: "code-review", agent: "claude-code", scope: "project" });
+ * await runInstall(deps, { name: "code-review", agent: "claude-code", scope: "project" });
  * ```
  */
-export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteReport> {
+export async function runInstall(deps: InstallDeps, options: InstallOptions): Promise<WriteReport> {
   const client = await openReadClient(deps);
 
   if (!options.scope && !deps.isTTY) {
@@ -138,7 +179,19 @@ export async function runAdd(deps: AddDeps, options: AddOptions): Promise<WriteR
   const agentId: AgentId | null = flagAgent ?? (deps.isTTY ? parseAgentId(await deps.promptAgent(AGENT_CHOICES)) : detectAgentId(deps));
   const scope = flagScope ?? parseScope(await deps.promptChoice("Install for which scope?", SCOPES));
 
-  return installSkill({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skill.name, files, scope, agentId, {
+  if (!options.force) await refuseIfLocallyModified(deps, scope, skill.name, client.registry);
+
+  const report = await installSkill({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skill.name, files, scope, agentId, {
     copy: options.copy ?? false,
   });
+
+  await recordInstall(deps, scope, client.registry, skill.name, {
+    id: skill.id,
+    registry_updated_at: skill.updated_at,
+    content_hash: hashSkillFiles(files),
+    installed_at: new Date().toISOString(),
+    agent: report.agent,
+  });
+
+  return report;
 }

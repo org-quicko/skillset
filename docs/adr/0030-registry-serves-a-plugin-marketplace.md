@@ -55,7 +55,7 @@ discovery document is "a projection of the `skills` table". Marketplace entries 
 and `tags`, so the Tag catalog (ADR-0011) has somewhere real to land; `plugin.json` carries
 `keywords` for the same purpose inside a bundle.
 
-This endpoint is a **third consumption path**, alongside the web Download and `skillreg add`. Each
+This endpoint is a **third consumption path**, alongside the web Download and `skillset install`. Each
 one that arrives has to decide what it records as an Install (ADR-0028). A marketplace archive
 download is a Download of the Artifact and counts as one, the same as the web path — with the
 caveat that background marketplace auto-updates may fetch without a human asking, which is a

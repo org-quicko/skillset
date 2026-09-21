@@ -21,9 +21,11 @@
   "scripts": {
     "build": "bun run src/build.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "package:mcpb": "bun run build && bunx @anthropic-ai/mcpb pack . skillset-mcp.mcpb"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@in-org-quicko/skillset-installer": "workspace:*",
     "@in-org-quicko/skillset-shared": "workspace:*",

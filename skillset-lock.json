@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "registry": "https://expire-gothic-delouse.ngrok-free.dev/",
+  "skills": {
+    "write-adapters": {
+      "id": "01a0c2b9-0d76-71e4-811c-c633af1401e6",
+      "registry_updated_at": "2026-09-21T06:48:22.645Z",
+      "content_hash": "sha256:e3bc6cf7a9f49e396c1d02ba542eeb05a7a6bba6589b734949fc5b20517adc78",
+      "installed_at": "2026-09-21T12:43:43.940Z",
+      "agent": "claude-code"
+    }
+  }
+}

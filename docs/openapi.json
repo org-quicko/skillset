@@ -482,7 +482,7 @@
       "get": {
         "tags": ["resources"],
         "summary": "List, search, filter, and sort Resources",
-        "description": "Reads from the `resource_directory` view (ticket 23, ADR-0026, docs/data-model.md), not `resources` directly. Defaults to sorted by last-updated, descending (ADR-0028 — installs are not comparable across Kinds). With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. Unauthenticated (ADR-0013).",
+        "description": "Reads from the `resource_directory` view (ticket 23, ADR-0026, docs/data-model.md), not `resources` directly. With `q`, results are full-text matched over name, description, SKILL.md body, and publisher, weighted in that order, and sorted by relevance unless `sort_by` says otherwise (ADR-0039). Without `q`, sorted by last-updated, descending (ADR-0028 — installs are not comparable across Kinds). Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. A term that matches nothing is retried against trigrams, so a typo still finds its Skill (ADR-0040); a term that matches something is never widened this way. Unauthenticated (ADR-0013).",
         "security": [],
         "parameters": [
           {
@@ -510,8 +510,8 @@
             "name": "sort_by",
             "in": "query",
             "required": false,
-            "description": "Governs ordering unconditionally, even with `q` set. Invalid values are rejected with a field-named validation error.",
-            "schema": { "type": "string", "enum": ["installs", "updated_at"], "default": "updated_at" }
+            "description": "Governs ordering. Omitted, it is `relevance` when `q` is set and `updated_at` when it is not; `relevance` with no `q` falls back to `updated_at` rather than being refused (ADR-0039). Invalid values are rejected with a field-named validation error.",
+            "schema": { "type": "string", "enum": ["installs", "updated_at", "relevance"] }
           },
           {
             "name": "sort_order",
@@ -1508,6 +1508,7 @@
           "tags",
           "published_by",
           "published_at",
+          "updated_at",
           "installs"
         ],
         "properties": {
@@ -1552,6 +1553,11 @@
           },
           "published_by": { "$ref": "#/components/schemas/Publisher" },
           "published_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Moves on every republish, unlike `published_at`. A client stores this at install time and compares it later to tell whether its copy has gone stale — without versioning (ADR-0002) it is the only revision signal there is (ADR-0038)."
+          },
           "installs": {
             "type": "integer",
             "minimum": 0,

@@ -196,16 +196,42 @@ Since an Artifact is now uploaded a file at a time, that abandonment has a parti
 row whose prefix holds some of its files. It reads the same way — the listing shows what arrived,
 and the zip download refuses.
 
-The generated column and its index — folding in `published_by_name` (ticket 23) alongside `name`
-and `description`, so a search term matching only a Resource's publisher still returns it:
+The generated column and its index. Four inputs, weighted so that relevance ranking has
+something to rank on: a term in the `name` outranks the same term in the `description`, which
+outranks one in the `body`, which outranks one in `published_by_name` (ADR-0039). `body` is in
+there so a search matches what a Skill actually says and not only how it was summarised;
+`published_by_name` (ticket 23) is, at the bottom, so a term matching only a Resource's
+publisher still returns it.
+
+The letters are not arbitrary: `ts_rank_cd`'s default weight array
+(`{D,C,B,A} = {0.1, 0.2, 0.4, 1.0}`) already encodes that order, so no query passes one of its
+own.
 
 ```sql
 ALTER TABLE resources ADD COLUMN search tsvector
   GENERATED ALWAYS AS (
-    to_tsvector('english', name || ' ' || coalesce(description, '') || ' ' || published_by_name)
+    setweight(to_tsvector('english', name), 'A') ||
+    setweight(to_tsvector('english', coalesce(description, '')), 'B') ||
+    setweight(to_tsvector('english', coalesce(body, '')), 'C') ||
+    setweight(to_tsvector('english', published_by_name), 'D')
   ) STORED;
 
 CREATE INDEX resources_search_idx ON resources USING GIN (search);
+```
+
+A generated column's expression cannot be altered in place, so changing this means dropping the
+column and re-adding it — and `resource_directory` selects it, so the view has to be dropped
+and recreated around that. Migration `0002_search_weights.sql` is the worked example.
+
+This column answers the ordinary search. It cannot answer a mistyped one — a term is stemmed
+into lexemes, and a lexeme with a letter missing is in no document — so a search that matches
+nothing here is retried against trigrams instead, with `word_similarity()` over `name` and
+`description` (ADR-0040). That needs `pg_trgm`, created unqualified by
+`0003_trigram_search.sql`, and no index of its own: the retry only ever runs after the GIN
+index above has already returned nothing.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
 Indexes: primary key on `id`; unique on `(kind, name)`; GIN on `search`; on `updated_at`
@@ -280,7 +306,7 @@ row per Install, an append-only history rather than a running total. Replaces
 The Postgres enum is still named `skill_install_source` — nothing about "where an Install came
 from" is Skill-specific, but renaming the type was out of scope for the ticket that generalised
 this table (spec: `.scratch/generic-resources/spec.md`). It has two values: `web` (a Download of
-a Kind's Artifact through the API) or `cli` (`skillset add`, ticket 09). Downloading a Skill's
+a Kind's Artifact through the API) or `cli` (`skillset install`, ticket 09). Downloading a Skill's
 Artifact appends one row here today, via an internal `recordInstall` function (not a public
 endpoint — nothing lets a client inflate this directly for a Kind with an Artifact), called once
 every file of the Artifact is in hand and the zip has been assembled (ADR-0032) — so a download
@@ -562,8 +588,7 @@ what you may do, so the role is still resolved from `users` on every request.
 
 `accounts` holds one row per way a User can authenticate. `provider_id` is `credential` for a
 password — that row's `password` column is where `users.password_hash` went — or the Provider's
-kind for an external login. `issuer` says who vouched for it: the provider's own issuer, or the
-synthetic `local:credential` for a password.
+kind for an external login.
 
 `access_token` on a **`github`** row is always null, and that is enforced rather than merely
 expected. It used to hold a live credential carrying the `repo` scope — read *and* write across
@@ -605,11 +630,13 @@ Auth's `encryptOAuthTokens` is on, so the column holds AES-256-GCM ciphertext un
 sensitive in the schema regardless: password and Token hashes are one-way, and this one is
 reversible by design.
 
-The three of `provider_id`, `issuer`, and `account_id` are unique together because they are what
-Better Auth matches an account on, all three at once. Writing a credential without the issuer
-does not fail — it produces a row that sign-in cannot see, so the login is refused as though the
-User did not exist. `apps/api/test/auth-schema.test.ts` checks the mapping for this reason, and
-needs no database to do it.
+`provider_id` and `account_id` are unique together because they are the pair Better Auth matches
+an account on. It is worth knowing this column list was briefly a *triple*: Better Auth 1.7.0
+added a required `issuer` between them, and 1.7.3 reverted it. Either half of that mismatch is
+silent in its own way — a column Better Auth expects and the schema lacks produces rows sign-in
+cannot see, and a `NOT NULL` column Better Auth stopped writing refuses every insert — so
+`apps/api/src/features/auth/auth-schema.test.ts` checks the mapping in both directions, and needs
+no database to do it.
 
 `verifications` is Better Auth's short-lived key/value store. Here it holds the in-flight OAuth
 state — the PKCE code verifier and the CSRF nonce — which is why a login begun against one

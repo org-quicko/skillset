@@ -2,7 +2,7 @@
 
 An Install stays one immutable row per occurrence, but "obtained" now means something different
 per Kind: a Download of the Artifact for a Skill or a Plugin, and the config being written
-(`skillreg add`) or revealed (an explicit `POST` from the web interface) for an MCP Server. The
+(`skillset install`) or revealed (an explicit `POST` from the web interface) for an MCP Server. The
 event log becomes `resource_install_events`, the materialized view `resource_analytics`, and both
 keep their existing shape. Because the counted acts differ, **`GET /resources` no longer sorts by
 `installs` by default — `updated_at` does.**

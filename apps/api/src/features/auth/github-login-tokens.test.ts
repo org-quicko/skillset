@@ -78,9 +78,6 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
     await ctx.internalAdapter.createAccount({
       userId: writer.id,
       providerId,
-      // Required, and the field whose omission once made every login fail as
-      // "user not found" — see auth-schema.test.ts.
-      issuer: providerId,
       accountId: `${providerId}-account-id`,
       ...tokens,
     });
@@ -207,7 +204,6 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
       await context.db.insert(accounts).values({
         user_id: writer.id,
         provider_id: "github",
-        issuer: "github",
         account_id: "legacy-with-scope",
         access_token: "gho_left_over",
         scope: "read:user,user:email,read:org,repo",
@@ -266,7 +262,6 @@ describe("A GitHub login stores no repository credential (ADR-0024)", () => {
       await context.db.insert(accounts).values({
         user_id: writer.id,
         provider_id: "github",
-        issuer: "github",
         account_id: "legacy",
         access_token: "left_over_from_before",
         refresh_token: "also_left_over",

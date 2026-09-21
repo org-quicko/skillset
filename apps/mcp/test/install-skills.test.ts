@@ -19,6 +19,7 @@ function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
     body: "Body.\n",
     published_by: { user_id: "u1", email: "writer@example.com", first_name: "A", last_name: "B" },
     published_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     license: null,
     compatibility: null,
     metadata: null,

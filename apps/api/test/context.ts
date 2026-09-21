@@ -9,7 +9,7 @@ import { runMigrations, waitForDatabase } from "../src/db/migrate.js";
 import { createLogger } from "../src/lib/logger.js";
 import { AnalyticsService } from "../src/features/analytics/analytics.service.js";
 import { FakeStorageAdapter } from "../src/storage/fake.js";
-import { createApp } from "../src/app.js";
+import { createApp, type AppDependencies } from "../src/app.js";
 
 export const TEST_AUTH_SECRET = "test-auth-secret-do-not-use-in-production";
 
@@ -40,8 +40,14 @@ export interface TestContext {
  * Seam 1 — the API request boundary: no server listens, `app.request(...)`
  * calls the Hono app directly against a real Postgres and a fake storage
  * adapter, per the spec's testing decisions.
+ *
+ * @param overrides - `AppDependencies` fields a specific test needs to set itself, e.g.
+ * `mcpbPath` — a fixture path a test writes, rather than depending on `apps/mcp` having been
+ * built. Merged over this function's own defaults.
  */
-export async function startTestContext(): Promise<{
+export async function startTestContext(
+  overrides: Partial<Pick<AppDependencies, "mcpbPath">> = {},
+): Promise<{
   context: TestContext;
   container: StartedPostgreSqlContainer;
 }> {
@@ -65,6 +71,7 @@ export async function startTestContext(): Promise<{
     // address, which the credential limiter is built to refuse. Tests that
     // are *about* the limiter build their own app with it on.
     rateLimiting: false,
+    ...overrides,
   });
 
   return { context: { app: withTestOrigin(app), sql, db, storage }, container };
