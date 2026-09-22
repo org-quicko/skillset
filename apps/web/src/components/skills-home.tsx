@@ -78,7 +78,8 @@ export function SkillsHome({
 }: {
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
-  onSelect: (name: string) => void;
+  /** `namespace` travels with the name so a row that two parties share stays linkable (ADR-0042). */
+  onSelect: (name: string, namespace: string) => void;
   role: Role | null;
 }) {
   const tags = useTags();

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, type Role } from "@in-org-quicko/skillset-shared";
+import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, registryNamespace, type Role } from "@in-org-quicko/skillset-shared";
 import { asc, eq } from "drizzle-orm";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
@@ -12,6 +12,7 @@ import {
   stopTestContext,
   type TestContext,
   SESSION_COOKIE_NAME,
+  TEST_PUBLIC_URL,
 } from "../../../test/context.js";
 
 interface ApiPublisher {
@@ -28,6 +29,7 @@ interface ApiTag {
 
 interface ApiSkill {
   id: string;
+  namespace: string;
   name: string;
   description: string;
   body: string;
@@ -61,6 +63,7 @@ interface ApiManifest {
 /** `GET /resources`'s row shape (ticket 23) — distinct from `ApiSkill`: `published_by_name` and `updated_at`, not the full Publisher and `published_at`. */
 interface ApiDirectoryEntry {
   id: string;
+  namespace: string;
   name: string;
   description: string;
   published_by_name: string;
@@ -90,6 +93,9 @@ interface Session {
 
 /** A Skill's `payload` (ADR-0026) with none of the four optional fields set — what a raw seed row not going through `publish` needs. */
 const BLANK_SKILL_PAYLOAD = { kind: "skill", license: null, compatibility: null, metadata: null, allowed_tools: null };
+
+/** What a Skill seeded straight into the table is named by — this test Registry itself (ADR-0042). */
+const TEST_NAMESPACE = registryNamespace(TEST_PUBLIC_URL);
 
 function sessionCookie(res: Response): string {
   const setCookie = res.headers.get("set-cookie");
@@ -726,6 +732,7 @@ describe("Listing Skills (ticket 03)", () => {
     await context.db.insert(resources).values(
       Array.from({ length: 51 }, (_, index) => ({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: `skill-${String(index).padStart(3, "0")}`,
         description: `Skill number ${index}.`,
         body: "Body.\n",
@@ -848,6 +855,7 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
       .insert(resources)
       .values({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "stats-skill-one",
         description: "First.",
         body: "Body.\n",
@@ -861,6 +869,7 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
       .insert(resources)
       .values({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "stats-skill-two",
         description: "Second, same Publisher as the first.",
         body: "Body.\n",
@@ -1044,6 +1053,7 @@ describe("Searching Skills (ticket 10)", () => {
     await context.db.insert(resources).values([
       ...Array.from({ length: 51 }, (_, index) => ({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: `widget-${String(index).padStart(3, "0")}`,
         description: "A generic widget Skill for demoing pagination.",
         body: "Body.\n",
@@ -1056,6 +1066,7 @@ describe("Searching Skills (ticket 10)", () => {
       })),
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "postgresql-migrations",
         description: "Runs schema migrations against a Postgresql database.",
         body: "Body.\n",
@@ -1068,6 +1079,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "code-review-bot",
         description: "Comments on pull requests during code review.",
         body: "Body.\n",
@@ -1080,6 +1092,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "quality-metrics-tracker",
         description: "Tracks code quality and review turnaround over time.",
         body: "Body.\n",
@@ -1092,6 +1105,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "changelog-writer",
         description: "Drafts a changelog entry from recent commits.",
         body: "Body.\n",
@@ -1104,6 +1118,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "async-await",
         description: "A minimal concurrency helper.",
         body: "Body.\n",
@@ -1116,6 +1131,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "async-await-helper",
         description: "Handles retries for workflows that need to pause on network calls.",
         body: "Body.\n",
@@ -1128,6 +1144,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "solo-effort",
         description: "Nothing in this description names its own author.",
         body: "Body.\n",
@@ -1258,6 +1275,7 @@ describe("Ranking search results by relevance", () => {
     await context.db.insert(resources).values([
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "orchestration-toolkit",
         description: "Coordinates long-running jobs.",
         body: "Body.\n",
@@ -1270,6 +1288,7 @@ describe("Ranking search results by relevance", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "pipeline-runner",
         description: "Handles orchestration across a build pipeline.",
         body: "Body.\n",
@@ -1282,6 +1301,7 @@ describe("Ranking search results by relevance", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "deploy-helper",
         description: "Ships a build to an environment.",
         body: "## Notes\n\nStep four hands off to the orchestration layer.\n",
@@ -1348,6 +1368,7 @@ describe("Falling back to fuzzy matching (ADR-0040)", () => {
   function seed(name: string, description: string, offsetMinutes: number) {
     return {
       kind: "skill",
+      namespace: TEST_NAMESPACE,
       name,
       description,
       body: "Body.\n",
@@ -2027,5 +2048,109 @@ describe("Deleting a Skill (ticket 12)", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as ApiError;
     expect(body.error.code).toBe("not_found");
+  });
+});
+
+// Two parties may publish the same name; one project may install only one of
+// them (ADR-0042). These cover the reading half — the half that has to keep
+// working unqualified, because Namespaces exist to let a second `pdf` in, not
+// to make the first one harder to find.
+describe("Namespaces (ADR-0042)", () => {
+  let context: TestContext;
+  let container: StartedPostgreSqlContainer;
+  let writer: Session;
+
+  const ANTHROPIC = "https://github.com/anthropics/skills";
+  const OBRA = "https://github.com/obra/superpowers";
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("names a Skill published here after this Registry, on the detail and the list alike", async () => {
+    await publish(context, writer, "house-style", { description: "Ours.", body: "Body." });
+
+    const read = await context.app.request("/api/resources/skill/by-name/house-style");
+    expect(((await read.json()) as ApiSkill).namespace).toBe(TEST_NAMESPACE);
+
+    const list = await context.app.request("/api/resources?q=house-style");
+    expect(((await list.json()) as ApiPage).items[0]?.namespace).toBe(TEST_NAMESPACE);
+  });
+
+  it("names an Imported Skill after the repository it was copied out of", async () => {
+    const res = await publish(context, writer, "imported-one", {
+      description: "Theirs.",
+      body: "Body.",
+      source: ANTHROPIC,
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ApiPublished).skill.namespace).toBe("anthropics/skills");
+  });
+
+  it("reads an Imported Skill by its bare name while nothing else shares it", async () => {
+    await publish(context, writer, "solo", { description: "Theirs.", body: "Body.", source: ANTHROPIC });
+
+    const read = await context.app.request("/api/resources/skill/by-name/solo");
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as ApiSkill).namespace).toBe("anthropics/skills");
+  });
+
+  it("lets two parties publish one name, and tells them apart when asked", async () => {
+    await publish(context, writer, "pdf", { description: "A.", body: "Body.", source: ANTHROPIC });
+    await publish(context, writer, "pdf", { description: "B.", body: "Body.", source: OBRA });
+
+    const rows = await context.db.select().from(resources).where(eq(resources.name, "pdf"));
+    expect(rows.length).toBe(2);
+
+    const theirs = await context.app.request("/api/resources/skill/by-name/pdf?namespace=obra/superpowers");
+    expect(theirs.status).toBe(200);
+    expect(((await theirs.json()) as ApiSkill).description).toBe("B.");
+  });
+
+  it("prefers the Skill published here when a bare name matches more than one", async () => {
+    await publish(context, writer, "review", { description: "Ours.", body: "Body." });
+    await publish(context, writer, "review", { description: "Theirs.", body: "Body.", source: ANTHROPIC });
+
+    const read = await context.app.request("/api/resources/skill/by-name/review");
+    expect(read.status).toBe(200);
+    const skill = (await read.json()) as ApiSkill;
+    expect(skill.namespace).toBe(TEST_NAMESPACE);
+    expect(skill.description).toBe("Ours.");
+  });
+
+  it("refuses a bare name that ties between outside parties, naming both", async () => {
+    await publish(context, writer, "tied", { description: "A.", body: "Body.", source: ANTHROPIC });
+    await publish(context, writer, "tied", { description: "B.", body: "Body.", source: OBRA });
+
+    const read = await context.app.request("/api/resources/skill/by-name/tied");
+    expect(read.status).toBe(409);
+    const body = (await read.json()) as ApiError;
+    expect(body.error.code).toBe("ambiguous_name");
+    expect(body.error.message).toContain("anthropics/skills");
+    expect(body.error.message).toContain("obra/superpowers");
+  });
+
+  it("moves a Skill into this Registry's Namespace when a republish clears its Source", async () => {
+    await publish(context, writer, "moved", { description: "Imported.", body: "Body.", source: ANTHROPIC });
+    await publish(context, writer, "moved", { description: "From disk.", body: "Body." });
+
+    // An insert, not an update: the Imported row keeps its own Namespace and
+    // stays where it is, which is why a bare read now prefers ours.
+    const rows = await context.db.select().from(resources).where(eq(resources.name, "moved"));
+    expect(rows.map((row) => row.namespace).sort()).toEqual(["anthropics/skills", TEST_NAMESPACE].sort());
   });
 });

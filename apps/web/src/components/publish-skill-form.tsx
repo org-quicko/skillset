@@ -92,7 +92,7 @@ function locationOf(query: string): SkillSourceLocation | null {
 
 /** One Skill's outcome from importing more than one at once — reported individually, never aborting the rest. */
 type ImportOutcome =
-  | { path: string; status: "published"; name: string }
+  | { path: string; status: "published"; name: string; namespace: string }
   | { path: string; status: "failed"; message: string };
 
 function describeFailure(error: unknown): string {
@@ -342,7 +342,7 @@ function CandidateRow({
   );
 }
 
-export function PublishSkillForm({ onPublished }: { onPublished: (name: string) => void }) {
+export function PublishSkillForm({ onPublished }: { onPublished: (name: string, namespace: string) => void }) {
   const [isDragging, setIsDragging] = useState(false);
   // A read failure (a file vanishes mid-drag, a permission error, an import
   // that 404s) happens before the mutation is ever invoked, so it can't live
@@ -374,7 +374,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
     setReadError(null);
     // No `source`: files dropped onto the page came off somebody's disk, and
     // the Registry records itself as the origin (ADR-0041).
-    publish.mutate({ files }, { onSuccess: (skill) => onPublished(skill.name) });
+    publish.mutate({ files }, { onSuccess: (skill) => onPublished(skill.name, skill.namespace) });
   }
 
   /** Back to picking a source, keeping whatever was typed so a corrected URL doesn't have to be retyped. */
@@ -410,7 +410,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
       try {
         const files = await fetchSkillFilesAt(location);
         const skill = await publish.mutateAsync({ files, source: resourceSourceUrl(location) });
-        outcomes.push({ path: location.path, status: "published", name: skill.name });
+        outcomes.push({ path: location.path, status: "published", name: skill.name, namespace: skill.namespace });
       } catch (error) {
         outcomes.push({ path: location.path, status: "failed", message: describeFailure(error) });
       }
@@ -418,7 +418,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
 
     const [only] = outcomes;
     if (outcomes.length === 1 && only.status === "published") {
-      onPublished(only.name);
+      onPublished(only.name, only.namespace);
       return;
     }
     setStep({ kind: "report", source, outcomes });

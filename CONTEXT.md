@@ -24,21 +24,29 @@ _Avoid_: Type, category, class, resource type
 **Namespace**:
 Which party named a Resource, and the other half of its publishing identity: unique is
 `(kind, namespace, name)` rather than `(kind, name)`, so two Skills may both be called
-`frontend-design` so long as different parties named them. Declared at publish time, never
-derived — an Import defaults to the `owner/repo` it was copied out of, and anything published
-straight here defaults to this Registry's own host, forward rather than the reverse-DNS a Source
-resolves to (`skills.quicko.com`, not `com.quicko.skills`), because a Namespace is read and typed
-where a Source is only ever linked. A republish resolves the Namespace a Resource already has
-rather than deriving a fresh one, since deriving would fork it instead of updating it. An opaque
-string throughout: lowercase alphanumerics, dots, hyphens, and at most one slash, compared whole
-and never split. It confers nothing — no ownership, no permission, no claim on the name — and it
-is never renamed, because a rename would re-identify every Resource beneath it. Required for a
-Skill; an MCP Server has none, its `name` being already namespaced by the upstream specification.
+`frontend-design` so long as different parties named them. Every Resource carries one, always —
+`owner/repo` for an Import, and this Registry's own host for anything published straight here. That
+host is written forward, rather than as the reverse-DNS a Source resolves to (`skills.quicko.com`,
+not `com.quicko.skills`), because a Namespace is read aloud and typed where a Source is only ever
+linked. Never absent and never resolved on read, which is the whole of what separates it from a
+Source: a Source is provenance and may genuinely be missing, a Namespace is identity and cannot be.
+It follows the Source rather than being declared beside it, so the two can never disagree — and a
+republish from disk, which clears an Import's Source, moves the Skill into this Registry's Namespace
+alongside the Imported one rather than replacing it. Naming none still reads: the lookup takes the only Skill of that
+name when there is one, and otherwise the one published here, so every name that resolved before
+still resolves and an Imported Skill nobody competes with keeps the name its author gave it. Only a
+tie between two outside parties refuses, naming both. Qualification is what *installing* needs —
+a directory holds one Skill of a name — not what reading or searching needs. An opaque string throughout: lowercase alphanumerics, dots, hyphens, and at most one slash,
+compared whole and never split. It confers nothing — no ownership, no permission, no claim on the
+name — and it is never renamed, because a rename would re-identify every Resource beneath it.
 
 A Registry concept, and only that: installs stay flat at `.agents/skills/<name>` (ADR-0022), so
-one project holds at most one Skill of a given name however many Namespaces publish it. Reverses
-ADR-0002, which rejected namespacing on the premise of a single team — a premise Import expired
-by bringing in Skills named by parties who were never on it.
+one project holds at most one Skill of a given name however many Namespaces publish it. Two
+same-named Skills are co-publishable, never co-installable — the CLI refuses the second rather
+than overwriting the first, and no Namespace changes that. Reverses ADR-0002, which rejected
+namespacing on the premise of a single team — a premise Import expired by bringing in Skills named
+by parties who were never on it, and the CLI's own import turned from occasional into ordinary
+(ADR-0042).
 _Avoid_: Scope (which is where a Skill is installed), owner, org, vendor, prefix, group
 
 **Skill**:
@@ -205,10 +213,14 @@ _Avoid_: Link, linked account, authorisation, integration
 **Import**:
 A one-time copy of a Skill's or a Plugin's files out of a Git Provider and into the Registry. It is
 not a link: nothing is ever re-read, and nothing syncs. What was published records the repository
-it came from as its Source, which is a historical note rather than a reference — nothing follows
-it (ADR-0041). A public folder needs no Connection; a private one is read as the writer's own
-Connection. An MCP Server is never Imported — its whole payload is a `server.json` a writer
-pastes.
+it came from as its Source, a historical note rather than a reference — nothing follows it
+(ADR-0041) — and that Source is what gives it its Namespace (ADR-0042). Either surface Imports, and
+they reach different repositories because they read as different parties: the web reads through the
+writer's Connection, so a private folder is in range, and the CLI reads the Git Provider itself,
+anonymously, so a public one is (ADR-0043). Publishing a checkout with its repository declared is
+not an Import — the bytes came off a disk — but it records the same Source and is how a private
+repository reaches the Registry from the CLI. An MCP Server is never Imported — its whole payload is
+a `server.json` a writer pastes.
 _Avoid_: Sync, clone, pull, link
 
 **Source**:

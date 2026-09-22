@@ -1,6 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Hono } from "hono";
-import type { Role } from "@in-org-quicko/skillset-shared";
+import { registryNamespace, type Role } from "@in-org-quicko/skillset-shared";
 import { setPasswordCredential } from "../src/features/auth/credential.js";
 import { hashPassword } from "../src/features/auth/password.js";
 import { createDatabase } from "../src/db/client.js";
@@ -55,9 +55,9 @@ export async function startTestContext(
   const { sql, db } = createDatabase(container.getConnectionUri());
 
   await waitForDatabase(sql);
-  await runMigrations(sql, db);
+  await runMigrations(sql, db, registryNamespace(TEST_PUBLIC_URL));
   // Migrations must be idempotent across restarts.
-  await runMigrations(sql, db);
+  await runMigrations(sql, db, registryNamespace(TEST_PUBLIC_URL));
 
   const storage = new FakeStorageAdapter();
   const app = createApp({

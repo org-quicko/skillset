@@ -48,12 +48,47 @@ export interface InstallDeps extends SessionDeps {
 
 export interface InstallOptions {
   name: string;
+  /** Which party named it, when a bare name matches more than one (ADR-0042). */
+  namespace?: string;
   agent?: string;
   scope?: string;
   /** `--copy`: write the Skill into the Agent's own directory rather than symlinking to `.agents/skills`. */
   copy?: boolean;
-  /** `--force`: install over a locally-modified copy, discarding the edits. */
+  /** `--force`: install over a locally-modified copy, or one a different party named, replacing it. */
   force?: boolean;
+}
+
+/**
+ * Refuses to install over a Skill of the same name that a different party
+ * named.
+ *
+ * @remarks
+ * A project holds one `.agents/skills/<name>` however many Namespaces publish
+ * that name (ADR-0022, ADR-0042), so this is the one collision a Namespace
+ * cannot resolve — it makes two same-named Skills co-publishable, never
+ * co-installable. Overwriting silently would swap a Skill the team wrote for a
+ * stranger's, under a name that did not change, which nothing downstream would
+ * show.
+ *
+ * Only an entry that recorded a Namespace can be judged: one written before
+ * they existed reads as unknown and is left alone, the same way an
+ * un-digested directory is.
+ */
+async function refuseIfDifferentlyNamed(
+  deps: InstallDeps,
+  scope: Scope,
+  skillName: string,
+  namespace: string,
+  registry: string,
+): Promise<void> {
+  const lockfile = await readLockfile(resolveLockfilePath(scope, deps), registry);
+  const recorded = lockfile.skills[skillName];
+  if (!recorded?.namespace || recorded.namespace === namespace) return;
+
+  throw new Error(
+    `${skillName} is already installed from ${recorded.namespace}, and a project holds one Skill of a name. ` +
+      `Pass --force to replace it with the one from ${namespace}.`,
+  );
 }
 
 /**
@@ -164,7 +199,17 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
   const flagScope = options.scope ? parseScope(options.scope) : null;
   const flagAgent = options.agent ? parseAgentId(options.agent) : null;
 
-  const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(options.name)}`, SkillSchema);
+  // The Namespace travels as a query parameter, not more path segments: it may
+  // itself contain a slash and is compared whole (ADR-0042). Omitted, the
+  // Registry resolves a bare name — the only candidate, or the one published
+  // there — and answers 409 only on a genuine tie, which `describeError`
+  // reprints with both Namespaces named.
+  const query = options.namespace ? `?namespace=${encodeURIComponent(options.namespace)}` : "";
+  const skill = await registryFetch(
+    client,
+    `/resources/skill/by-name/${encodeURIComponent(options.name)}${query}`,
+    SkillSchema,
+  );
   const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact?source=cli`);
 
   let files;
@@ -179,7 +224,10 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
   const agentId: AgentId | null = flagAgent ?? (deps.isTTY ? parseAgentId(await deps.promptAgent(AGENT_CHOICES)) : detectAgentId(deps));
   const scope = flagScope ?? parseScope(await deps.promptChoice("Install for which scope?", SCOPES));
 
-  if (!options.force) await refuseIfLocallyModified(deps, scope, skill.name, client.registry);
+  if (!options.force) {
+    await refuseIfDifferentlyNamed(deps, scope, skill.name, skill.namespace, client.registry);
+    await refuseIfLocallyModified(deps, scope, skill.name, client.registry);
+  }
 
   const report = await installSkill({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skill.name, files, scope, agentId, {
     copy: options.copy ?? false,
@@ -187,6 +235,7 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
 
   await recordInstall(deps, scope, client.registry, skill.name, {
     id: skill.id,
+    namespace: skill.namespace,
     registry_updated_at: skill.updated_at,
     content_hash: hashSkillFiles(files),
     installed_at: new Date().toISOString(),

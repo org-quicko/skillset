@@ -25,6 +25,9 @@ import { tsvector } from "./column-types";
 export const resourceDirectory = appView("resource_directory", {
   id: uuid("id").notNull(),
   kind: text("kind").notNull(),
+  // Never null, unlike `source` below: identity rather than provenance
+  // (ADR-0042), so nothing resolves it on the way out.
+  namespace: text("namespace").notNull(),
   name: text("name").notNull(),
   description: text("description").notNull(),
   published_by_name: text("published_by_name").notNull(),

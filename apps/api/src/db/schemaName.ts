@@ -25,6 +25,28 @@ export const DEFAULT_DB_SCHEMA = "public";
  */
 export const MIGRATION_SCHEMA_SENTINEL = "__db_schema__";
 
+/**
+ * The Namespace sentinel the shipped SQL carries, standing in for the
+ * Namespace anything published straight to this deployment is named by
+ * (ADR-0042).
+ *
+ * @remarks
+ * Here for the same reason as {@link MIGRATION_SCHEMA_SENTINEL}: the value is
+ * `PUBLIC_URL`'s host, which is not known when the SQL is written, and
+ * `0006_resource_namespace.sql` has to write it into every pre-existing row to
+ * make the column `NOT NULL`. `runMigrations` substitutes it.
+ *
+ * Substituted as plain text, so the value is checked against
+ * `isNamespace` before it goes anywhere near the SQL — the same boundary
+ * `readDbSchema` is for the schema name. A Namespace is lowercase
+ * alphanumerics, dots, hyphens and at most one slash, which leaves nothing a
+ * quote could escape into.
+ *
+ * Deliberately not a plausible value: substituting it is a blind string
+ * replacement, and it must never collide with a real host.
+ */
+export const MIGRATION_NAMESPACE_SENTINEL = "__registry_namespace__";
+
 /** Postgres truncates an identifier past this, silently. */
 const MAX_IDENTIFIER_LENGTH = 63;
 

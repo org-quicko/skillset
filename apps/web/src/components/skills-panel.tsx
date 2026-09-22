@@ -10,7 +10,7 @@ import {
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
-import { SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
+import { namespaceFromSearch, SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 
 // `sort_by` has no single default — it is `relevance` while a search term is
@@ -77,6 +77,9 @@ export function SkillsPanel({ role }: { role: Role | null }) {
       <div className="mx-auto flex h-full min-h-0 w-full max-w-[1200px] flex-col px-7 pt-6 pb-10">
         <SkillDetail
           name={name}
+          // Undefined for a bare `/skills/<name>`, which the Registry resolves
+          // rather than refusing (ADR-0042).
+          namespace={namespaceFromSearch(search)}
           canDelete={role !== null && roleMeets(role, "admin")}
           canEditTags={role !== null && roleMeets(role, "writer")}
           onBack={() => navigate("/")}
@@ -90,7 +93,7 @@ export function SkillsPanel({ role }: { role: Role | null }) {
     <SkillsHome
       filters={filters}
       onFiltersChange={handleFiltersChange}
-      onSelect={(name) => navigate(skillPath(name))}
+      onSelect={(name, namespace) => navigate(skillPath(name, namespace))}
       role={role}
     />
   );

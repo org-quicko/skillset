@@ -15,6 +15,18 @@ export interface LockfileEntry {
   /** The Resource id, so a rename at the Registry is still resolvable. */
   id: string;
   /**
+   * Which party named the Skill (ADR-0042) — half of what identifies it at the
+   * Registry, and the only way to tell that the directory now holding `pdf` is
+   * a different Skill from the `pdf` being installed over it.
+   *
+   * Optional, and no `version` bump with it: an entry written before
+   * Namespaces existed has none, which reads as "unknown" rather than "named
+   * here" — so an install over one is allowed, exactly as it was before. An
+   * older CLI ignores the key, and this one tolerates its absence, which is
+   * what a bump would have cost for nothing.
+   */
+  namespace?: string;
+  /**
    * The Registry's `updated_at` for this Skill at the moment it was
    * installed. Compared against the Registry's current value to decide
    * whether the installed copy is stale — there are no versions to compare

@@ -1,4 +1,5 @@
 import {
+  importedSource,
   roleMeets,
   type Role,
   type SkillDirectorySortField,
@@ -127,7 +128,7 @@ function SortHeader({
  *
  * @param filters - The active search term, Tag ids, and sort choice.
  * @param onFiltersChange - Called with the full new filter set when a sort header or Tag chip is clicked.
- * @param onSelect - Called with a Skill's name when its row is clicked, or when a Skill is published from the empty state.
+ * @param onSelect - Called with a Skill's name and Namespace when its row is clicked, or when a Skill is published from the empty state.
  * @param role - The signed-in visitor's Role, or `null` when signed out — gates the empty state's Publish action the same way `Header` does.
  */
 export function SkillList({
@@ -138,7 +139,7 @@ export function SkillList({
 }: {
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
-  onSelect: (name: string) => void;
+  onSelect: (name: string, namespace: string) => void;
   role: Role | null;
 }) {
   const skills = useSkillDirectory(filters);
@@ -208,9 +209,9 @@ export function SkillList({
           />
           <FormDialogBody>
             <PublishSkillForm
-              onPublished={(name) => {
+              onPublished={(name, namespace) => {
                 setPublishOpen(false);
-                onSelect(name);
+                onSelect(name, namespace);
               }}
             />
           </FormDialogBody>
@@ -246,7 +247,7 @@ export function SkillList({
               key={skill.id}
               style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
               className="fill-mode-both animate-in cursor-pointer fade-in-0 slide-in-from-bottom-1 duration-300 [animation-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:animate-none"
-              onClick={() => onSelect(skill.name)}
+              onClick={() => onSelect(skill.name, skill.namespace)}
             >
               <TableCell className="text-xs text-muted-foreground">{index + 1}</TableCell>
               <TableCell>
@@ -255,17 +256,24 @@ export function SkillList({
                       and honours modifier-clicks; the row's own onClick stays for
                       pointer users clicking anywhere else in it. */}
                   <a
-                    href={skillPath(skill.name)}
+                    href={skillPath(skill.name, skill.namespace)}
                     onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                       event.preventDefault();
                       event.stopPropagation();
-                      onSelect(skill.name);
+                      onSelect(skill.name, skill.namespace);
                     }}
                     className="rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     {skill.name}
                   </a>
+                  {/* Only for a Skill that came from elsewhere. One published
+                      here is named by this Registry, and repeating that on
+                      every row is noise — the same rule that hides the Source
+                      (ADR-0041, ADR-0042). */}
+                  {importedSource(skill.source) && (
+                    <span className="font-mono text-xs text-muted-foreground">{skill.namespace}</span>
+                  )}
                   {visibleTags.map((tag) => (
                     <Badge key={tag.id} asChild variant="outline">
                       <button

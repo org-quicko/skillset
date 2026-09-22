@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
@@ -23,6 +23,7 @@ function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
     compatibility: null,
     metadata: null,
     allowed_tools: null,
+    namespace: "registry.example",
     source: "com.example.registry",
     tags: [],
     installs: 3,
@@ -281,6 +282,123 @@ describe("runInstall", () => {
       ).rejects.toThrow(/entry_path_traversal/);
 
       await expect(access(join(cwd, ".agents"))).rejects.toThrow();
+    });
+  });
+});
+
+// A project holds one `.agents/skills/<name>` however many parties publish that
+// name (ADR-0022, ADR-0042), so the CLI has to resolve the tie the Registry
+// cannot.
+describe("runInstall and Namespaces (ADR-0042)", () => {
+  const IMPORTED = "anthropics/skills";
+
+  /** Answers both the bare and the qualified lookup, each with its own Namespace. */
+  function stubBoth() {
+    return stubFetch((url) => {
+      if (url === "https://registry.example/api/resources/skill/by-name/code-review") {
+        return jsonResponse(200, fakeSkill());
+      }
+      if (url === "https://registry.example/api/resources/skill/by-name/code-review?namespace=anthropics%2Fskills") {
+        return jsonResponse(200, fakeSkill({ id: "skill-2", namespace: IMPORTED, source: "https://github.com/anthropics/skills" }));
+      }
+      if (url.startsWith("https://registry.example/api/resources/skill-")) {
+        return new Response(validArtifactZip(), { status: 200 });
+      }
+      throw new Error(`Unexpected request to ${url}`);
+    });
+  }
+
+  function depsFor(configDir: string, cwd: string, fetchImpl: typeof fetch): InstallDeps {
+    return baseDeps({
+      fetch: fetchImpl,
+      configPath: join(configDir, "config.json"),
+      env: { SKILLSET_REGISTRY: "https://registry.example" },
+      cwd,
+      homeDir: cwd,
+    });
+  }
+
+  async function lockedNamespace(cwd: string): Promise<string | undefined> {
+    const lockfile = JSON.parse(await readFile(join(cwd, "skillset-lock.json"), "utf8")) as {
+      skills: Record<string, { namespace?: string }>;
+    };
+    return lockfile.skills["code-review"]?.namespace;
+  }
+
+  it("sends the Namespace as a query parameter, never as more path segments", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const { fetch: fetchImpl, calls } = stubBoth();
+
+      await runInstall(depsFor(configDir, cwd, fetchImpl), {
+        name: "code-review",
+        namespace: IMPORTED,
+        scope: "project",
+        agent: "codex",
+      });
+
+      expect(calls[0]?.url).toBe(
+        "https://registry.example/api/resources/skill/by-name/code-review?namespace=anthropics%2Fskills",
+      );
+    });
+  });
+
+  it("records which party named the Skill it installed", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const { fetch: fetchImpl } = stubBoth();
+
+      await runInstall(depsFor(configDir, cwd, fetchImpl), {
+        name: "code-review",
+        namespace: IMPORTED,
+        scope: "project",
+        agent: "codex",
+      });
+
+      expect(await lockedNamespace(cwd)).toBe(IMPORTED);
+    });
+  });
+
+  it("refuses to install over a Skill of the same name that a different party named", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const { fetch: fetchImpl } = stubBoth();
+      const deps = depsFor(configDir, cwd, fetchImpl);
+
+      await runInstall(deps, { name: "code-review", scope: "project", agent: "codex" });
+      await expect(
+        runInstall(deps, { name: "code-review", namespace: IMPORTED, scope: "project", agent: "codex" }),
+      ).rejects.toThrow(/already installed from registry.example/);
+
+      // Refused before anything was written: the first install still stands.
+      expect(await lockedNamespace(cwd)).toBe("registry.example");
+    });
+  });
+
+  it("replaces it when --force says to", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const { fetch: fetchImpl } = stubBoth();
+      const deps = depsFor(configDir, cwd, fetchImpl);
+
+      await runInstall(deps, { name: "code-review", scope: "project", agent: "codex" });
+      await runInstall(deps, { name: "code-review", namespace: IMPORTED, scope: "project", agent: "codex", force: true });
+
+      expect(await lockedNamespace(cwd)).toBe(IMPORTED);
+    });
+  });
+
+  it("leaves an entry written before Namespaces existed alone, rather than refusing on unknown", async () => {
+    await withTempDirs(async ({ configDir, cwd }) => {
+      const { fetch: fetchImpl } = stubBoth();
+      const deps = depsFor(configDir, cwd, fetchImpl);
+
+      await runInstall(deps, { name: "code-review", scope: "project", agent: "codex" });
+
+      // An older CLI's lockfile: an entry with no Namespace at all.
+      const path = join(cwd, "skillset-lock.json");
+      const lockfile = JSON.parse(await readFile(path, "utf8")) as { skills: Record<string, Record<string, unknown>> };
+      delete lockfile.skills["code-review"]?.namespace;
+      await writeFile(path, JSON.stringify(lockfile));
+
+      await runInstall(deps, { name: "code-review", namespace: IMPORTED, scope: "project", agent: "codex" });
+      expect(await lockedNamespace(cwd)).toBe(IMPORTED);
     });
   });
 });

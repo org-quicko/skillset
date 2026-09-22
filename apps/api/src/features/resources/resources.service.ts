@@ -4,6 +4,7 @@ import {
   buildArtifact,
   validateArtifactPath,
   normalizeSkillPath,
+  registryNamespace,
   reverseDomain,
   type ArtifactFile,
   type ArtifactFileUpload,
@@ -16,6 +17,7 @@ import type { Database } from "../../db/client.js";
 import { firstRow } from "../../db/rows.js";
 import { resourceDirectory, resourceTags, resources, users, type UserRow } from "../../db/schemas/index.js";
 import {
+  AmbiguousResourceNameError,
   ArtifactFileNotFoundError,
   ArtifactMissingError,
   ArtifactTooLargeError,
@@ -51,6 +53,7 @@ import type { StorageAdapter } from "../../storage/types.js";
 const skillSelection = {
   id: resources.id,
   kind: resources.kind,
+  namespace: resources.namespace,
   name: resources.name,
   description: resources.description,
   body: resources.body,
@@ -79,6 +82,8 @@ interface SkillPublisher {
 interface SkillSummary {
   id: string;
   kind: "skill";
+  /** Which party named it — stored, never resolved, never absent (ADR-0042). */
+  namespace: string;
   name: string;
   description: string;
   license: string | null;
@@ -414,6 +419,7 @@ export class ResourcesService {
       .select({
         id: resourceDirectory.id,
         kind: resourceDirectory.kind,
+        namespace: resourceDirectory.namespace,
         name: resourceDirectory.name,
         description: resourceDirectory.description,
         published_by_name: resourceDirectory.published_by_name,
@@ -491,25 +497,71 @@ export class ResourcesService {
    * The web keeps `/skills/<name>` as a browser URL, so a reader arriving from
    * a bookmark or shared link needs an authoritative name → id resolution.
    *
-   * An indexed equality match on the unique `(kind, name)` pair, not search:
-   * `GET /resources?q=` ranks by recency and caps at one page, and Postgres's
-   * `english` config drops stopwords — which would 404 a real Skill whose name
-   * happens to be one (docs/data-model.md allows single-word names).
+   * An indexed equality match on the unique `(kind, namespace, name)` triple,
+   * not search: `GET /resources?q=` ranks by recency and caps at one page, and
+   * Postgres's `english` config drops stopwords — which would 404 a real Skill
+   * whose name happens to be one (docs/data-model.md allows single-word names).
+   *
+   * A bare name still reads, which is the point: Namespaces exist to let two
+   * parties publish `pdf`, not to make either one harder to look up (ADR-0042).
+   * Unqualified, the lookup takes the only candidate when there is one, and
+   * otherwise the one published here — so a name that resolved before still
+   * resolves, and to the same Skill. Only a genuine tie between outside
+   * parties has no answer, and that refuses rather than guesses.
+   *
+   * Qualification is what *installing* needs, not what reading needs: an
+   * install writes a directory and can hold only one Skill of a name
+   * (ADR-0022), so the CLI resolves the tie with the caller. Reading has no
+   * such constraint.
+   *
+   * Resolved here rather than at the route, so every caller — the web, the
+   * CLI, the MCP server — agrees on what an unqualified name means.
    *
    * @param kind - The Kind path segment, not yet known to be registered.
    * @param name - The Skill's name.
+   * @param namespace - Which party named it. Omitted, the rule above applies.
    * @returns `SkillDetail`
    * @throws ResourceNotFoundError if `kind` isn't `"skill"`, or no Skill
    * exists by that name — a route param, so an unrecognised Kind here reads
    * as "not found" rather than a validation error (unlike the same check on
    * `publish`, whose `kind` chooses what gets written).
+   * @throws AmbiguousResourceNameError if the bare name matches several
+   * Namespaces and none of them is this Registry's own.
    * @example
    * ```ts
-   * const skill = await resourcesService.getByName("skill", "code-review");
+   * await resourcesService.getByName("skill", "code-review");
+   * await resourcesService.getByName("skill", "pdf", "anthropics/skills");
    * ```
    */
-  async getByName(kind: string, name: string): Promise<SkillDetail> {
-    return this.readSkill(and(eq(resources.kind, kind), eq(resources.name, name)) as SQL);
+  async getByName(kind: string, name: string, namespace?: string): Promise<SkillDetail> {
+    const named = namespace ?? (await this.resolveNamespace(kind, name));
+    return this.readSkill(
+      and(eq(resources.kind, kind), eq(resources.namespace, named), eq(resources.name, name)) as SQL,
+    );
+  }
+
+  /**
+   * Which Namespace an unqualified name means.
+   *
+   * @remarks
+   * One extra query, and only on the unqualified path — the qualified one hits
+   * the unique index directly. Worth it: the alternative is a `LIMIT 1` over an
+   * ordering nobody chose, which would answer a tie differently depending on
+   * how the rows happened to be laid out.
+   */
+  private async resolveNamespace(kind: string, name: string): Promise<string> {
+    const candidates = await this.db
+      .select({ namespace: resources.namespace })
+      .from(resources)
+      .where(and(eq(resources.kind, kind), eq(resources.name, name)));
+
+    const [only] = candidates;
+    if (!only) throw new ResourceNotFoundError();
+    if (candidates.length === 1) return only.namespace;
+
+    const own = registryNamespace(this.publicUrl);
+    if (candidates.some((candidate) => candidate.namespace === own)) return own;
+    throw new AmbiguousResourceNameError(name, candidates.map((candidate) => candidate.namespace).sort());
   }
 
   /**
@@ -562,6 +614,29 @@ export class ResourcesService {
     return stored ?? reverseDomain(this.publicUrl);
   }
 
+  /**
+   * The Namespace a publish is named by, from the `source` it declared.
+   *
+   * @param source - The declared repository URL, or null for a publish
+   * straight to this Registry.
+   * @returns `owner/repo` for a repository URL, and this deployment's own host
+   * otherwise.
+   *
+   * @remarks
+   * Derived from `source` rather than declared on its own, so the two cannot
+   * disagree — a Skill copied out of `github.com/a/b` has no way to claim it
+   * was named by `c/d`. A publisher still chooses it, by choosing what to
+   * declare as the Source (ADR-0041, ADR-0042).
+   *
+   * Unlike `resolveSource`, this is written into the row: a Namespace is half
+   * of a Resource's identity and is never resolved on read.
+   */
+  private namespaceForPublish(source: string | null): string {
+    if (!source) return registryNamespace(this.publicUrl);
+    const project = source.replace(/(\.git)?\/*$/, "").match(/([^/]+\/[^/]+)$/)?.[1];
+    return project ? project.toLowerCase() : registryNamespace(this.publicUrl);
+  }
+
   private async readSkill(identity: SQL): Promise<SkillDetail> {
     const [skill] = await this.db
       .select(skillSelection)
@@ -579,6 +654,7 @@ export class ResourcesService {
     return {
       id: skill.id,
       kind: "skill",
+      namespace: skill.namespace,
       name: skill.name,
       description: skill.description,
       // Written by `validateSkillBody` on every publish; only null in
@@ -645,6 +721,10 @@ export class ResourcesService {
     // from disk a Skill that was first Imported must clear the old origin
     // rather than leave it claiming a repository these bytes did not come from.
     const source = input.source ?? null;
+    // Follows `source`, so a republish that clears an Import's origin also
+    // moves the Skill into this Registry's own Namespace rather than leaving
+    // it filed under a repository these bytes no longer come from.
+    const namespace = this.namespaceForPublish(source);
     const skillPayload: SkillPayload = {
       kind,
       license: input.license ?? null,
@@ -665,6 +745,7 @@ export class ResourcesService {
       .insert(resources)
       .values({
         kind,
+        namespace,
         name,
         description,
         body,
@@ -676,7 +757,11 @@ export class ResourcesService {
         source,
       })
       .onConflictDoUpdate({
-        target: [resources.kind, resources.name],
+        // Matches resources_kind_namespace_name_unique, which is NULLS NOT
+        // DISTINCT (ADR-0042) — so a republish of a Skill published here, whose
+        // namespace is null, still conflicts with the row already there and
+        // updates it rather than inserting a second one.
+        target: [resources.kind, resources.namespace, resources.name],
         set: {
           description,
           body,

@@ -30,6 +30,7 @@ function fakeSkill(updatedAt: string, overrides: Partial<Record<string, unknown>
     compatibility: null,
     metadata: null,
     allowed_tools: null,
+    namespace: "registry.example",
     source: "com.example.registry",
     tags: [],
     installs: 3,

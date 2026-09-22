@@ -21,7 +21,45 @@ skillset list                # what's installed here, and whether it's current
 skillset update [names...]   # re-download whatever the Registry has moved on from
 skillset remove <name>       # uninstall a Skill
 skillset publish [path]      # defaults to the current directory
+skillset publish --from <url>  # publish from a public GitHub or GitLab URL
 skillset whoami
+```
+
+Without a global install, every command runs through `npx`:
+
+```sh
+npx @in-org-quicko/skillset-cli install <name>
+```
+
+## Namespaces
+
+Two parties can publish the same Skill name — the team's own `pdf` and one imported from
+`anthropics/skills`. A bare name still reads: it resolves to the only match, or to the one
+published to your Registry. Only a tie between two outside parties has to be spelled out.
+
+```sh
+skillset search pdf                             # imported rows show their namespace
+skillset install pdf                            # yours, or the only one
+skillset install pdf --namespace anthropics/skills
+```
+
+A project holds one `.agents/skills/<name>`, so installing a Skill over one a *different* party
+named is refused; pass `--force` to replace it.
+
+## Publishing from a repository
+
+```sh
+skillset publish --from https://github.com/acme/skills/tree/main/pdf
+skillset publish --from https://github.com/acme/skills   # every Skill in it
+```
+
+The CLI reads the repository itself, anonymously — **public projects only**, and no credential is
+sent. Each Skill records the repository as its Source, and takes its Namespace from it.
+
+For a private repository, clone it and declare where it came from:
+
+```sh
+skillset publish ./skills/pdf --source https://github.com/acme/private
 ```
 
 Credentials are stored per-Registry after `login`. For CI, skip `login` and set:

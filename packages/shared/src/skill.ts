@@ -145,6 +145,11 @@ export const SkillFrontmatterExtrasSchema = z.object({
   compatibility: z.string().nullable(),
   metadata: z.record(z.string(), z.string()).nullable(),
   allowed_tools: z.string().nullable(),
+  // Which party named this Skill: `owner/repo` for an Import, and this
+  // Registry's own host for anything published straight to it. Stored rather
+  // than resolved, unlike `source` below — a Namespace is half of a Skill's
+  // identity and is never absent (ADR-0042).
+  namespace: z.string(),
   // Always a value, never null: a Resource nothing was imported from reads as
   // this Registry's own domain in reverse-DNS notation, resolved on the way
   // out rather than written into every row (ADR-0041).
@@ -214,6 +219,10 @@ export type Skill = z.infer<typeof SkillSchema>;
 export const SkillDirectoryEntrySchema = z.object({
   id: z.string(),
   kind: z.string(),
+  // Carried on the list as well as the detail, because it is half of what
+  // identifies the row: two entries may share a `name` and are told apart only
+  // by this (ADR-0042).
+  namespace: z.string(),
   name: SkillNameSchema,
   description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
   published_by_name: z.string(),

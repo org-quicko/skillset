@@ -104,9 +104,9 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
         />
         <FormDialogBody>
           <PublishSkillForm
-            onPublished={(name) => {
+            onPublished={(name, namespace) => {
               setPublishOpen(false);
-              navigate(skillPath(name));
+              navigate(skillPath(name, namespace));
             }}
           />
         </FormDialogBody>

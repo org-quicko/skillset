@@ -55,6 +55,7 @@ function fakePublished() {
       compatibility: null,
       metadata: null,
       allowed_tools: null,
+      namespace: "registry.example",
       source: "com.example.registry",
       tags: [],
       installs: 0,
@@ -615,5 +616,139 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await rm(configDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// Publishing straight from a Git Provider URL (ADR-0010's anonymous,
+// client-side path — no Connection, no /imports, no git binary).
+describe("runPublish --from", () => {
+  const SKILL_MD = "---\nname: pdf\ndescription: Fills PDF forms.\n---\nBody.\n";
+  const CONTENTS = "https://api.github.com/repos/acme/skills/contents/pdf?ref=main";
+  const RAW = "https://raw.githubusercontent.com/acme/skills/main/pdf/SKILL.md";
+
+  /** GitHub's Contents API for one folder holding one `SKILL.md`, then the raw bytes. */
+  function stubGitHubAndRegistry() {
+    return stubFetch((url, init) => {
+      if (url === CONTENTS) {
+        return jsonResponse(200, [
+          { type: "file", name: "SKILL.md", path: "pdf/SKILL.md", size: SKILL_MD.length, download_url: RAW },
+        ]);
+      }
+      if (url === RAW) return new Response(SKILL_MD, { status: 200 });
+      if (url === "https://registry.example/api/resources/skill/pdf") {
+        return jsonResponse(200, { ...fakePublished(), upload: uploadFor(init?.body) });
+      }
+      if (isStorageUrl(url)) return new Response(null, { status: 200 });
+      throw new Error(`Unexpected request to ${url}`);
+    });
+  }
+
+  async function withConfig<T>(run: (configPath: string, cwd: string) => Promise<T>): Promise<T> {
+    const cwd = await mkdtemp(join(tmpdir(), "skillset-from-"));
+    const configPath = join(cwd, "config.json");
+    await writeConfig(configPath, { registry: "https://registry.example", token: "tok_test" });
+    try {
+      return await run(configPath, cwd);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  }
+
+  it("takes the name from the fetched SKILL.md, reading nothing from disk", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubGitHubAndRegistry();
+
+      // One Skill at the URL answers as a single result, the same shape as
+      // pointing `publish` at one directory rather than a tree of them.
+      asResult(
+        await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd }), {
+          from: "https://github.com/acme/skills/tree/main/pdf",
+        }),
+      );
+
+      // `pdf`, not the empty temp directory's nothing: the frontmatter that
+      // came back over the wire is what named it.
+      expect(calls.map((call) => call.url)).toContain("https://registry.example/api/resources/skill/pdf");
+    });
+  });
+
+  it("records the repository as the Skill's Source, without the ref or the folder (ADR-0041)", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubGitHubAndRegistry();
+
+      await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd }), {
+        from: "https://github.com/acme/skills/tree/main/pdf",
+      });
+
+      const put = calls.find((call) => call.url === "https://registry.example/api/resources/skill/pdf");
+      const body = JSON.parse(String(put?.init?.body)) as { source?: string };
+      expect(body.source).toBe("https://github.com/acme/skills");
+    });
+  });
+
+  it("never reaches the Registry's /imports routes — the CLI reads the provider itself", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubGitHubAndRegistry();
+
+      await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd }), {
+        from: "https://github.com/acme/skills/tree/main/pdf",
+      });
+
+      expect(calls.some((call) => call.url.includes("/imports/"))).toBe(false);
+    });
+  });
+
+  it("sends no credential to the provider — public projects only (ADR-0010)", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubGitHubAndRegistry();
+
+      await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd }), {
+        from: "https://github.com/acme/skills/tree/main/pdf",
+      });
+
+      for (const call of calls.filter((c) => c.url.startsWith("https://api.github.com"))) {
+        expect(call.init?.headers).not.toHaveProperty("authorization");
+      }
+    });
+  });
+
+  it("refuses a URL that is not a Git Provider this Registry reads", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubGitHubAndRegistry();
+
+      await expect(
+        runPublish(testDeps({ fetch: fetchImpl, configPath, cwd }), { from: "https://example.com/acme/skills" }),
+      ).rejects.toThrow();
+      expect(calls).toHaveLength(0);
+    });
+  });
+});
+
+// A checkout of a private repository cannot be reached by --from, so the
+// publisher declares where it came from instead (ADR-0041, ADR-0042).
+describe("runPublish --source", () => {
+  it("records a declared Source on a publish from disk", async () => {
+    const skillDir = await makeSkillDir();
+    try {
+      const configPath = join(skillDir, "config.json");
+      await writeConfig(configPath, { registry: "https://registry.example", token: "tok_test" });
+      const { fetch: fetchImpl, calls } = stubFetch((url, init) => {
+        if (url === "https://registry.example/api/resources/skill/code-review") {
+          return jsonResponse(200, { ...fakePublished(), upload: uploadFor(init?.body) });
+        }
+        if (isStorageUrl(url)) return new Response(null, { status: 200 });
+        throw new Error(`Unexpected request to ${url}`);
+      });
+
+      await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd: skillDir }), {
+        source: "https://github.com/acme/private",
+      });
+
+      const put = calls.find((call) => call.url.endsWith("/resources/skill/code-review"));
+      const body = JSON.parse(String(put?.init?.body)) as { source?: string };
+      expect(body.source).toBe("https://github.com/acme/private");
+    } finally {
+      await rm(skillDir, { recursive: true, force: true });
+    }
   });
 });

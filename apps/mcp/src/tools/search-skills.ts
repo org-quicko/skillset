@@ -28,6 +28,17 @@ export interface SearchSkillsResult {
    * decision rather than a detail.
    */
   allowed_tools: string | null;
+  /**
+   * Which party named this Skill — `owner/repo` for one Imported out of a
+   * repository, and the Registry's own host for one published straight to it
+   * (ADR-0042).
+   *
+   * On the search result rather than only on a read, because two Skills may
+   * share a `name` and install_skills can be called straight off this list:
+   * without it there is nothing here to tell them apart, or to qualify the
+   * install with.
+   */
+  namespace: string;
   /** Where the Skill came from: a repository URL, or the Registry's own reverse-DNS domain. */
   source: string;
 }
@@ -142,6 +153,7 @@ export async function searchSkills(
       updated_at: item.updated_at,
       installs: item.installs,
       allowed_tools: item.allowed_tools,
+      namespace: item.namespace,
       source: item.source,
     })),
     total: page.total,

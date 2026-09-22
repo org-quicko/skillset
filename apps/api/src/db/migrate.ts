@@ -6,7 +6,8 @@ import type postgres from "postgres";
 import { advisoryLockKey } from "./advisory-lock.js";
 import type { Database } from "./client.js";
 import { dbSchema } from "./schemaFactory.js";
-import { DEFAULT_DB_SCHEMA, MIGRATION_SCHEMA_SENTINEL } from "./schemaName.js";
+import { isNamespace } from "@in-org-quicko/skillset-shared";
+import { DEFAULT_DB_SCHEMA, MIGRATION_NAMESPACE_SENTINEL, MIGRATION_SCHEMA_SENTINEL } from "./schemaName.js";
 
 const READY_CHECK_RETRIES = 30;
 const READY_CHECK_DELAY_MS = 1000;
@@ -52,7 +53,18 @@ const DEFAULT_MIGRATIONS_FOLDER = join(import.meta.dir, "../../drizzle");
  * @returns The path to the temporary folder, for the caller to remove.
  * @throws Error if the folder cannot be read or copied.
  */
-async function resolveMigrations(migrationsFolder: string, schemaName: string): Promise<string> {
+async function resolveMigrations(
+  migrationsFolder: string,
+  schemaName: string,
+  registryNamespace: string,
+): Promise<string> {
+  // Checked here rather than trusted from the caller: this is the last point
+  // before the value becomes plain text inside SQL, and a Namespace's grammar
+  // is narrow enough that passing it leaves nothing a quote could escape into.
+  if (!isNamespace(registryNamespace)) {
+    throw new Error(`Cannot resolve migrations: "${registryNamespace}" is not a usable Namespace.`);
+  }
+
   const resolved = await mkdtemp(join(tmpdir(), "skillset-migrations-"));
   await cp(migrationsFolder, resolved, { recursive: true });
 
@@ -60,7 +72,12 @@ async function resolveMigrations(migrationsFolder: string, schemaName: string): 
     if (!entry.endsWith(".sql")) continue;
     const path = join(resolved, entry);
     const template = await readFile(path, "utf8");
-    await writeFile(path, template.replaceAll(MIGRATION_SCHEMA_SENTINEL, schemaName));
+    await writeFile(
+      path,
+      template
+        .replaceAll(MIGRATION_SCHEMA_SENTINEL, schemaName)
+        .replaceAll(MIGRATION_NAMESPACE_SENTINEL, registryNamespace),
+    );
   }
 
   return resolved;
@@ -86,6 +103,9 @@ async function resolveMigrations(migrationsFolder: string, schemaName: string): 
  *
  * @param sql - The connection to take the advisory lock on.
  * @param db - The Drizzle client the migrator runs through.
+ * @param registryNamespace - The Namespace anything published straight to this
+ * deployment is named by, substituted for `MIGRATION_NAMESPACE_SENTINEL`
+ * (ADR-0042). Rejected unless it is a well-formed Namespace.
  * @param migrationsFolder - Where the generated SQL lives; defaults to
  * `drizzle/` beside the app.
  * @throws Error if a migration fails, after the lock is released.
@@ -93,9 +113,10 @@ async function resolveMigrations(migrationsFolder: string, schemaName: string): 
 export async function runMigrations(
   sql: postgres.Sql,
   db: Database,
+  registryNamespace: string,
   migrationsFolder = DEFAULT_MIGRATIONS_FOLDER,
 ): Promise<void> {
-  const resolved = await resolveMigrations(migrationsFolder, dbSchema);
+  const resolved = await resolveMigrations(migrationsFolder, dbSchema, registryNamespace);
 
   await sql`SELECT pg_advisory_lock(${MIGRATION_LOCK_KEY})`;
   try {

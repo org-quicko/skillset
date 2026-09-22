@@ -38,3 +38,4 @@ export * from "./identity-provider.js";
 export * from "./connection.js";
 export * from "./integration.js";
 export * from "./repository.js";
+export * from "./namespace.js";

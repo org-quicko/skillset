@@ -1,5 +1,6 @@
 import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
 import { ArrowLeftIcon } from "lucide-react";
+import { AiAssistantsCard } from "@/components/ai-assistants-card";
 import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { IntegrationsCard } from "@/components/integrations-card";
@@ -25,8 +26,9 @@ const TOKENS_PATH = "/settings/tokens";
 const LOGIN_PATH = "/settings/login";
 const INTEGRATIONS_PATH = "/settings/integrations";
 const CONNECTIONS_PATH = "/settings/connected-accounts";
+const ASSISTANTS_PATH = "/settings/ai-assistants";
 
-type Section = "profile" | "users" | "login" | "integrations" | "connections" | "tokens";
+type Section = "profile" | "users" | "login" | "integrations" | "connections" | "tokens" | "assistants";
 
 // `canManageUsers` gates the Integrations section too: it decides something
 // about the Registry rather than about you — which apps it holds repository
@@ -51,6 +53,7 @@ function sectionFor(
   if (pathname === INTEGRATIONS_PATH && canManageUsers) return "integrations";
   if (pathname === CONNECTIONS_PATH && canImport) return "connections";
   if (pathname === TOKENS_PATH) return "tokens";
+  if (pathname === ASSISTANTS_PATH) return "assistants";
   return "profile";
 }
 
@@ -72,6 +75,7 @@ export function SettingsPage({ user }: { user: User }) {
       ? [{ label: "Connected Accounts", section: "connections" as const, path: CONNECTIONS_PATH }]
       : []),
     { label: "Tokens", section: "tokens", path: TOKENS_PATH },
+    { label: "AI Assistants", section: "assistants", path: ASSISTANTS_PATH },
   ];
 
   return (
@@ -124,6 +128,7 @@ export function SettingsPage({ user }: { user: User }) {
           {section === "integrations" && canManageUsers && <IntegrationsCard />}
           {section === "connections" && canImport && <ConnectionCard />}
           {section === "tokens" && <TokensCard />}
+          {section === "assistants" && <AiAssistantsCard />}
         </div>
       </SidebarProvider>
     </div>

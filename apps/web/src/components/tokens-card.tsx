@@ -1,5 +1,5 @@
 import type { Token, TokenCreated } from "@in-org-quicko/skillset-shared";
-import { CheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { IconSwap } from "@/components/icon-swap";
 import { InfoRow } from "@/components/info-row";
@@ -11,12 +11,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useMintToken, useTokens } from "@/hooks/use-tokens";
 import { apiErrorMessage } from "@/lib/api";
 import { formatMoment } from "@/lib/utils";
-
-/**
- * `GET /mcp.mcpb` — a top-level route, not under `/api` (apps/api/src/app.ts, ADR-0037) — so this
- * is a plain path rather than `apiUrl(...)`.
- */
-const MCPB_DOWNLOAD_PATH = "/mcp.mcpb";
 
 /** Placeholder rows for the token list while `useTokens` is in flight. */
 function TokenRowsSkeleton() {
@@ -156,20 +150,6 @@ export function TokensCard() {
           }}
         />
       )}
-
-      <Panel title="Claude Desktop" contentClassName="p-0" className="bg-transparent">
-        <InfoRow
-          title="MCP Bundle"
-          description="A single file that installs this Registry&apos;s MCP server into a host that can&apos;t run npx, like Claude Desktop&apos;s Extensions."
-        >
-          <Button variant="outline" size="sm" asChild>
-            <a href={MCPB_DOWNLOAD_PATH} aria-label="Download MCP Bundle">
-              <DownloadIcon className="size-4" />
-              Download
-            </a>
-          </Button>
-        </InfoRow>
-      </Panel>
     </div>
   );
 }

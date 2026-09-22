@@ -120,11 +120,15 @@ program
 
 program
   .command("publish")
-  .description("Publish the Skill at [path], or every Skill beneath it (defaults to the current directory).")
-  .argument("[path]", "Path to a Skill's directory, or a directory holding several")
+  .description(
+    "Publish the Skill at [path], or every Skill beneath it (defaults to the current directory). Pass --from to publish from a repository URL instead.",
+  )
+  .argument("[path]", "Path to a Skill's directory, or a directory holding several. Ignored when --from is given")
+  .option("--from <url>", "Publish from a GitHub or GitLab URL — a repository, a tree at a ref, or a folder in one. Public projects only")
+  .option("--source <url>", "Record the repository these files came from, for publishing a checkout of a private one --from cannot reach")
   .option("--yes", "Skip confirming a publish of more than one Skill")
   .option("--json", JSON_FLAG)
-  .action(async (path: string | undefined, opts: { yes?: boolean }) => {
+  .action(async (path: string | undefined, opts: { from?: string; source?: string; yes?: boolean }) => {
     // Non-interactive, for the same reason as `install` — so a multi-Skill
     // publish under `--json` needs `--yes` rather than a confirmation nobody
     // is there to give.
@@ -138,7 +142,7 @@ program
         confirm: async () => false,
       };
       return emitJson(async () => {
-        const result = await runPublish(deps, { path, yes: opts.yes });
+        const result = await runPublish(deps, { path, from: opts.from, source: opts.source, yes: opts.yes });
         // A partly-failed batch resolves rather than throws, so the exit code
         // is set here — otherwise `--json` would report success for a run the
         // formatted output calls a failure.
@@ -168,7 +172,7 @@ program
             return proceed;
           },
         },
-        { path, yes: opts.yes },
+        { path, from: opts.from, source: opts.source, yes: opts.yes },
       );
 
       if (!Array.isArray(result)) {
@@ -198,12 +202,13 @@ program
   .command("install")
   .description("Download and install a Skill for a coding Agent.")
   .argument("<name>", "The Skill's name")
+  .option("--namespace <ns>", "Which party named the Skill, when a bare name matches more than one")
   .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
   .option("--scope <scope>", "Install scope: project or user")
   .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
-  .option("--force", "Replace an already-installed Skill even if it has local changes")
+  .option("--force", "Replace an already-installed Skill that has local changes, or that a different party named")
   .option("--json", JSON_FLAG)
-  .action(async (name: string, opts: { agent?: string; scope?: string; copy?: boolean; force?: boolean }) => {
+  .action(async (name: string, opts: { namespace?: string; agent?: string; scope?: string; copy?: boolean; force?: boolean }) => {
     const deps = {
       fetch,
       configPath: resolveConfigPath(process.env),
@@ -218,7 +223,7 @@ program
       promptChoice,
       promptAgent,
     };
-    const options = { name, agent: opts.agent, scope: opts.scope, copy: opts.copy, force: opts.force };
+    const options = { name, namespace: opts.namespace, agent: opts.agent, scope: opts.scope, copy: opts.copy, force: opts.force };
     if (jsonMode()) return emitJson(() => runInstall(deps, options));
 
     p.intro(label("install"));
@@ -397,7 +402,14 @@ program
 
       s.stop(`${report.total} Skill(s) matched`);
       for (const item of report.items) {
-        p.log.message(`${pc.cyan(item.name)}\n${pc.dim(item.description)}`);
+        // The Namespace only where it says something: a Skill published to
+        // this Registry is named by it, and repeating that on every row is
+        // noise. One Imported from elsewhere shows the string to pass to
+        // `install --namespace`, which is the row a reader may have to
+        // disambiguate. Same rule `importedSource` applies to the Source
+        // itself (ADR-0041).
+        const from = importedSource(item.source) ? pc.dim(` ${item.namespace}`) : "";
+        p.log.message(`${pc.cyan(item.name)}${from}\n${pc.dim(item.description)}`);
       }
       p.outro(
         report.truncated
@@ -438,7 +450,9 @@ program
         // Only when it points somewhere else. Telling someone who just asked a
         // Registry about a Skill that the Skill came from that Registry is not
         // a fact, and the same rule hides the interface's Source row.
-        ...(importedSource(skill.source) ? [`source: ${skill.source}`] : []),
+        // Both, and only when it came from elsewhere: the Source says where
+        // to look, the Namespace is the string `install --namespace` takes.
+        ...(importedSource(skill.source) ? [`namespace: ${skill.namespace}`, `source: ${skill.source}`] : []),
       ];
       p.log.message(pc.dim(facts.join(" · ")));
 

@@ -20,9 +20,19 @@ export const resources = appTable(
     // Plain text, validated in the service against `KINDS` (ADR-0026) — not a
     // Postgres enum, so registering a new Kind is an insert, not a migration.
     kind: text("kind").notNull(),
-    // A Resource's publishing identity is (kind, name), not name alone: an
-    // MCP Server and a Skill may share a name (ADR-0026). `PUT` is still an
-    // upsert by this pair.
+    // Which party named this Resource — `owner/repo` for an Import, this
+    // deployment's own host for anything published straight here (ADR-0042).
+    // Never null and never resolved on read, which is what separates it from
+    // `source` below: a Source is provenance and may genuinely be absent,
+    // where a Namespace is half of a Resource's identity and never is. A bare
+    // name still reaches the team's own Skill because the *lookup* supplies
+    // this Registry's Namespace when a caller names none, not because the
+    // column is empty.
+    namespace: text("namespace").notNull(),
+    // A Resource's publishing identity is (kind, namespace, name), not name
+    // alone: an MCP Server and a Skill may share a name (ADR-0026), and two
+    // parties may both name a Skill `pdf` (ADR-0042). `PUT` is still an
+    // upsert by that triple.
     name: text("name").notNull(),
     description: text("description").notNull(),
     // Markdown documentation — a Skill's SKILL.md body below the frontmatter,
@@ -74,7 +84,14 @@ export const resources = appTable(
   (table) => ({
     // No check constraint on `name`: no single pattern fits every Kind, so
     // validation lives entirely in the shared per-Kind validators (ADR-0026).
-    kindNameUnique: unique("resources_kind_name_unique").on(table.kind, table.name),
+    // Two parties may both name a Skill `pdf`; one party may not name two
+    // (ADR-0042). No null handling to think about, because `namespace` has
+    // none.
+    kindNamespaceNameUnique: unique("resources_kind_namespace_name_unique").on(
+      table.kind,
+      table.namespace,
+      table.name,
+    ),
     searchIdx: index("resources_search_idx").using("gin", table.search),
     // The new default sort (ADR-0028) needs this; there is no equivalent
     // index left on published_at (docs/data-model.md).

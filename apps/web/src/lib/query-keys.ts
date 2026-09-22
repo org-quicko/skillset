@@ -50,8 +50,31 @@ export function resourceDirectoryQueryKey(filters: {
   ] as const;
 }
 
-/** A single Skill, with its `SKILL.md` body. */
-export function resourceQueryKey(name: string) {
+/**
+ * A single Skill, with its `SKILL.md` body.
+ *
+ * @remarks
+ * The Namespace is part of the key because it is part of the identity
+ * (ADR-0042): two Skills may share a `name`, and caching them under one key
+ * would serve one reader the other's Skill. An unqualified lookup keys on
+ * `undefined`, which is its own entry rather than an alias of whichever Skill
+ * the Registry resolved it to — the resolution can change when a second party
+ * publishes the same name, and a cache that hid that would be wrong quietly.
+ */
+export function resourceQueryKey(name: string, namespace?: string) {
+  return ["resources", "detail", name, namespace] as const;
+}
+
+/**
+ * Every cached entry for a Skill of this name, whoever named it.
+ *
+ * @remarks
+ * For invalidating and removing, where `resourceQueryKey` is the wrong tool:
+ * its key ends in the Namespace, and an explicit `undefined` there does not
+ * prefix-match an entry cached under a real one. A delete or a republish has
+ * to reach both.
+ */
+export function resourceDetailPrefixKey(name: string) {
   return ["resources", "detail", name] as const;
 }
 

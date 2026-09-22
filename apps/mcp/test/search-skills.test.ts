@@ -14,6 +14,7 @@ function fakeEntry(overrides: Partial<Record<string, unknown>> = {}) {
     updated_at: UPDATED_AT,
     installs: 3,
     allowed_tools: null,
+    namespace: "registry.example",
     source: "com.example.registry",
     tags: [],
     ...overrides,
@@ -50,6 +51,7 @@ describe("searchSkills", () => {
         updated_at: UPDATED_AT,
         installs: 3,
         allowed_tools: null,
+        namespace: "registry.example",
         source: "com.example.registry",
       },
     ]);

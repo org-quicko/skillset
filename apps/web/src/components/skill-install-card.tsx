@@ -6,21 +6,39 @@ import { cn } from "@/lib/utils";
 
 type Tab = "command" | "prompt";
 
+/** What this CLI is published as — the name `npx` has to be given to reach it. */
+const CLI_PACKAGE = "@in-org-quicko/skillset-cli";
+
 /**
- * The Installation panel: a copyable `skillset install` command, or a
+ * The Installation panel: a copyable `npx` install command, or a
  * natural-language prompt to hand an agent, switched by a tab in the header.
  *
  * @param name - The Skill's name, interpolated into both the command and the prompt.
+ * @param namespace - Which party named it, when a bare name would not reach
+ * this Skill (ADR-0042) — see the remark below.
+ *
+ * @remarks
+ * The command has to be one that installs *this* Skill, not one that happens
+ * to share its name. A bare name resolves to the only Skill called that, or to
+ * the one published here, so it is right for every first-party Skill and wrong
+ * for an Imported one the moment the team publishes the same name. Qualifying
+ * an Imported Skill's command is always correct and never misleading, so it is
+ * qualified unconditionally rather than guessing whether a competitor exists.
  */
-export function SkillInstallCard({ name }: { name: string }) {
+export function SkillInstallCard({ name, namespace }: { name: string; namespace?: string }) {
   const [tab, setTab] = useState<Tab>("command");
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => () => clearTimeout(resetTimer.current), []);
 
-  const command = `skillset install ${name}`;
-  const prompt = `Install the ${name} skill from the Skillset registry.`;
+  const qualifier = namespace ? ` --namespace ${namespace}` : "";
+  // The scoped package name, not the `skillset` bin name: npx resolves what it
+  // is given as a package, and `skillset` on npm is somebody else's.
+  const command = `npx ${CLI_PACKAGE} install ${name}${qualifier}`;
+  const prompt = namespace
+    ? `Install the ${name} skill from ${namespace} on the Skillset registry.`
+    : `Install the ${name} skill from the Skillset registry.`;
   const text = tab === "command" ? command : prompt;
 
   async function copy() {

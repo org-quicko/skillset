@@ -65,9 +65,38 @@ function publisherInitials(publisher: Publisher): string {
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b px-5 py-3 last:border-b-0">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="text-sm">{children}</div>
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      {/* `min-w-0` so a value that wants to truncate can: a flex item will not
+          shrink below its content otherwise, and a long Namespace wraps to
+          three lines instead. */}
+      <div className="min-w-0 text-sm">{children}</div>
     </div>
+  );
+}
+
+/**
+ * The Details panel's Namespace value: one line, truncated, with the whole of
+ * it in a tooltip.
+ *
+ * @remarks
+ * Truncated rather than wrapped because `owner/repo` for a long organisation
+ * runs to three lines in this column and pushes the rest of the panel down for
+ * a value most readers only glance at. Unlike the Source beside it, this one
+ * has to stay *readable* rather than just identifiable — it is the string a
+ * reader retypes after `--namespace` — so the full value is always one hover
+ * away, and `tabIndex` makes it one Tab away too, since a bare span is not
+ * focusable and the tooltip would otherwise be pointer-only.
+ */
+function NamespaceValue({ namespace }: { namespace: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="block truncate rounded-sm font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+          {namespace}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{namespace}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -148,18 +177,21 @@ function ToolAccess({ allowedTools }: { allowedTools: string | null }) {
  */
 export function SkillDetail({
   name,
+  namespace,
   canDelete,
   canEditTags,
   onBack,
   onDeleted,
 }: {
   name: string;
+  /** From the URL's `?namespace=`; undefined lets the Registry resolve the bare name (ADR-0042). */
+  namespace?: string;
   canDelete: boolean;
   canEditTags: boolean;
   onBack: () => void;
   onDeleted: () => void;
 }) {
-  const skill = useSkill(name);
+  const skill = useSkill(name, namespace);
   const trend = useSkillInstallTrend(skill.data?.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editTagsOpen, setEditTagsOpen] = useState(false);
@@ -238,7 +270,9 @@ export function SkillDetail({
 
       <Reveal delayMs={150} className="mt-2 grid min-h-0 flex-1 gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="flex min-h-0 min-w-0 flex-col gap-4">
-          <SkillInstallCard name={data.name} />
+          {/* Qualified only for a Skill that came from elsewhere: one
+              published here is what a bare name already reaches. */}
+          <SkillInstallCard name={data.name} namespace={imported ? data.namespace : undefined} />
 
           <SkillFilesPanel id={data.id} body={data.body} />
         </div>
@@ -268,6 +302,15 @@ export function SkillDetail({
             <DetailRow label="Published">{formatDate(data.published_at)}</DetailRow>
             {/* Absent, not blank, for a Skill published straight here: the row
                 would name the Registry the reader is already looking at. */}
+            {/* Always, unlike the Source below it. A Namespace is identity and
+                is never absent (ADR-0042) — every Skill has one, including one
+                uploaded straight here, which is named after this Registry. A
+                Source is an address, and for a Skill published here it points
+                at the page the reader is already on, so that row is hidden
+                rather than shown empty (ADR-0041). */}
+            <DetailRow label="Namespace">
+              <NamespaceValue namespace={data.namespace} />
+            </DetailRow>
             {imported && (
               <DetailRow label="Source">
                 <SourceLink source={imported} />
