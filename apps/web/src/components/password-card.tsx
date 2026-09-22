@@ -79,7 +79,7 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
             className="h-9"
           />
         </LabeledField>
-        {mismatch && <p className="-mt-2 text-xs text-destructive">Passwords don't match.</p>}
+        {mismatch && <p className="-mt-2 text-xs text-destructive">Passwords don&apos;t match.</p>}
         {replacePassword.isError && (
           <p className="text-sm text-destructive">{apiErrorMessage(replacePassword.error)}</p>
         )}
@@ -164,7 +164,7 @@ export function ChangePasswordDialog({
         <FormField
           htmlFor="dialog_confirm_password"
           label="Verify password"
-          helperText={mismatch ? <span className="text-destructive">Passwords don't match.</span> : undefined}
+          helperText={mismatch ? <span className="text-destructive">Passwords don&apos;t match.</span> : undefined}
         >
           <Input
             id="dialog_confirm_password"

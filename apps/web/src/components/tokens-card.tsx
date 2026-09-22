@@ -61,7 +61,7 @@ function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: ()
         </button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Copy it now. It's shown once and can't be retrieved again.
+        Copy it now. It&apos;s shown once and can&apos;t be retrieved again.
       </p>
       <Button variant="outline" size="sm" className="w-fit" onClick={onDismiss}>
         Done
