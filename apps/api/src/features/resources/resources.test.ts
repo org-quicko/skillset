@@ -35,6 +35,7 @@ interface ApiSkill {
   compatibility: string | null;
   metadata: Record<string, string> | null;
   allowed_tools: string | null;
+  source: string;
   tags: ApiTag[];
   published_by: ApiPublisher;
   published_at: string;
@@ -64,6 +65,8 @@ interface ApiDirectoryEntry {
   description: string;
   published_by_name: string;
   updated_at: string;
+  source: string;
+  allowed_tools: string | null;
   installs: number;
   tags: ApiTag[];
 }
@@ -264,6 +267,75 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(published.skill).toEqual((await read.json()) as ApiSkill);
   });
 
+  // `allowed-tools` is a permission grant, and the decision it informs — adopt
+  // this Skill or not — is made while browsing the list, before any detail read.
+  // So the directory carries it out of `payload`, rather than leaving a caller
+  // to read every row to find out.
+  it("carries allowed-tools on the directory list, null for a Skill that declares none", async () => {
+    await publish(context, writer, "claims-tools", {
+      description: "Declares what it reaches.",
+      body: "Body.\n",
+      allowed_tools: "Read, Grep",
+    });
+    await publish(context, writer, "claims-nothing", {
+      description: "Declares nothing.",
+      body: "Body.\n",
+    });
+
+    const res = await context.app.request("/api/resources?q=claims");
+    expect(res.status).toBe(200);
+
+    const page = (await res.json()) as ApiPage;
+    const byName = new Map(page.items.map((item) => [item.name, item.allowed_tools]));
+    expect(byName.get("claims-tools")).toBe("Read, Grep");
+    expect(byName.get("claims-nothing")).toBeNull();
+  });
+
+  // Where a Resource came from, on both reads. The two cases are stored
+  // differently on purpose (ADR-0041): an Import's origin is data, and the
+  // Registry's own identity is configuration, resolved on the way out.
+  it("records an Import's repository URL as its source, on the detail and the list alike", async () => {
+    const res = await publish(context, writer, "imported-skill", {
+      description: "Came out of a repository.",
+      body: "Body.\n",
+      source: "https://github.com/org-quicko/skillset",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ApiPublished).skill.source).toBe("https://github.com/org-quicko/skillset");
+
+    const read = await context.app.request("/api/resources/skill/by-name/imported-skill");
+    expect(((await read.json()) as ApiSkill).source).toBe("https://github.com/org-quicko/skillset");
+
+    const list = await context.app.request("/api/resources?q=imported-skill");
+    expect(((await list.json()) as ApiPage).items[0]?.source).toBe("https://github.com/org-quicko/skillset");
+  });
+
+  it("reads a Skill published straight to the Registry as the Registry's own domain, reversed", async () => {
+    await publish(context, writer, "uploaded-skill", { description: "Came off a disk.", body: "Body.\n" });
+
+    const read = await context.app.request("/api/resources/skill/by-name/uploaded-skill");
+    // TEST_PUBLIC_URL is http://localhost, whose single label reverses to itself.
+    expect(((await read.json()) as ApiSkill).source).toBe("localhost");
+
+    const list = await context.app.request("/api/resources?q=uploaded-skill");
+    expect(((await list.json()) as ApiPage).items[0]?.source).toBe("localhost");
+  });
+
+  // A republish fully replaces what was recorded (ADR-0002). Re-uploading from
+  // disk a Skill that was first Imported must stop it claiming a repository
+  // these bytes did not come from.
+  it("clears a recorded source when a republish declares none", async () => {
+    await publish(context, writer, "moved-skill", {
+      description: "First from a repository.",
+      body: "Body.\n",
+      source: "https://github.com/org-quicko/skillset",
+    });
+    await publish(context, writer, "moved-skill", { description: "Then from a disk.", body: "Body.\n" });
+
+    const read = await context.app.request("/api/resources/skill/by-name/moved-skill");
+    expect(((await read.json()) as ApiSkill).source).toBe("localhost");
+  });
+
   it("refuses publishing to a reader and allows it to writers and Admins", async () => {
     const refused = await publish(context, reader, "reader-attempt", {
       description: "Should not land.",
@@ -376,6 +448,24 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       payload: { description: "Reviews code.", body: "Body.\n", allowed_tools: ["Read"] },
       code: "allowed_tools_invalid",
       field: "allowed_tools",
+    },
+    {
+      // The scheme check is what keeps a `javascript:` URL out of a field the
+      // interface renders as a link.
+      label: "a source that is not an absolute http(s) URL",
+      name: "bad-source-scheme",
+      payload: { description: "Reviews code.", body: "Body.\n", source: "javascript:alert(1)" },
+      code: "source_invalid",
+      field: "source",
+    },
+    {
+      // Nobody may *declare* the reverse-DNS form: that case is what omitting
+      // `source` means, and the Registry fills it in itself (ADR-0041).
+      label: "a source that is a reverse-DNS domain rather than a URL",
+      name: "bad-source-domain",
+      payload: { description: "Reviews code.", body: "Body.\n", source: "com.quicko.skills" },
+      code: "source_invalid",
+      field: "source",
     },
   ];
 

@@ -4,6 +4,7 @@ import {
   buildArtifact,
   validateArtifactPath,
   normalizeSkillPath,
+  reverseDomain,
   type ArtifactFile,
   type ArtifactFileUpload,
   type Page,
@@ -54,6 +55,7 @@ const skillSelection = {
   description: resources.description,
   body: resources.body,
   payload: resources.payload,
+  source: resources.source,
   published_at: resources.published_at,
   updated_at: resources.updated_at,
   published_by: {
@@ -83,6 +85,8 @@ interface SkillSummary {
   compatibility: string | null;
   metadata: Record<string, string> | null;
   allowed_tools: string | null;
+  /** Always resolved — never the column's null (ADR-0041). */
+  source: string;
   tags: TagSummary[];
   published_at: Date;
   // What a republish moves and `published_at` does not, so it — not
@@ -145,6 +149,10 @@ interface ResourceDirectoryEntry {
   description: string;
   published_by_name: string;
   updated_at: Date;
+  /** Resolved the same way `SkillSummary.source` is — never the column's null (ADR-0041). */
+  source: string;
+  /** The Skill's `allowed-tools`, read out of `payload` by the view; null when it set none. */
+  allowed_tools: string | null;
   installs: number;
   tags: TagSummary[];
 }
@@ -301,6 +309,8 @@ export class ResourcesService {
     private readonly logger: Logger,
     private readonly tags: TagsService,
     private readonly analytics: AnalyticsService,
+    /** This Registry's public URL, which a Resource with no Import reads as its source. */
+    private readonly publicUrl: string,
   ) {}
 
   /**
@@ -408,6 +418,8 @@ export class ResourcesService {
         description: resourceDirectory.description,
         published_by_name: resourceDirectory.published_by_name,
         updated_at: resourceDirectory.updated_at,
+        source: resourceDirectory.source,
+        allowed_tools: resourceDirectory.allowed_tools,
         installs: resourceDirectory.install_count,
         tags: resourceDirectory.tags,
       })
@@ -419,7 +431,8 @@ export class ResourcesService {
 
     const [totals] = await this.db.select({ total: count() }).from(resourceDirectory).where(where);
 
-    return { items: rows, page, page_size: pageSize, total: totals?.total ?? 0 };
+    const items = rows.map((row) => ({ ...row, source: this.resolveSource(row.source) }));
+    return { items, page, page_size: pageSize, total: totals?.total ?? 0 };
   }
 
   /**
@@ -526,6 +539,29 @@ export class ResourcesService {
    * const skill = await this.readSkill(eq(resources.id, id));
    * ```
    */
+  /**
+   * Resolves a Resource's stored `source` into the one every read returns.
+   *
+   * @param stored - The column's value: a repository URL for an Import, and
+   * null for a Resource published straight to this Registry.
+   * @returns `stored` when there is one, and otherwise this Registry's own
+   * domain in reverse-DNS notation.
+   *
+   * @remarks
+   * Resolved here rather than written into the row on publish, because the
+   * fallback is this Registry's identity — configuration, not a fact about the
+   * Resource. Storing it would duplicate `PUBLIC_URL` into every row, go stale
+   * the day the deployment moves, and leave every Resource published before
+   * this column existed needing a backfill the migration cannot perform
+   * (ADR-0041).
+   *
+   * Every read goes through here — the detail, the publish response, and each
+   * row of the directory — so no caller ever sees the column's null.
+   */
+  private resolveSource(stored: string | null): string {
+    return stored ?? reverseDomain(this.publicUrl);
+  }
+
   private async readSkill(identity: SQL): Promise<SkillDetail> {
     const [skill] = await this.db
       .select(skillSelection)
@@ -553,6 +589,7 @@ export class ResourcesService {
       compatibility: payload.compatibility,
       metadata: payload.metadata,
       allowed_tools: payload.allowed_tools,
+      source: this.resolveSource(skill.source),
       published_at: skill.published_at,
       updated_at: skill.updated_at,
       published_by: skill.published_by,
@@ -603,6 +640,11 @@ export class ResourcesService {
     // `null`, not left `undefined`: a republish fully replaces the frontmatter
     // (ADR-0002), so a field the payload no longer sets must clear what an
     // earlier publish stored.
+    // `null`, not left `undefined`, for the same reason the payload fields are:
+    // a republish fully replaces what was recorded (ADR-0002), so re-uploading
+    // from disk a Skill that was first Imported must clear the old origin
+    // rather than leave it claiming a repository these bytes did not come from.
+    const source = input.source ?? null;
     const skillPayload: SkillPayload = {
       kind,
       license: input.license ?? null,
@@ -631,6 +673,7 @@ export class ResourcesService {
         published_by_email: publisher.email,
         published_by_name,
         published_at,
+        source,
       })
       .onConflictDoUpdate({
         target: [resources.kind, resources.name],
@@ -642,6 +685,7 @@ export class ResourcesService {
           published_by_email: publisher.email,
           published_by_name,
           published_at,
+          source,
           updated_at: new Date(),
         },
       })

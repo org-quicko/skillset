@@ -1,5 +1,6 @@
 import {
   parseSkillSourceUrl,
+  resourceSourceUrl,
   SkillValidationError,
   type SkillFile,
   type SkillSourceLocation,
@@ -371,7 +372,9 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
 
   function handleFiles(files: SkillFile[]) {
     setReadError(null);
-    publish.mutate(files, { onSuccess: (skill) => onPublished(skill.name) });
+    // No `source`: files dropped onto the page came off somebody's disk, and
+    // the Registry records itself as the origin (ADR-0041).
+    publish.mutate({ files }, { onSuccess: (skill) => onPublished(skill.name) });
   }
 
   /** Back to picking a source, keeping whatever was typed so a corrected URL doesn't have to be retyped. */
@@ -406,7 +409,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string) 
       setStep({ kind: "publishing", source, total: chosen.length, done: index });
       try {
         const files = await fetchSkillFilesAt(location);
-        const skill = await publish.mutateAsync(files);
+        const skill = await publish.mutateAsync({ files, source: resourceSourceUrl(location) });
         outcomes.push({ path: location.path, status: "published", name: skill.name });
       } catch (error) {
         outcomes.push({ path: location.path, status: "failed", message: describeFailure(error) });

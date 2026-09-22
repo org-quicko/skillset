@@ -13,6 +13,8 @@ function fakeEntry(overrides: Partial<Record<string, unknown>> = {}) {
     published_by_name: "A B",
     updated_at: UPDATED_AT,
     installs: 3,
+    allowed_tools: null,
+    source: "com.example.registry",
     tags: [],
     ...overrides,
   };
@@ -47,8 +49,21 @@ describe("searchSkills", () => {
         tags: ["quality"],
         updated_at: UPDATED_AT,
         installs: 3,
+        allowed_tools: null,
+        source: "com.example.registry",
       },
     ]);
+  });
+
+  // A caller can go straight from a search result to install_skills, so the
+  // permission grant a Skill claims has to be visible on the search, not only
+  // on the read that a caller may skip.
+  it("carries each match's allowed-tools through from the directory", async () => {
+    const { fetch: fetchImpl } = stubRegistry(fakePage([fakeEntry({ allowed_tools: "Read, Grep, Bash" })]));
+
+    const response = await searchSkills(fetchImpl, "https://registry.example", { query: "code review" });
+
+    expect(response.results[0]?.allowed_tools).toBe("Read, Grep, Bash");
   });
 
   it("returns an empty result set, not an error, when nothing matches", async () => {

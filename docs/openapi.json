@@ -594,6 +594,12 @@
                     "type": "string",
                     "description": "From the SKILL.md frontmatter. Optional; internal grammar unvalidated (experimental in the specification)."
                   },
+                  "source": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "example": "https://github.com/org-quicko/skillset",
+                    "description": "Where these files came from, when that is somewhere nameable — the repository URL, for an Import. Not from the frontmatter: only the publisher knows whether the files were fetched or picked off a disk. Must be an absolute http(s) URL. Omitted, the Registry records itself as the source, which is what a direct upload means; a republish that omits it clears whatever an earlier Import recorded (ADR-0002, ADR-0041)."
+                  },
                   "files": {
                     "type": "array",
                     "items": { "$ref": "#/components/schemas/ArtifactFile" },
@@ -1442,7 +1448,7 @@
       "SkillDirectoryEntry": {
         "type": "object",
         "description": "One row of `GET /resources` (ticket 23, ADR-0026), sourced from the `resource_directory` view — deliberately not SkillSummary: `published_by_name` in place of the full Publisher object, and `updated_at` in place of `published_at`. `GET /resources/{id}` and `{kind}/by-name/{name}` are unaffected and still return SkillSummary/Skill.",
-        "required": ["id", "kind", "name", "description", "published_by_name", "updated_at", "installs", "tags"],
+        "required": ["id", "kind", "name", "description", "published_by_name", "updated_at", "source", "allowed_tools", "installs", "tags"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "kind": {
@@ -1464,6 +1470,17 @@
             "type": "string",
             "format": "date-time",
             "description": "When this Skill was last published, republished, or otherwise changed — not when it was first published (`published_at`, only on the detail read)."
+          },
+          "source": {
+            "type": "string",
+            "example": "https://github.com/org-quicko/skillset",
+            "description": "Where the Resource came from. A repository URL when it was Imported from a Git Provider, and this Registry's own domain in reverse-DNS notation (e.g. `com.quicko.skills`) when it was published straight to it. Always present — the null the column stores for the second case is resolved on the way out (ADR-0041)."
+          },
+          "allowed_tools": {
+            "type": "string",
+            "nullable": true,
+            "example": "Read, Grep, Bash",
+            "description": "The Skill's `allowed-tools` frontmatter — what it claims the right to reach once loaded. On the list as well as the detail because it is a permission grant, and the decision it informs is made while browsing. Null when the frontmatter never set it."
           },
           "installs": {
             "type": "integer",
@@ -1505,6 +1522,7 @@
           "compatibility",
           "metadata",
           "allowed_tools",
+          "source",
           "tags",
           "published_by",
           "published_at",
@@ -1545,6 +1563,11 @@
           "allowed_tools": {
             "type": ["string", "null"],
             "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
+          },
+          "source": {
+            "type": "string",
+            "example": "https://github.com/org-quicko/skillset",
+            "description": "Where the Resource came from. A repository URL when it was Imported from a Git Provider, and this Registry's own domain in reverse-DNS notation (e.g. `com.quicko.skills`) when it was published straight to it. Never null: the second case is stored as null and resolved on the way out (ADR-0041)."
           },
           "tags": {
             "type": "array",

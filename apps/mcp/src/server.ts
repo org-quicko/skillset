@@ -130,6 +130,8 @@ const SkillSummaryOutputSchema = z.object({
   tags: z.array(z.string()),
   updated_at: z.string(),
   installs: z.number(),
+  allowed_tools: z.string().nullable(),
+  source: z.string(),
 });
 
 const SearchSkillsOutputSchema = {
@@ -170,7 +172,12 @@ const InstallSkillOutcomeOutputSchema = z.discriminatedUnion("status", [
     intendedDirectory: z.string(),
     skillMdBody: z.string(),
   }),
-  z.object({ name: z.string(), status: z.literal("refused"), existing: z.string() }),
+  z.object({
+    name: z.string(),
+    status: z.literal("refused"),
+    existing: z.string(),
+    installed: z.enum(["current", "outdated", "modified", "untracked"]),
+  }),
   z.object({ name: z.string(), status: z.literal("error"), message: z.string() }),
 ]);
 
@@ -198,6 +205,7 @@ const ReadSkillOutputSchema = {
     license: z.string().nullable(),
     compatibility: z.string().nullable(),
     allowed_tools: z.string().nullable(),
+    source: z.string(),
     files: z.array(z.object({ path: z.string(), size: z.number() })),
   }),
 };
@@ -302,7 +310,9 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
         "`write-adapters`, `review pull requests`, or `write changelogs`. Call this before calling install_skills so " +
         "you have the exact Registry name. Read-only; installs and modifies nothing. Returns matching Skill names " +
         "and descriptions, with optional tag and result-limit filters, and a `next_cursor` to page past the cap " +
-        "when the catalog holds more than fit in one page.",
+        "when the catalog holds more than fit in one page. Each result also carries `allowed_tools` — what that " +
+        "Skill claims the right to reach once loaded. Say what it names before installing a Skill that sets it: " +
+        "installing is what grants it.",
       annotations: {
         readOnlyHint: true,
         idempotentHint: true,
@@ -331,7 +341,11 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
         "agent name). Use this when the user asks to add, install, or set up a Skill; pass the exact Skill names " +
         "returned by search_skills. Installs several at once, and one bad name doesn't stop the rest. Returns the " +
         "detected Agent, where each Skill was written, and each Skill's SKILL.md so it's usable immediately. Set " +
-        "overwrite only when the user has explicitly asked to update or replace a Skill that's already installed.",
+        "overwrite only when the user has explicitly asked to update or replace a Skill that's already installed. " +
+        "A Skill that is already installed comes back as `refused` with an `installed` field saying how that copy " +
+        "stands: `current` means it already matches the Registry and there is nothing to do; `outdated` means the " +
+        "Registry has moved on, so update_skills is the right call; `modified` or `untracked` means overwriting " +
+        "may discard someone's edits — say so and ask before retrying with overwrite.",
       annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
       inputSchema: InstallSkillsInputSchema,
       outputSchema: InstallSkillsOutputSchema,

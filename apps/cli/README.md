@@ -33,6 +33,24 @@ SKILLSET_TOKEN=<token>
 
 `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` always override the stored config.
 
+## Machine-readable output
+
+Every command takes `--json`, which replaces the formatted output with the command's result on
+stdout:
+
+```sh
+skillset search code-review --json | jq -r '.items[].name'
+skillset list --json | jq '[.skills[] | select(.status == "outdated")]'
+```
+
+Failures go to **stderr** as `{ "error": { "code, message, status?, field? } }` with a non-zero
+exit code, so a pipeline only ever parses well-formed payloads. `code` is the Registry's own
+error code where there is one, and `cli_error` for a failure that never reached it.
+
+`--json` never prompts, whatever the terminal says — a clack prompt would write to the same
+stdout the payload goes to. So `login` needs `--token`, a multi-Skill `publish` needs `--yes`,
+and `install` needs `--agent`/`--scope` where it would otherwise have asked.
+
 ## License
 
 AGPL-3.0-only

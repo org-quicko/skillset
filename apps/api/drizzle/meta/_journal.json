@@ -29,6 +29,20 @@
       "when": 1789993110488,
       "tag": "0003_trigram_search",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790080000000,
+      "tag": "0004_directory_allowed_tools",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790081000000,
+      "tag": "0005_resource_source",
+      "breakpoints": true
     }
   ]
 }

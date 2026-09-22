@@ -20,6 +20,16 @@ export interface SearchSkillsResult {
   /** Last republish, so a caller can see which of two similar Skills is being maintained. */
   updated_at: string;
   installs: number;
+  /**
+   * What this Skill claims the right to reach once loaded — its `allowed-tools`
+   * frontmatter, or null when it set none. Here rather than only on
+   * {@link "./read-skill.js".readSkill} because install_skills can be called
+   * straight off a search result, and this is the one field on which that is a
+   * decision rather than a detail.
+   */
+  allowed_tools: string | null;
+  /** Where the Skill came from: a repository URL, or the Registry's own reverse-DNS domain. */
+  source: string;
 }
 
 /** What {@link searchSkills} answers: the page of matches, and how much of the catalog it is. */
@@ -131,6 +141,8 @@ export async function searchSkills(
       tags: item.tags.map((tag) => tag.name),
       updated_at: item.updated_at,
       installs: item.installs,
+      allowed_tools: item.allowed_tools,
+      source: item.source,
     })),
     total: page.total,
   };

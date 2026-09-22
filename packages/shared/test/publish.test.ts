@@ -248,3 +248,28 @@ describe("Artifact exclusions and limits (ticket 03)", () => {
     expect(ruleFor(validSkill(ignored))).toBe("no error");
   });
 });
+
+/**
+ * Where a Skill's files came from is the caller's to declare — nothing in the
+ * files themselves says it, and `buildSkillBundle` must not invent one.
+ */
+describe("Declaring a source (ADR-0041)", () => {
+  it("carries a declared source into the publish body", () => {
+    const bundle = buildSkillBundle(validSkill(), { source: "https://github.com/org-quicko/skillset" });
+
+    expect(bundle.request.source).toBe("https://github.com/org-quicko/skillset");
+  });
+
+  // Absent rather than present-and-undefined, so a publisher sends only what
+  // it actually declared and the Registry's own default is what fills the gap.
+  it("omits the key entirely when no source was declared", () => {
+    expect("source" in buildSkillBundle(validSkill()).request).toBe(false);
+    expect("source" in buildSkillBundle(validSkill(), {}).request).toBe(false);
+  });
+
+  it("never reads a source out of the frontmatter", () => {
+    const files = [file("SKILL.md", skillMd("name: code-review\ndescription: Reviews code.\nsource: https://evil.example"))];
+
+    expect(buildSkillBundle(files).request.source).toBeUndefined();
+  });
+});

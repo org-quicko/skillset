@@ -22,8 +22,9 @@ export interface InfoReport {
  * to resolve the Registry from.
  * @param options - The Skill's name, and `--files` to list its contents too.
  * @returns The Skill, and its file list when asked for.
- * @throws Error naming `skillset search` when the Registry has no Skill by
- * that name — someone who mistyped needs the catalog, not a bare 404.
+ * @throws ApiError naming `skillset search` when the Registry has no Skill by
+ * that name — someone who mistyped needs the catalog, not a bare 404, and the
+ * 404's own code is kept so `--json` can still report it as `not_found`.
  * @throws ApiError when the Registry refuses for any other reason.
  * @throws RegistryUnreachableError when the Registry cannot be reached.
  *
@@ -58,7 +59,15 @@ export async function runInfo(deps: SessionDeps, options: InfoOptions): Promise<
     skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(options.name)}`, SkillSchema);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
-      throw new Error(`No Skill named "${options.name}" on this Registry. Run \`skillset search\` to see what there is.`);
+      // Rethrown as an ApiError rather than a plain Error so the Registry's own
+      // code survives the friendlier message: under `--json` that is what a
+      // caller branches on, and `cli_error` would make the commonest failure
+      // here indistinguishable from a local one.
+      throw new ApiError(
+        error.status,
+        error.code,
+        `No Skill named "${options.name}" on this Registry. Run \`skillset search\` to see what there is.`,
+      );
     }
     throw error;
   }

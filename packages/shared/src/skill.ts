@@ -145,6 +145,10 @@ export const SkillFrontmatterExtrasSchema = z.object({
   compatibility: z.string().nullable(),
   metadata: z.record(z.string(), z.string()).nullable(),
   allowed_tools: z.string().nullable(),
+  // Always a value, never null: a Resource nothing was imported from reads as
+  // this Registry's own domain in reverse-DNS notation, resolved on the way
+  // out rather than written into every row (ADR-0041).
+  source: z.string(),
   tags: z.array(TagSchema),
 });
 
@@ -214,6 +218,14 @@ export const SkillDirectoryEntrySchema = z.object({
   description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
   published_by_name: z.string(),
   updated_at: timestamp,
+  // Carried on the list, not just the detail, because it is a permission
+  // grant: it is what a Skill claims the right to reach once loaded, and the
+  // decision it informs — adopt this Skill or not — is made while browsing,
+  // before any read or install. Null when the frontmatter never set it.
+  allowed_tools: z.string().nullable(),
+  // Resolved, like the detail read's — a repository URL for an Import, and
+  // this Registry's reverse-DNS domain for anything published straight to it.
+  source: z.string(),
   // Same lag caveat as SkillSummarySchema's `installs` (ADR-0012).
   installs: z.number().int().nonnegative(),
   tags: z.array(TagSchema),
@@ -320,6 +332,10 @@ export const SkillPublishSchema = z.object({
   compatibility: z.string().optional(),
   metadata: z.record(z.string(), z.string()).optional(),
   allowed_tools: z.string().optional(),
+  // Declared by the publisher, not read out of the frontmatter: only the
+  // publisher knows whether these files came out of a repository or off
+  // somebody's disk. Omitted, the Registry records itself (ADR-0041).
+  source: z.string().optional(),
   files: z.array(ArtifactFileSchema),
 });
 export type SkillPublish = z.infer<typeof SkillPublishSchema>;

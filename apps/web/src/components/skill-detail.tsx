@@ -1,8 +1,9 @@
-import type { Publisher } from "@in-org-quicko/skillset-shared";
-import { DownloadIcon, EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { importedSource, type Publisher } from "@in-org-quicko/skillset-shared";
+import { DownloadIcon, EllipsisIcon, ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
+import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { InstallTrendChart } from "@/components/install-trend-chart";
 import { Panel } from "@/components/panel";
 import { Reveal } from "@/components/reveal";
@@ -21,7 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDownloadSkillArtifact, useSkill, useSkillInstallTrend } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { formatDate, splitAllowedTools } from "@/lib/utils";
 
 /** The placeholder page shown while a Skill loads — mirrors the real two-column layout. */
 function SkillDetailSkeleton() {
@@ -71,6 +72,75 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 /**
+ * The Details panel's source value: the Git Provider's mark, linking out to the
+ * repository a Skill was Imported from.
+ *
+ * The icon carries the whole value because the URL underneath is long, and the
+ * one thing a reader wants from it at a glance is which provider it is. The
+ * address itself stays reachable — as the link's target, its tooltip, and its
+ * accessible name — rather than taking up a row it would have to truncate.
+ *
+ * A host no Git Provider claims falls back to the host as text. An Import
+ * cannot produce one, but a hand-written publish can declare any http(s) URL
+ * (ADR-0041), and showing it is better than an icon that would name the wrong
+ * provider or a row that silently disappears.
+ */
+function SourceLink({ source }: { source: { url: string; provider: string | null } }) {
+  const Icon = source.provider ? GIT_PROVIDER_ICONS[source.provider] : undefined;
+  const label = `Open the source repository at ${new URL(source.url).hostname}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label={label}
+          className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {Icon ? (
+            <Icon className="size-4" aria-hidden="true" />
+          ) : (
+            <>
+              <span className="max-w-[150px] truncate">{new URL(source.url).hostname}</span>
+              <ExternalLinkIcon className="size-3 shrink-0" aria-hidden="true" />
+            </>
+          )}
+        </a>
+      </TooltipTrigger>
+      <TooltipContent>{source.url}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * The Details panel's tool-access value: one Badge per tool a Skill claims,
+ * or a note that it claims nothing in particular.
+ *
+ * A Skill that declares no `allowed-tools` is not restricted — it inherits
+ * whatever the Agent already permits — so the empty case says that rather
+ * than reading as "no access".
+ */
+function ToolAccess({ allowedTools }: { allowedTools: string | null }) {
+  const tools = splitAllowedTools(allowedTools);
+
+  if (tools.length === 0) {
+    return <span className="text-muted-foreground">Unrestricted</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      {tools.map((tool) => (
+        <Badge key={tool} variant="secondary" className="font-mono text-[11px]">
+          {tool}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+/**
  * A Skill's page: breadcrumb, then title with download and manage actions
  * aligned beside it, then a two-column layout — the install command and the
  * Artifact's browsable contents on the left; installs and publisher details
@@ -99,6 +169,9 @@ export function SkillDetail({
   if (skill.isError) return <p className="text-sm text-destructive">{apiErrorMessage(skill.error)}</p>;
 
   const data = skill.data;
+  // Null for a Skill published straight to this Registry, which is what hides
+  // the Source row entirely rather than showing it empty.
+  const imported = importedSource(data.source);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3.5">
@@ -193,6 +266,16 @@ export function SkillDetail({
               </div>
             </DetailRow>
             <DetailRow label="Published">{formatDate(data.published_at)}</DetailRow>
+            {/* Absent, not blank, for a Skill published straight here: the row
+                would name the Registry the reader is already looking at. */}
+            {imported && (
+              <DetailRow label="Source">
+                <SourceLink source={imported} />
+              </DetailRow>
+            )}
+            <DetailRow label="Tool access">
+              <ToolAccess allowedTools={data.allowed_tools} />
+            </DetailRow>
           </Panel>
         </div>
       </Reveal>

@@ -38,7 +38,7 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
   }
 
   return (
-    <Panel className="w-full" title="Password" description={description ?? "Change your password at any time."} uppercase={false}>
+    <Panel className="w-full bg-transparent" title="Password" description={description ?? "Change your password at any time."} uppercase={false}>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <LabeledField label="Current password" htmlFor="current_password">
           <Input

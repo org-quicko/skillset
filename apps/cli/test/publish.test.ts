@@ -55,6 +55,7 @@ function fakePublished() {
       compatibility: null,
       metadata: null,
       allowed_tools: null,
+      source: "com.example.registry",
       tags: [],
       installs: 0,
     },

@@ -154,6 +154,18 @@ export function useSkillInstallTrend(id: string | undefined) {
  * it has the same fix: publish again. `path` names the file that failed, so
  * the message can say which one rather than only that one did.
  */
+/**
+ * What publishing takes: the files, and where they came from.
+ *
+ * `source` is the caller's to supply because only the caller knows — an Import
+ * has a repository URL, and files dropped onto the page have nothing to say.
+ * Omitted, the Registry records itself (ADR-0041).
+ */
+export interface PublishSkillInput {
+  files: SkillFile[];
+  source?: string;
+}
+
 export class SkillUploadError extends Error {
   readonly path: string;
 
@@ -174,8 +186,8 @@ export class SkillUploadError extends Error {
 export function usePublishSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (files: SkillFile[]): Promise<Skill> => {
-      const bundle = buildSkillBundle(files);
+    mutationFn: async ({ files, source }: PublishSkillInput): Promise<Skill> => {
+      const bundle = buildSkillBundle(files, { source });
 
       const published = await apiFetch(`/resources/skill/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
         method: "PUT",

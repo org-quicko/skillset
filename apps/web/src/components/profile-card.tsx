@@ -61,7 +61,7 @@ export function ProfileCard({ user }: { user: User }) {
         <p className="max-w-2xl text-xs text-muted-foreground">Manage your personal information.</p>
       </div>
 
-      <Panel contentClassName="p-0">
+      <Panel contentClassName="p-0" className="bg-transparent">
         <div className="divide-y">
           <InfoRow title="First name">
             <Input
@@ -88,7 +88,7 @@ export function ProfileCard({ user }: { user: User }) {
       </Panel>
       {updateName.isError && <p className="text-sm text-destructive">{apiErrorMessage(updateName.error)}</p>}
 
-      <Panel contentClassName="p-0">
+      <Panel contentClassName="p-0" className="bg-transparent">
         <InfoRow title="Password" description="Change your password at any time.">
           <Button type="button" variant="outline" onClick={() => setChangingPassword(true)}>
             Change password

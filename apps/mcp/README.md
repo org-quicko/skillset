@@ -73,9 +73,15 @@ things and an Agent needs to tell them apart.
 
 The Registry:
 
-- `search_skills` — search the catalog, or list all of it when given no query
-- `read_skill` — read one Skill's `SKILL.md` and file list **without installing it**
-- `install_skills` — download and install one or more Skills for the detected (or given) Agent
+- `search_skills` — search the catalog, or list all of it when given no query. Each result
+  carries `allowed_tools`, so what a Skill claims the right to reach is visible before the
+  install that grants it — not only on the `read_skill` a caller may skip
+- `read_skill` — read one Skill's `SKILL.md` and file list **without installing it**. Both it and
+  `search_skills` report `source`: the repository URL a Skill was imported from, or the
+  Registry's own domain in reverse-DNS notation when it was published straight to it
+- `install_skills` — download and install one or more Skills for the detected (or given) Agent.
+  A Skill already installed comes back `refused` with an `installed` field — `current`,
+  `outdated`, `modified`, or `untracked` — saying what overwriting it would cost
 - `publish_skill` — publish a Skill to the Registry (requires a Token)
 
 This project:

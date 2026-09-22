@@ -12,10 +12,14 @@ import {
   type Skill,
 } from "@in-org-quicko/skillset-shared";
 import {
+  hashInstalledSkill,
   hashSkillFiles,
   installSkill,
+  readLockfile,
   recordInstall,
   resolveInstallTarget,
+  resolveLockfilePath,
+  skillStatus,
   type InstallContext,
   type LinkResult,
 } from "@in-org-quicko/skillset-installer";
@@ -59,8 +63,20 @@ export type InstallSkillOutcome =
       intendedDirectory: string;
       skillMdBody: string;
     }
-  | { name: string; status: "refused"; existing: string }
+  | { name: string; status: "refused"; existing: string; installed: ExistingCopyStatus }
   | { name: string; status: "error"; message: string };
+
+/**
+ * How the copy already on disk stands, reported alongside a refusal so the
+ * caller knows what overwriting it would cost.
+ *
+ * The four {@link SkillStatus} values minus `missing` — which cannot arise
+ * here, because a refusal only happens when the directory exists — plus
+ * `untracked` for a directory the lockfile has no entry for. `untracked` is
+ * the cautious case: nothing recorded what was written, so nothing can say
+ * whether replacing it discards work.
+ */
+export type ExistingCopyStatus = "current" | "outdated" | "modified" | "untracked";
 
 /** Resolves a Skill by name. @throws Error naming the Skill when the Registry answers non-2xx. */
 async function fetchSkill(fetchImpl: typeof fetch, registry: string, name: string): Promise<Skill> {
@@ -104,6 +120,54 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Decides how the copy already installed at `directory` stands, for a refusal
+ * to report.
+ *
+ * @param ctx - The project root and home directory the lockfile is resolved against.
+ * @param scope - Which Scope's lockfile records this install.
+ * @param registry - The Registry URL, for reading a lockfile that has none yet.
+ * @param name - The Skill's name, as the lockfile keys it.
+ * @param directory - The canonical directory the installed files live in.
+ * @param registryUpdatedAt - What the Registry holds now, already fetched for
+ * this install — so deciding `outdated` costs no extra request.
+ * @returns `untracked` when no lockfile entry records this Skill, and
+ * otherwise whatever {@link skillStatus} makes of the two recorded signals.
+ * @throws Error if the lockfile exists but cannot be read, or the installed
+ * directory cannot be walked.
+ *
+ * @remarks
+ * Exists because `refused` used to say only that something was already there.
+ * That is the same answer for a copy identical to the Registry's, one the
+ * Registry has moved past, and one somebody has edited — and those call for
+ * three different next steps. A caller that cannot tell them apart either
+ * gives up or passes `overwrite` blindly, and the second is how local edits
+ * get discarded.
+ *
+ * `missing` is unreachable: the caller only asks once the directory exists.
+ *
+ * @example
+ * ```ts
+ * await describeExistingCopy(ctx, "project", registry, "code-review", dir, skill.updated_at);
+ * // -> "modified"
+ * ```
+ */
+async function describeExistingCopy(
+  ctx: InstallSkillsContext,
+  scope: Scope,
+  registry: string,
+  name: string,
+  directory: string,
+  registryUpdatedAt: string,
+): Promise<ExistingCopyStatus> {
+  const lockfile = await readLockfile(resolveLockfilePath(scope, ctx), registry);
+  const entry = lockfile.skills[name];
+  if (!entry) return "untracked";
+
+  const status = skillStatus(entry, await hashInstalledSkill(directory), registryUpdatedAt);
+  return status === "missing" ? "untracked" : status;
 }
 
 /**
@@ -173,7 +237,16 @@ async function installOneSkill(deps: InstallSkillsDeps, name: string): Promise<I
   }
 
   if (!overwrite && (await pathExists(target.canonicalTarget))) {
-    return { name, status: "refused", existing: skill.name };
+    let installed: ExistingCopyStatus;
+    try {
+      installed = await describeExistingCopy(ctx, scope, registry, skill.name, target.canonicalTarget, skill.updated_at);
+    } catch {
+      // An unreadable lockfile or directory is not worth failing the refusal
+      // over — the refusal itself still stands, and `untracked` is the
+      // answer that asks the caller to check before overwriting.
+      installed = "untracked";
+    }
+    return { name, status: "refused", existing: skill.name, installed };
   }
 
   let bytes: Uint8Array;

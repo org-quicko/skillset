@@ -36,6 +36,8 @@ function skillEntry(overrides: Partial<Record<string, unknown>> = {}) {
     published_by_name: "A B",
     updated_at: "2026-09-20T00:00:00.000Z",
     installs: 3,
+    allowed_tools: null,
+    source: "com.example.registry",
     tags: [{ id: "t1", name: "quality" }],
     ...overrides,
   };
@@ -78,6 +80,7 @@ function stubRegistry() {
         compatibility: null,
         metadata: null,
         allowed_tools: null,
+        source: "com.example.registry",
         tags: [{ id: "t1", name: "quality" }],
         installs: 3,
       });

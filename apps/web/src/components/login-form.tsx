@@ -1,6 +1,7 @@
 import { loginRefusalMessage, type PublicIdentityProvider } from "@in-org-quicko/skillset-shared";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { WordmarkButton } from "@/components/logo";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +34,7 @@ export function LoginForm() {
   const [reveal, setReveal] = useState(false);
   const login = useLogin();
   const providers = useLoginProviders();
-  const { search, navigate } = useRouter();
+  const { search } = useRouter();
 
   // Set by the API when it bounces a failed external login back here. The code
   // names which check refused it, so the message can be the one that helps —
@@ -52,13 +53,7 @@ export function LoginForm() {
     <div className="flex min-h-svh flex-col bg-background">
       <header className="border-b">
         <div className="mx-auto flex h-[54px] w-full max-w-[1200px] items-center px-7">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="cursor-pointer font-wordmark text-2xl tracking-[0.04em] uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          >
-            SKILLSET
-          </button>
+          <WordmarkButton />
         </div>
       </header>
 

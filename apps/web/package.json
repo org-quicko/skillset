@@ -12,7 +12,6 @@
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "@fontsource/michroma": "^5.3.0",
     "@in-org-quicko/skillset-shared": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.3.3",

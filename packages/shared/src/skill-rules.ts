@@ -15,6 +15,7 @@
  * (ADR-0026). What stays here is what's genuinely Skill-specific: the exact
  * pattern and ceilings, the rule codes, and the messages a User reads.
  */
+import { RESOURCE_SOURCE_MAX_LENGTH } from "./resource-source.js";
 import { isNonBlankString, isWithinMaxLength, matchesPattern } from "./resource-rules.js";
 
 export const SKILL_NAME_MAX_LENGTH = 64;
@@ -41,6 +42,7 @@ export type SkillRule =
   | "compatibility_too_long"
   | "metadata_invalid"
   | "allowed_tools_invalid"
+  | "source_invalid"
   | "frontmatter_missing"
   | "frontmatter_invalid"
   | "skill_md_missing"
@@ -268,6 +270,51 @@ export function validateSkillAllowedTools(value: unknown): string | undefined {
       "allowed_tools_invalid",
       "A Skill's allowed-tools, if set, must be a string.",
       "allowed_tools",
+    );
+  }
+  return value;
+}
+
+/**
+ * Validates a Resource's optional `source`.
+ *
+ * @param value - The candidate source, as a publisher declared it.
+ * @returns `string | undefined` — `undefined` when the field was absent, which
+ * is how a publisher says "these came off my own disk".
+ * @throws SkillValidationError with rule `source_invalid` if `value` is
+ * present but is not an absolute `http(s)` URL, or is longer than
+ * {@link RESOURCE_SOURCE_MAX_LENGTH}.
+ *
+ * @remarks
+ * Held to a URL because the only source a publisher may declare is somewhere
+ * it was fetched from; the other case — published straight to this Registry —
+ * is not declarable at all, it is what omitting the field means, and the
+ * Registry fills it in itself so nobody can claim to be somewhere they are
+ * not (ADR-0041).
+ *
+ * The scheme check is what keeps a `javascript:` or `data:` URL out of a field
+ * the interface renders as a link.
+ *
+ * @example
+ * ```ts
+ * validateResourceSource("https://github.com/org-quicko/skillset"); // -> the URL
+ * validateResourceSource(undefined);                                // -> undefined
+ * ```
+ */
+export function validateResourceSource(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || !isWithinMaxLength(value, RESOURCE_SOURCE_MAX_LENGTH)) {
+    throw new SkillValidationError(
+      "source_invalid",
+      `A Resource's source, if set, must be a string of at most ${RESOURCE_SOURCE_MAX_LENGTH} characters.`,
+      "source",
+    );
+  }
+  if (!URL.canParse(value) || !/^https?:$/.test(new URL(value).protocol)) {
+    throw new SkillValidationError(
+      "source_invalid",
+      "A Resource's source, if set, must be an absolute http(s) URL.",
+      "source",
     );
   }
   return value;

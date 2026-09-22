@@ -15,6 +15,11 @@ the bundled MCP server — all under your own infrastructure, with your own acce
 Reading the catalog needs no account; publishing, deleting, and administration are restricted to
 Users with the right role. See [`CONTEXT.md`](CONTEXT.md) for the full domain vocabulary.
 
+Every Resource records a **Source** — the repository URL it was imported from, or this Registry's
+own domain in reverse-DNS notation (`com.quicko.skills`) when it was published straight here. It
+is provenance rather than a link: nothing is ever re-read from it
+([ADR-0041](docs/adr/0041-a-resource-records-where-it-came-from.md)).
+
 ## Running it
 
 ```bash
@@ -98,6 +103,11 @@ published, `list` asks what this project has installed.
 directory, for `--scope user`). That is what lets `list` tell a stale copy from one you have
 edited, and what stops `install` and `update` replacing your edits without `--force`
 ([ADR-0038](docs/adr/0038-a-lockfile-records-what-was-installed.md)).
+
+Every command also takes `--json`, which prints the result to stdout and any failure to stderr as
+`{ "error": { … } }` with a non-zero exit code — for scripts, CI, and agents that shell out
+rather than speak MCP. It never prompts, so `login` needs `--token` and a multi-Skill `publish`
+needs `--yes`.
 
 For CI, skip `login` and set `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` instead — see
 [`apps/cli/README.md`](apps/cli/README.md).

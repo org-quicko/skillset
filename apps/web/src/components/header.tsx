@@ -1,6 +1,7 @@
 import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
 import { LogOutIcon, SettingsIcon, UploadIcon } from "lucide-react";
 import { useState } from "react";
+import { WordmarkButton } from "@/components/logo";
 import { PublishSkillForm } from "@/components/publish-skill-form";
 import { ThemeSegmentedControl, ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -44,13 +45,7 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
   return (
     <header className="w-full border-b bg-background">
       <div className="relative mx-auto flex h-[54px] w-full max-w-[1200px] items-center justify-between px-7">
-        <button
-          type="button"
-          onClick={() => navigate("/")}
-          className="cursor-pointer font-wordmark text-2xl tracking-[0.04em] uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          SKILLSET
-        </button>
+        <WordmarkButton />
 
         <div className="flex items-center gap-4">
           {canPublish && (

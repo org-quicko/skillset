@@ -12,6 +12,8 @@ export interface ReadSkillResult {
   license: string | null;
   compatibility: string | null;
   allowed_tools: string | null;
+  /** Where the Skill came from: a repository URL, or the Registry's own reverse-DNS domain. */
+  source: string;
   /** Every file the Skill ships, with its size — what it brings beyond `SKILL.md`. */
   files: { path: string; size: number }[];
 }
@@ -80,6 +82,7 @@ export async function readSkill(
     license: skill.license,
     compatibility: skill.compatibility,
     allowed_tools: skill.allowed_tools,
+    source: skill.source,
     files,
   };
 }

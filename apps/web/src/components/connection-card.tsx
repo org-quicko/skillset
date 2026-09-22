@@ -17,7 +17,7 @@ import { formatDate } from "@/lib/utils";
 /** Placeholder rows, shaped like `ConnectedAccountRow`, while `useConnections` is in flight. */
 function ConnectionsListSkeleton() {
   return (
-    <Panel title="Apps" contentClassName="p-0">
+    <Panel title="Apps" contentClassName="p-0" className="bg-transparent">
       {Array.from({ length: 3 }).map((_, index) => (
         <div key={index} className="flex items-center justify-between gap-4 border-b px-5 py-3 last:border-b-0">
           <div className="flex min-w-0 items-center gap-3">
@@ -149,7 +149,7 @@ export function ConnectionCard() {
       {disconnect.isError && <p className="text-sm text-destructive">{apiErrorMessage(disconnect.error)}</p>}
 
       {connections.isSuccess && connectable.length === 0 && (
-        <Panel>
+        <Panel className="bg-transparent">
           <p className="text-sm text-muted-foreground">
             No Git Provider is set up for importing yet. An administrator sets one up under Integrations.
           </p>
@@ -157,7 +157,7 @@ export function ConnectionCard() {
       )}
 
       {connectable.length > 0 && (
-        <Panel title="Apps" contentClassName="p-0">
+        <Panel title="Apps" contentClassName="p-0" className="bg-transparent">
           {connectable.map((entry) => (
             <ConnectedAccountRow
               key={entry.id}

@@ -101,7 +101,7 @@ export function TokensCard() {
       </div>
 
       <form onSubmit={handleSubmit}>
-        <Panel title="New Token" contentClassName="p-0">
+        <Panel title="New Token" contentClassName="p-0" className="bg-transparent">
           <InfoRow title="Name">
             <div className="flex min-w-0 items-center gap-2">
               <Input
@@ -122,7 +122,7 @@ export function TokensCard() {
         {mint.isError && <p className="mt-3 text-sm text-destructive">{apiErrorMessage(mint.error)}</p>}
       </form>
 
-      <Panel title="Your Tokens" contentClassName="p-0">
+      <Panel title="Your Tokens" contentClassName="p-0" className="bg-transparent">
         {tokens.isPending && <TokenRowsSkeleton />}
         {tokens.isError && <p className="p-5 text-sm text-destructive">{apiErrorMessage(tokens.error)}</p>}
         {tokens.isSuccess && tokens.data.length === 0 && (
@@ -157,7 +157,7 @@ export function TokensCard() {
         />
       )}
 
-      <Panel title="Claude Desktop" contentClassName="p-0">
+      <Panel title="Claude Desktop" contentClassName="p-0" className="bg-transparent">
         <InfoRow
           title="MCP Bundle"
           description="A single file that installs this Registry&apos;s MCP server into a host that can&apos;t run npx, like Claude Desktop&apos;s Extensions."

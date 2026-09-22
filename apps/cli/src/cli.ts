@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
-import { getAgent } from "@in-org-quicko/skillset-shared";
+import { getAgent, importedSource } from "@in-org-quicko/skillset-shared";
 import { Command } from "commander";
 import { homedir } from "node:os";
 import pc from "picocolors";
@@ -15,11 +15,23 @@ import { runSearch } from "./commands/search.js";
 import { runUpdate } from "./commands/update.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveConfigPath } from "./config.js";
+import { emitJson, jsonMode, setJsonMode } from "./json.js";
 import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken } from "./ui.js";
 
 const program = new Command();
 program.name("skillset").description("Publish and manage Skills on Skillset.");
 program.addHelpText("beforeAll", bannerText());
+
+/** `--json`'s help text, declared once and added to every command that has a result worth printing. */
+const JSON_FLAG = "Print the result as JSON on stdout, and any failure as JSON on stderr. Never prompts.";
+
+// Declared per subcommand rather than once on the root, so it reads where
+// anyone would type it — `skillset search foo --json`, not
+// `skillset --json search foo`. One hook then lifts whichever command was run
+// into the module flag every action reads.
+program.hook("preAction", (_root, actionCommand) => {
+  setJsonMode(actionCommand.opts().json === true);
+});
 // A bare `skillset` prints the banner. Anything commander did not recognise
 // as a subcommand lands here too, and is named back rather than reported as
 // "too many arguments" — which is what a root action turns an unknown
@@ -44,7 +56,19 @@ program
   .requiredOption("--registry <url>", "The Registry's URL")
   .option("--token <secret>", "A Token minted from the web interface (prompted for if omitted)")
   .option("--insecure", "Allow a plain-http Registry that is not on this machine (sends the Token in the clear)")
+  .option("--json", JSON_FLAG)
   .action(async (opts: { registry: string; token?: string; insecure?: boolean }) => {
+    if (jsonMode()) {
+      const deps = { fetch, configPath: resolveConfigPath(process.env) };
+      return emitJson(async () => {
+        // The masked prompt is the interactive path's whole reason for
+        // existing; under `--json` there is nobody to type into it, so the
+        // Token has to arrive on the command line.
+        if (!opts.token) throw new Error("Pass --token with --json: there is no terminal to prompt at.");
+        return runLogin(deps, { registry: opts.registry, token: opts.token, insecure: opts.insecure });
+      });
+    }
+
     p.intro(label("login"));
 
     // Prompted rather than required on the command line, so the Token stays out of shell
@@ -76,12 +100,16 @@ program
 program
   .command("whoami")
   .description("Show which Registry the CLI is authenticated against and as whom.")
+  .option("--json", JSON_FLAG)
   .action(async () => {
+    const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env };
+    if (jsonMode()) return emitJson(() => runWhoami(deps));
+
     p.intro(label("whoami"));
     const s = p.spinner();
     s.start("Resolving identity");
     try {
-      const result = await runWhoami({ fetch, configPath: resolveConfigPath(process.env), env: process.env });
+      const result = await runWhoami(deps);
       s.stop(`${pc.cyan(result.email)} ${pc.dim(`(${result.role})`)}`);
       p.outro(result.registry);
     } catch (error) {
@@ -95,7 +123,30 @@ program
   .description("Publish the Skill at [path], or every Skill beneath it (defaults to the current directory).")
   .argument("[path]", "Path to a Skill's directory, or a directory holding several")
   .option("--yes", "Skip confirming a publish of more than one Skill")
+  .option("--json", JSON_FLAG)
   .action(async (path: string | undefined, opts: { yes?: boolean }) => {
+    // Non-interactive, for the same reason as `install` — so a multi-Skill
+    // publish under `--json` needs `--yes` rather than a confirmation nobody
+    // is there to give.
+    if (jsonMode()) {
+      const deps = {
+        fetch,
+        configPath: resolveConfigPath(process.env),
+        env: process.env,
+        cwd: process.cwd(),
+        isTTY: false,
+        confirm: async () => false,
+      };
+      return emitJson(async () => {
+        const result = await runPublish(deps, { path, yes: opts.yes });
+        // A partly-failed batch resolves rather than throws, so the exit code
+        // is set here — otherwise `--json` would report success for a run the
+        // formatted output calls a failure.
+        if (Array.isArray(result) && result.some((outcome) => outcome.status === "failed")) process.exitCode = 1;
+        return result;
+      });
+    }
+
     p.intro(label("publish"));
     const s = p.spinner();
     s.start("Validating and uploading");
@@ -151,22 +202,28 @@ program
   .option("--scope <scope>", "Install scope: project or user")
   .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
   .option("--force", "Replace an already-installed Skill even if it has local changes")
+  .option("--json", JSON_FLAG)
   .action(async (name: string, opts: { agent?: string; scope?: string; copy?: boolean; force?: boolean }) => {
+    const deps = {
+      fetch,
+      configPath: resolveConfigPath(process.env),
+      env: process.env,
+      cwd: process.cwd(),
+      homeDir: homedir(),
+      // `--json` is non-interactive whatever the terminal says: a clack prompt
+      // would write to the same stdout the payload goes to, and a caller
+      // parsing it has nobody to answer. Unresolved choices then fail with a
+      // JSON error naming the flag to pass instead of hanging.
+      isTTY: jsonMode() ? false : process.stdin.isTTY === true,
+      promptChoice,
+      promptAgent,
+    };
+    const options = { name, agent: opts.agent, scope: opts.scope, copy: opts.copy, force: opts.force };
+    if (jsonMode()) return emitJson(() => runInstall(deps, options));
+
     p.intro(label("install"));
     try {
-      const report = await runInstall(
-        {
-          fetch,
-          configPath: resolveConfigPath(process.env),
-          env: process.env,
-          cwd: process.cwd(),
-          homeDir: homedir(),
-          isTTY: process.stdin.isTTY === true,
-          promptChoice,
-          promptAgent,
-        },
-        { name, agent: opts.agent, scope: opts.scope, copy: opts.copy, force: opts.force },
-      );
+      const report = await runInstall(deps, options);
       p.log.success(`Installed ${pc.cyan(report.skillDirectory)}`);
       if (report.link.kind === "symlink") {
         p.log.message(pc.dim(`${report.agent}: symlinked ${report.link.path}`));
@@ -203,15 +260,17 @@ program
   .description("Show the Skills installed here, and whether each is current, outdated, locally modified, or missing.")
   .option("--scope <scope>", "Which scope to list: project or user (default: project)")
   .option("--offline", "Skip the Registry, so nothing is reported as outdated")
+  .option("--json", JSON_FLAG)
   .action(async (opts: { scope?: string; offline?: boolean }) => {
+    const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() };
+    const options = { scope: opts.scope, offline: opts.offline };
+    if (jsonMode()) return emitJson(() => runList(deps, options));
+
     p.intro(label("list"));
     const s = p.spinner();
     s.start("Reading installed Skills");
     try {
-      const report = await runList(
-        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() },
-        { scope: opts.scope, offline: opts.offline },
-      );
+      const report = await runList(deps, options);
 
       if (report.skills.length === 0) {
         s.stop(`No Skills installed at ${report.scope} scope`);
@@ -240,15 +299,25 @@ program
   .argument("[names...]", "The Skills to update")
   .option("--scope <scope>", "Which scope to update: project or user (default: project)")
   .option("--force", "Update a Skill with local changes, discarding them")
+  .option("--json", JSON_FLAG)
   .action(async (names: string[], opts: { scope?: string; force?: boolean }) => {
+    const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() };
+    const options = { names, scope: opts.scope, force: opts.force };
+    if (jsonMode()) {
+      return emitJson(async () => {
+        const outcomes = await runUpdate(deps, options);
+        // Same as `publish`: a per-Skill failure resolves, so the exit code has
+        // to be set from the outcomes rather than left to `emitJson`'s catch.
+        if (outcomes.some((outcome) => outcome.status === "error")) process.exitCode = 1;
+        return outcomes;
+      });
+    }
+
     p.intro(label("update"));
     const s = p.spinner();
     s.start("Checking the Registry");
     try {
-      const outcomes = await runUpdate(
-        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() },
-        { names, scope: opts.scope, force: opts.force },
-      );
+      const outcomes = await runUpdate(deps, options);
 
       const changed = outcomes.filter((o) => o.status === "updated" || o.status === "restored").length;
       const failed = outcomes.filter((o) => o.status === "error").length;
@@ -277,13 +346,15 @@ program
   .description("Uninstall a Skill: its files, the Agent's link to it, and its lockfile entry.")
   .argument("<name>", "The Skill's name")
   .option("--scope <scope>", "Which scope to remove from: project or user (default: project)")
+  .option("--json", JSON_FLAG)
   .action(async (name: string, opts: { scope?: string }) => {
+    const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() };
+    const options = { name, scope: opts.scope };
+    if (jsonMode()) return emitJson(() => runRemove(deps, options));
+
     p.intro(label("remove"));
     try {
-      const report = await runRemove(
-        { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() },
-        { name, scope: opts.scope },
-      );
+      const report = await runRemove(deps, options);
 
       if (!report.skillDirectory && !report.link && !report.forgotten) {
         p.log.warn(`${name} was not installed at ${report.scope} scope — nothing to remove.`);
@@ -306,15 +377,17 @@ program
   .argument("[query]", "What to search for — a task, or an exact Skill name")
   .option("--tag <name>", "Narrow to Skills carrying this Tag")
   .option("--limit <n>", "Maximum number of results")
+  .option("--json", JSON_FLAG)
   .action(async (query: string | undefined, opts: { tag?: string; limit?: string }) => {
+    const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env };
+    const options = { query, tag: opts.tag, limit: opts.limit };
+    if (jsonMode()) return emitJson(() => runSearch(deps, options));
+
     p.intro(label("search"));
     const s = p.spinner();
     s.start(query ? `Searching for ${query}` : "Listing the catalog");
     try {
-      const report = await runSearch(
-        { fetch, configPath: resolveConfigPath(process.env), env: process.env },
-        { query, tag: opts.tag, limit: opts.limit },
-      );
+      const report = await runSearch(deps, options);
 
       if (report.items.length === 0) {
         s.stop("No Skills matched");
@@ -342,15 +415,17 @@ program
   .description("Show a Skill's SKILL.md and details without installing it.")
   .argument("<name>", "The Skill's name")
   .option("--files", "Also list every file the Skill ships")
+  .option("--json", JSON_FLAG)
   .action(async (name: string, opts: { files?: boolean }) => {
+    const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env };
+    const options = { name, files: opts.files };
+    if (jsonMode()) return emitJson(() => runInfo(deps, options));
+
     p.intro(label("info"));
     const s = p.spinner();
     s.start(`Reading ${name}`);
     try {
-      const { skill, files } = await runInfo(
-        { fetch, configPath: resolveConfigPath(process.env), env: process.env },
-        { name, files: opts.files },
-      );
+      const { skill, files } = await runInfo(deps, options);
 
       s.stop(pc.cyan(skill.name));
       p.log.message(skill.description);
@@ -360,8 +435,19 @@ program
         `${skill.installs} install(s)`,
         ...(skill.tags.length > 0 ? [`tags: ${skill.tags.map((tag) => tag.name).join(", ")}`] : []),
         ...(skill.license ? [`license: ${skill.license}`] : []),
+        // Only when it points somewhere else. Telling someone who just asked a
+        // Registry about a Skill that the Skill came from that Registry is not
+        // a fact, and the same rule hides the interface's Source row.
+        ...(importedSource(skill.source) ? [`source: ${skill.source}`] : []),
       ];
       p.log.message(pc.dim(facts.join(" · ")));
+
+      // Its own line rather than another dimmed fact: this is what the Skill
+      // claims the right to reach once loaded, and installing is what grants
+      // it — the one detail here worth reading before `skillset install`.
+      if (skill.allowed_tools) {
+        p.log.message(`${pc.yellow("tool access")}  ${skill.allowed_tools}`);
+      }
 
       if (files) {
         p.log.message(pc.dim(files.map((file) => `  ${file.path}  ${file.size}B`).join("\n")));

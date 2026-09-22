@@ -56,6 +56,11 @@ export function bannerText(): string {
     lines.push(`  ${pc.dim("$")} ${pc.cyan(cmd.padEnd(pad))}  ${pc.dim(desc)}`);
   }
 
+  // Noted once rather than appended to all nine lines above, which would
+  // double the width of the widest of them for a flag that reads the same on
+  // every command.
+  lines.push("", `  ${pc.dim("Add --json to any command for machine-readable output.")}`);
+
   return lines.join("\n");
 }
 

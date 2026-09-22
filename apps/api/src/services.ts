@@ -79,7 +79,7 @@ export function buildServices(deps: ServiceDependencies): Services {
     authenticator: new Authenticator(deps.db, auth),
     analytics,
     tags,
-    resources: new ResourcesService(deps.db, deps.storage, deps.logger, tags, analytics),
+    resources: new ResourcesService(deps.db, deps.storage, deps.logger, tags, analytics, deps.publicUrl),
     users: new UsersService(deps.db, deps.logger),
     setup: new SetupService(deps.db, deps.logger),
     identityProviders: new IdentityProvidersService(deps.db, deps.logger, keys),

@@ -31,7 +31,7 @@ const ACTIONS_COL = `${TABLE_HEAD_LABEL_CLASS} w-[110px]`;
 /** Placeholder user table while `useUsers` is in flight. */
 function UsersTableSkeleton() {
   return (
-    <Panel contentClassName="p-0">
+    <Panel contentClassName="p-0" className="bg-transparent">
       <Table className="table-fixed">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -113,7 +113,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
       {users.isPending && <UsersTableSkeleton />}
 
       {users.isSuccess && (
-        <Panel contentClassName="p-0">
+        <Panel contentClassName="p-0" className="bg-transparent">
           <Table className="table-fixed">
             <TableHeader>
               <TableRow className="hover:bg-transparent">

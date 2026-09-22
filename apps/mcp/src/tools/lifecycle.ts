@@ -139,7 +139,9 @@ export async function updateSkills(
   );
   const refused = wanted
     .filter((skill) => skill.status === "modified" && !options.force)
-    .map((skill) => ({ name: skill.name, status: "refused" as const, existing: skill.name }));
+    // Always `modified` — the filter above admits nothing else — so the status
+    // is carried straight through rather than recomputed from disk.
+    .map((skill) => ({ name: skill.name, status: "refused" as const, existing: skill.name, installed: "modified" as const }));
 
   if (writable.length === 0) {
     return { detection: deps.detection, outcomes: refused };

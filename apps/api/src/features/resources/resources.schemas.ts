@@ -2,6 +2,7 @@ import {
   isKind,
   KIND_KEYS,
   validateArtifactManifest,
+  validateResourceSource,
   validateSkillAllowedTools,
   validateSkillBody,
   validateSkillCompatibility,
@@ -42,6 +43,7 @@ export const PublishBodySchema = z.object({
   compatibility: ruleSchema(validateSkillCompatibility).optional(),
   metadata: ruleSchema(validateSkillMetadata).optional(),
   allowed_tools: ruleSchema(validateSkillAllowedTools).optional(),
+  source: ruleSchema(validateResourceSource).optional(),
   files: ruleSchema(validateArtifactManifest),
 });
 export type PublishBody = z.infer<typeof PublishBodySchema>;

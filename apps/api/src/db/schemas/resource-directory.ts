@@ -29,6 +29,14 @@ export const resourceDirectory = appView("resource_directory", {
   description: text("description").notNull(),
   published_by_name: text("published_by_name").notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull(),
+  // Null for a Resource published straight to this Registry; the read resolves
+  // it rather than the view doing so, because the value it resolves to is
+  // configuration the database has no access to (ADR-0041).
+  source: text("source"),
+  // Read out of `payload` by the view (ADR-0026), so the list can show what
+  // tool access a Skill claims without a second read per row. Null both when
+  // the frontmatter never set it and for a Kind whose payload has no such key.
+  allowed_tools: text("allowed_tools"),
   install_count: integer("install_count").notNull(),
   tags: jsonb("tags").notNull().$type<Array<{ id: string; name: string }>>(),
   search: tsvector("search"),

@@ -66,7 +66,7 @@ export async function startTestContext(
     storage,
     betterAuthSecret: TEST_AUTH_SECRET,
     publicUrl: TEST_PUBLIC_URL,
-    logger: createLogger("silent"),
+    logger: createLogger(process.env.TEST_LOG_LEVEL ?? "silent"),
     // Off for the suite as a whole: every test signs in from the same
     // address, which the credential limiter is built to refuse. Tests that
     // are *about* the limiter build their own app with it on.

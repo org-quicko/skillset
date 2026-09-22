@@ -8,10 +8,10 @@ members of a single team.
 ## Language
 
 **Resource**:
-Anything the Registry holds and a coding agent can obtain. Every Resource has a Kind, a `name`
-unique within that Kind, a description, a publisher, optional markdown documentation (`body`),
-and any number of Tags; everything else about it lives in its Kind-specific payload (ADR-0026).
-Not every Resource has an Artifact (ADR-0027).
+Anything the Registry holds and a coding agent can obtain. Every Resource has a Kind, a Namespace,
+a `name` unique within that pair, a description, a publisher, optional markdown documentation
+(`body`), and any number of Tags; everything else about it lives in its Kind-specific payload
+(ADR-0026). Not every Resource has an Artifact (ADR-0027).
 _Avoid_: Package, entry, item, asset, artifact (which is the files, not the thing)
 
 **Kind**:
@@ -20,6 +20,26 @@ shape of the payload, the rules `name` and `description` must satisfy, whether t
 Artifact, and what `skillset install` does. Stored as plain text rather than an enum, so a fourth
 Kind is an insert rather than a migration (ADR-0026, following ADR-0024).
 _Avoid_: Type, category, class, resource type
+
+**Namespace**:
+Which party named a Resource, and the other half of its publishing identity: unique is
+`(kind, namespace, name)` rather than `(kind, name)`, so two Skills may both be called
+`frontend-design` so long as different parties named them. Declared at publish time, never
+derived — an Import defaults to the `owner/repo` it was copied out of, and anything published
+straight here defaults to this Registry's own host, forward rather than the reverse-DNS a Source
+resolves to (`skills.quicko.com`, not `com.quicko.skills`), because a Namespace is read and typed
+where a Source is only ever linked. A republish resolves the Namespace a Resource already has
+rather than deriving a fresh one, since deriving would fork it instead of updating it. An opaque
+string throughout: lowercase alphanumerics, dots, hyphens, and at most one slash, compared whole
+and never split. It confers nothing — no ownership, no permission, no claim on the name — and it
+is never renamed, because a rename would re-identify every Resource beneath it. Required for a
+Skill; an MCP Server has none, its `name` being already namespaced by the upstream specification.
+
+A Registry concept, and only that: installs stay flat at `.agents/skills/<name>` (ADR-0022), so
+one project holds at most one Skill of a given name however many Namespaces publish it. Reverses
+ADR-0002, which rejected namespacing on the premise of a single team — a premise Import expired
+by bringing in Skills named by parties who were never on it.
+_Avoid_: Scope (which is where a Skill is installed), owner, org, vendor, prefix, group
 
 **Skill**:
 The Kind whose payload is a directory bundle: a root `SKILL.md` with YAML frontmatter, alongside
@@ -184,11 +204,26 @@ _Avoid_: Link, linked account, authorisation, integration
 
 **Import**:
 A one-time copy of a Skill's or a Plugin's files out of a Git Provider and into the Registry. It is
-not a link: what was published keeps no reference to where it came from, and nothing is ever
-re-read. A public folder needs no Connection; a private one is read as the writer's own
+not a link: nothing is ever re-read, and nothing syncs. What was published records the repository
+it came from as its Source, which is a historical note rather than a reference — nothing follows
+it (ADR-0041). A public folder needs no Connection; a private one is read as the writer's own
 Connection. An MCP Server is never Imported — its whole payload is a `server.json` a writer
 pastes.
 _Avoid_: Sync, clone, pull, link
+
+**Source**:
+Where a Resource came from, as one value every read returns. An Imported Resource's Source is the
+**repository** URL it was copied out of — without the ref or the folder, so a monorepo's Skills
+share one. Anything published straight to the Registry has this Registry itself as its Source,
+written as its domain in reverse-DNS notation (`com.quicko.skills`). One is an address and the
+other an identity, which is why only the first is ever shown: a Source appears — as its Git
+Provider's mark, linking out — only when it points somewhere the reader cannot already see, and a
+Resource published here shows none at all. Declared by the publisher rather than inferred — the
+Registry never opens an Artifact to find out (ADR-0001) — and only the URL form is declarable: the
+reverse-DNS form is what declaring nothing means. Provenance, not a link: a republish from disk
+clears an earlier Import's Source, and a repository that moves leaves the recorded value untouched
+and wrong.
+_Avoid_: Origin, provider, upstream, remote, repository (which is one kind of Source, not the term)
 
 **Permitted Organisation**:
 One value a Provider admits people from: a Workspace domain for Google, a tenant id for

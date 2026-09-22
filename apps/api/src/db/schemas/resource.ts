@@ -36,6 +36,13 @@ export const resources = appTable(
     // this is the four optional Agent Skills spec fields — see
     // `SkillPayloadSchema`.
     payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),
+    // Where the Resource came from, when that is somewhere other than here —
+    // a repository URL for an Import (ADR-0041). Null means it was published
+    // straight to this Registry, which the read resolves to this Registry's
+    // own reverse-DNS domain; it is deliberately not stored, because the
+    // Registry's identity is configuration rather than a fact about the row.
+    // A column rather than a payload key: every Kind comes from somewhere.
+    source: text("source"),
     // Attribution is stored three ways on purpose: the reference gives a
     // current name while the User exists, the email snapshot outlives them
     // being removed, and published_by_name (ticket 23) is a display-name

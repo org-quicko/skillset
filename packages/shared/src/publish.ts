@@ -28,6 +28,16 @@ export interface SkillBundle {
   files: SkillFile[];
 }
 
+/** What {@link buildSkillBundle} takes beyond the files themselves. */
+export interface BuildSkillBundleOptions {
+  /**
+   * Where these files came from, when that is somewhere other than the caller's
+   * own disk — a repository URL for an Import. Omitted, the Registry records
+   * itself as the source (ADR-0041).
+   */
+  source?: string;
+}
+
 /**
  * Turns a set of files into everything needed to publish them as a Skill.
  *
@@ -50,6 +60,9 @@ export interface SkillBundle {
  * @param files - The Skill's files, at paths relative to its root. Excluded
  * paths are dropped and a single wrapping directory is stripped before
  * anything is read.
+ * @param options - `source`, when the files came from somewhere nameable. It
+ * is not read out of the files: only the caller knows whether they were
+ * fetched from a repository or picked off a disk.
  * @returns The Skill's name, its publish request body, and the files to
  * upload.
  * @throws SkillValidationError with rule `skill_md_missing` if no `SKILL.md`
@@ -67,7 +80,7 @@ export interface SkillBundle {
  * // then PUT each of bundle.files to the matching published.upload.files entry
  * ```
  */
-export function buildSkillBundle(files: SkillFile[]): SkillBundle {
+export function buildSkillBundle(files: SkillFile[], options: BuildSkillBundleOptions = {}): SkillBundle {
   const collected = collectSkillFiles(files);
   validateArtifactSize(collected, (file) => file.bytes.byteLength);
 
@@ -86,5 +99,9 @@ export function buildSkillBundle(files: SkillFile[]): SkillBundle {
   const { name, ...document } = parseSkillDocument(new TextDecoder().decode(skillMd.bytes));
   const manifest = collected.map((file) => ({ path: file.path, size: file.bytes.byteLength }));
 
-  return { name, request: { ...document, files: manifest }, files: collected };
+  return {
+    name,
+    request: { ...document, ...(options.source ? { source: options.source } : {}), files: manifest },
+    files: collected,
+  };
 }
