@@ -15,11 +15,12 @@ export interface UpdateOptions {
 
 /** One Skill's outcome from an update. */
 export type UpdateOutcome =
-  | { name: string; status: "updated"; from: string; to: string }
+  | { name: string; status: "updated"; from: string | null; to: string }
   | { name: string; status: "restored"; to: string }
   | { name: string; status: "up-to-date" }
   | { name: string; status: "skipped"; reason: "modified" }
   | { name: string; status: "gone" }
+  | { name: string; status: "pending" }
   | { name: string; status: "error"; message: string };
 
 /** Narrows a lockfile's recorded Agent, which is a plain string on disk and may name an Agent this build no longer knows. */
@@ -42,9 +43,10 @@ async function reinstall(
   scope: Scope,
   installed: InstalledSkill,
 ): Promise<{ to: string }> {
+  const query = installed.entry.namespace ? `?namespace=${encodeURIComponent(installed.entry.namespace)}` : "";
   const skill = await registryFetch(
     client,
-    `/resources/skill/by-name/${encodeURIComponent(installed.name)}`,
+    `/resources/skill/by-name/${encodeURIComponent(installed.name)}${query}`,
     SkillSchema,
   );
   const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact?source=cli`);
@@ -63,6 +65,7 @@ async function reinstall(
 
   await recordInstall(deps, scope, client.registry, skill.name, {
     id: skill.id,
+    namespace: skill.namespace,
     registry_updated_at: skill.updated_at,
     content_hash: hashSkillFiles(files),
     installed_at: new Date().toISOString(),
@@ -101,7 +104,10 @@ async function reinstall(
  *
  * A Skill the Registry no longer has reads `gone` and is left installed —
  * deleting a User's files because an Admin deleted a row is not this
- * command's call to make.
+ * command's call to make. One installed straight from a repository whose
+ * Submission is still waiting reads `pending` and is left alone the same way;
+ * once approved it reads `outdated` and moves onto the Registry's copy like
+ * any other (ADR-0044).
  *
  * @example
  * ```ts
@@ -135,7 +141,9 @@ export async function runUpdate(deps: InstalledDeps, options: UpdateOptions): Pr
       continue;
     }
     if (skill.registryUpdatedAt === undefined) {
-      outcomes.push({ name: skill.name, status: "gone" });
+      // Installed from a repository and not yet approved: there is no
+      // Registry copy yet, which is not the same as one having been deleted.
+      outcomes.push({ name: skill.name, status: skill.entry.registry_updated_at === null ? "pending" : "gone" });
       continue;
     }
     // A `current` Skill that `--force` named is still current: forcing is

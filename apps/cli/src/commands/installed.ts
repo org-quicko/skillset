@@ -36,9 +36,10 @@ export function parseScopeFlag(value: string | undefined): Scope {
  * reading it as one would hide a broken Registry behind a clean listing.
  */
 function lookupThrough(client: RegistryClient): RegistryLookup {
-  return async (name) => {
+  return async (name, namespace) => {
     try {
-      const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(name)}`, SkillSchema);
+      const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
+      const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(name)}${query}`, SkillSchema);
       return skill.updated_at;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return undefined;

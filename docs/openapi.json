@@ -14,6 +14,10 @@
     { "name": "resources", "description": "Publishing, reading, searching, and retrieving Resources — Skills today (ADR-0026)" },
     { "name": "tags", "description": "The Tag catalog: listing it, and renaming a Tag" },
     {
+      "name": "submissions",
+      "description": "Resources installed straight from a repository and put forward for the Registry, until an Admin approves or rejects them (ADR-0044)"
+    },
+    {
       "name": "identity-providers",
       "description": "Configuring the Identity Providers a Registry offers on its login page (ADR-0015)"
     },
@@ -886,6 +890,125 @@
           "404": { "$ref": "#/components/responses/TagNotFound" },
           "409": {
             "description": "A different Tag already holds this name",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions": {
+      "get": {
+        "tags": ["submissions"],
+        "summary": "List pending Submissions",
+        "description": "Every pending Resource Submission, newest first. Requires at least the admin role — the same bar as deleting a Resource, since approving puts something in front of the whole team (ADR-0044).",
+        "responses": {
+          "200": {
+            "description": "The pending Submissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/ResourceSubmission" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may review Submissions",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions/{kind}/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Kind" }, { "$ref": "#/components/parameters/SkillName" }],
+      "put": {
+        "tags": ["submissions"],
+        "summary": "Submit a Resource for approval",
+        "description": "Puts a Resource installed straight from a repository forward for an Admin to approve (ADR-0044). Open to every signed-in role, reader included: submitting publishes nothing. Takes the same body as `PUT /resources/{kind}/{name}`, except that `source` is required — the Namespace is derived from it exactly as a publish derives it, so an approved Submission lands where a publish of the same Source would have.\n\nIdempotent by `(kind, namespace, name)`: submitting the same Resource again replaces the pending Submission and deletes its files before new upload targets are issued. Upload targets are one per declared file, in manifest order, as for publishing (ADR-0032). The Submission is never readable through `/resources`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "The same body `PUT /resources/{kind}/{name}` takes, with `source` required.",
+                "type": "object",
+                "required": ["description", "body", "source", "files"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Submission was recorded. Write its files to `upload` next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["submission", "upload"],
+                  "properties": {
+                    "submission": { "$ref": "#/components/schemas/ResourceSubmission" },
+                    "upload": { "$ref": "#/components/schemas/ArtifactUpload" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed validation, or `source` is missing (`source_required`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "409": {
+            "description": "The Resource is already in the Registry (`already_published`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions/{id}/approve": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "post": {
+        "tags": ["submissions"],
+        "summary": "Approve a Submission into the Registry",
+        "description": "Creates the Resource from the Submission, crediting whoever submitted it as the publisher, copies its files into the Resource's Artifact, and deletes the Submission. Requires at least the admin role (ADR-0044).",
+        "responses": {
+          "200": {
+            "description": "The Resource as it now reads",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may approve a Submission",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": {
+            "description": "No Submission by that id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "409": {
+            "description": "The Resource was published since (`already_published`), or none of its files were uploaded (`submission_incomplete`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions/{id}": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "delete": {
+        "tags": ["submissions"],
+        "summary": "Reject a Submission",
+        "description": "Discards the Submission and its files. Requires at least the admin role (ADR-0044).",
+        "responses": {
+          "204": { "description": "Rejected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may reject a Submission",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": {
+            "description": "No Submission by that id",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -1793,6 +1916,36 @@
           },
           "created_at": { "type": "string", "format": "date-time", "description": "When the grant was given — the consent's own timestamp." },
           "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ResourceSubmission": {
+        "type": "object",
+        "description": "A Resource installed straight from a repository, waiting on an Admin (ADR-0044). Not a Resource: nothing in `/resources` reads it.",
+        "required": [
+          "id",
+          "kind",
+          "namespace",
+          "name",
+          "description",
+          "body",
+          "source",
+          "allowed_tools",
+          "submitted_by_email",
+          "submitted_by_name",
+          "submitted_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "kind": { "type": "string", "example": "skill" },
+          "namespace": { "type": "string", "example": "anthropics/skills" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "body": { "type": "string" },
+          "source": { "type": "string", "example": "https://github.com/anthropics/skills" },
+          "allowed_tools": { "type": ["string", "null"] },
+          "submitted_by_email": { "type": "string", "format": "email" },
+          "submitted_by_name": { "type": "string" },
+          "submitted_at": { "type": "string", "format": "date-time" }
         }
       },
       "Error": {

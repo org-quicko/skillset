@@ -13,6 +13,7 @@ import { importsRoutes } from "./features/imports/imports.routes.js";
 import { integrationsRoutes } from "./features/integrations/integrations.routes.js";
 import { resourcesRoutes } from "./features/resources/resources.routes.js";
 import { setupRoutes } from "./features/setup/setup.routes.js";
+import { submissionsRoutes } from "./features/submissions/submissions.routes.js";
 import { tagsRoutes } from "./features/tags/tags.routes.js";
 import { usersRoutes } from "./features/users/users.routes.js";
 import { notFound, onError } from "./lib/errors.js";
@@ -129,6 +130,7 @@ function createApi(deps: AppDependencies) {
     .route("/imports", importsRoutes)
     .route("/users", usersRoutes)
     .route("/resources", resourcesRoutes)
+    .route("/submissions", submissionsRoutes)
     .route("/tags", tagsRoutes);
 
   // Registered before `app.route("/api", api)` below: Hono wraps a sub-app's

@@ -54,8 +54,10 @@ function knownAgent(recorded: string | null): AgentId | null {
  * whole inventory over one row.
  */
 function registryLookup(fetchImpl: typeof fetch, registry: string): RegistryLookup {
-  return async (name) => {
-    const res = await fetchImpl(new URL(`/api/resources/skill/by-name/${encodeURIComponent(name)}`, registry));
+  return async (name, namespace) => {
+    const url = new URL(`/api/resources/skill/by-name/${encodeURIComponent(name)}`, registry);
+    if (namespace) url.searchParams.set("namespace", namespace);
+    const res = await fetchImpl(url);
     if (res.status === 404) return undefined;
     if (!res.ok) throw new Error(`Could not read "${name}" from the Registry (status ${res.status}).`);
     return SkillSchema.parse(await res.json()).updated_at;
@@ -134,8 +136,12 @@ export async function updateSkills(
   const installed = await readInstalled(deps.ctx, deps.scope, registryLookup(deps.fetchImpl, deps.registry));
   const wanted = options.names?.length ? installed.filter((skill) => options.names?.includes(skill.name)) : installed;
 
+  // A Skill installed straight from a repository and not yet approved has no
+  // Registry copy to restore or refresh from (ADR-0044), so it is left alone.
   const writable = wanted.filter(
-    (skill) => skill.status === "outdated" || skill.status === "missing" || (skill.status === "modified" && options.force),
+    (skill) =>
+      !(skill.entry.registry_updated_at === null && skill.registryUpdatedAt === undefined) &&
+      (skill.status === "outdated" || skill.status === "missing" || (skill.status === "modified" && options.force)),
   );
   const refused = wanted
     .filter((skill) => skill.status === "modified" && !options.force)

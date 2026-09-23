@@ -39,6 +39,40 @@ import {
 import type { StorageAdapter } from "../../storage/types.js";
 
 /**
+ * The Namespace a Resource is named by, from the `source` it declared.
+ *
+ * @param source - The declared repository URL, or null for a publish
+ * straight to this Registry.
+ * @param publicUrl - This Registry's `PUBLIC_URL`, whose host names anything
+ * published straight here.
+ * @returns `owner/repo` for a repository URL, and this deployment's own host
+ * otherwise.
+ * @throws Error if `publicUrl` has no host usable as a Namespace.
+ *
+ * @remarks
+ * Derived from `source` rather than declared on its own, so the two cannot
+ * disagree — a Skill copied out of `github.com/a/b` has no way to claim it
+ * was named by `c/d`. A publisher still chooses it, by choosing what to
+ * declare as the Source (ADR-0041, ADR-0042). Shared by publishing and by
+ * Submissions (ADR-0044), so an approved Submission lands in exactly the
+ * Namespace a publish of the same Source would have.
+ *
+ * Unlike a Source, this is written into the row: a Namespace is half of a
+ * Resource's identity and is never resolved on read.
+ *
+ * @example
+ * ```ts
+ * namespaceForSource("https://github.com/anthropics/skills", publicUrl); // -> "anthropics/skills"
+ * namespaceForSource(null, "https://skills.quicko.com");                  // -> "skills.quicko.com"
+ * ```
+ */
+export function namespaceForSource(source: string | null, publicUrl: string): string {
+  if (!source) return registryNamespace(publicUrl);
+  const project = source.replace(/(\.git)?\/*$/, "").match(/([^/]+\/[^/]+)$/)?.[1];
+  return project ? project.toLowerCase() : registryNamespace(publicUrl);
+}
+
+/**
  * The wire's `published_by` is the Publisher object, not the column: the
  * email snapshot on the Resource row is always present, while the id and
  * names come from the User row and are null once that User has been removed
@@ -104,7 +138,7 @@ interface SkillSummary {
   installs: number;
 }
 
-interface SkillDetail extends SkillSummary {
+export interface SkillDetail extends SkillSummary {
   body: string;
 }
 
@@ -614,29 +648,6 @@ export class ResourcesService {
     return stored ?? reverseDomain(this.publicUrl);
   }
 
-  /**
-   * The Namespace a publish is named by, from the `source` it declared.
-   *
-   * @param source - The declared repository URL, or null for a publish
-   * straight to this Registry.
-   * @returns `owner/repo` for a repository URL, and this deployment's own host
-   * otherwise.
-   *
-   * @remarks
-   * Derived from `source` rather than declared on its own, so the two cannot
-   * disagree — a Skill copied out of `github.com/a/b` has no way to claim it
-   * was named by `c/d`. A publisher still chooses it, by choosing what to
-   * declare as the Source (ADR-0041, ADR-0042).
-   *
-   * Unlike `resolveSource`, this is written into the row: a Namespace is half
-   * of a Resource's identity and is never resolved on read.
-   */
-  private namespaceForPublish(source: string | null): string {
-    if (!source) return registryNamespace(this.publicUrl);
-    const project = source.replace(/(\.git)?\/*$/, "").match(/([^/]+\/[^/]+)$/)?.[1];
-    return project ? project.toLowerCase() : registryNamespace(this.publicUrl);
-  }
-
   private async readSkill(identity: SQL): Promise<SkillDetail> {
     const [skill] = await this.db
       .select(skillSelection)
@@ -724,7 +735,7 @@ export class ResourcesService {
     // Follows `source`, so a republish that clears an Import's origin also
     // moves the Skill into this Registry's own Namespace rather than leaving
     // it filed under a repository these bytes no longer come from.
-    const namespace = this.namespaceForPublish(source);
+    const namespace = namespaceForSource(source, this.publicUrl);
     const skillPayload: SkillPayload = {
       kind,
       license: input.license ?? null,

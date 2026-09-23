@@ -17,6 +17,7 @@ skillset login --registry <url>
 skillset search [query]      # what the team has published
 skillset info <name>         # read a Skill without installing it
 skillset install <name>      # install a Skill for a coding agent
+skillset install <url>       # install straight from a GitHub or GitLab folder
 skillset list                # what's installed here, and whether it's current
 skillset update [names...]   # re-download whatever the Registry has moved on from
 skillset remove <name>       # uninstall a Skill
@@ -45,6 +46,21 @@ skillset install pdf --namespace anthropics/skills
 
 A project holds one `.agents/skills/<name>`, so installing a Skill over one a *different* party
 named is refused; pass `--force` to replace it.
+
+## Installing from a repository
+
+```sh
+skillset install https://github.com/acme/skills/tree/main/pdf
+```
+
+The CLI clones just that folder with **your own git**, so any repository you can clone works —
+private ones included, over HTTPS or SSH, with whatever credentials git already has. It needs git
+on `PATH`, and the URL must name exactly one Skill.
+
+The Skill is recorded in `skillset-lock.json` with the repository it came from. If you are logged
+in, it is also submitted to the Registry for an Admin to approve (Settings → Submissions). Until
+then `skillset update` reports it as pending; once approved, `update` switches it to the
+Registry's copy.
 
 ## Publishing from a repository
 

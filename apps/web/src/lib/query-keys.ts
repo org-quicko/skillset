@@ -123,6 +123,9 @@ export function usersQueryKey(page: number) {
  */
 export const connectionsQueryKey = ["connections"] as const;
 
+/** Every pending Resource Submission — an Admin's view (ADR-0044). */
+export const submissionsQueryKey = ["submissions"] as const;
+
 /** Every configured Integration — an Admin's view. There is no public counterpart. */
 export const integrationsQueryKey = ["integrations"] as const;
 

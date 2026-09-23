@@ -12,8 +12,12 @@ export const LOCKFILE_NAME = "skillset-lock.json";
 
 /** What was installed for one Skill, and what it was installed from. */
 export interface LockfileEntry {
-  /** The Resource id, so a rename at the Registry is still resolvable. */
-  id: string;
+  /**
+   * The Resource id, so a rename at the Registry is still resolvable. `null`
+   * for a Skill installed straight from a repository, which has no Resource
+   * behind it until an Admin approves its Submission (ADR-0044).
+   */
+  id: string | null;
   /**
    * Which party named the Skill (ADR-0042) â€” half of what identifies it at the
    * Registry, and the only way to tell that the directory now holding `pdf` is
@@ -31,8 +35,18 @@ export interface LockfileEntry {
    * installed. Compared against the Registry's current value to decide
    * whether the installed copy is stale â€” there are no versions to compare
    * instead (ADR-0002).
+   *
+   * `null` for a Skill installed straight from a repository (ADR-0044). The
+   * first time the Registry reports one — its Submission was approved — the
+   * two differ, the Skill reads `outdated`, and `update` moves it onto the
+   * Registry's copy with nothing else to do.
    */
-  registry_updated_at: string;
+  registry_updated_at: string | null;
+  /**
+   * The repository a Skill was installed straight from, rather than from the
+   * Registry (ADR-0044). Absent for a Registry install.
+   */
+  source?: string;
   /** `sha256:<hex>` over the files as installed â€” see {@link hashSkillFiles}. */
   content_hash: string;
   installed_at: string;
@@ -288,8 +302,12 @@ export interface InstalledSkill {
  * CLI and the MCP server each already own a way to reach the Registry, and
  * neither should have to hand one to a module whose whole job is the
  * filesystem.
+ *
+ * `namespace` is the one the lockfile recorded, when it recorded one, so a
+ * Skill is looked up as the party that named it rather than by a bare name
+ * that might now resolve to someone else's (ADR-0042).
  */
-export type RegistryLookup = (name: string) => Promise<string | undefined>;
+export type RegistryLookup = (name: string, namespace: string | undefined) => Promise<string | undefined>;
 
 /**
  * Reads what is installed at `scope` and works out how each Skill stands.
@@ -334,7 +352,7 @@ export async function readInstalled(
       const { canonicalTarget } = resolveInstallTarget(ctx, name, scope, null);
       const [installedHash, registryUpdatedAt] = await Promise.all([
         hashInstalledSkill(canonicalTarget),
-        lookup ? lookup(name) : Promise.resolve(undefined),
+        lookup ? lookup(name, entry.namespace) : Promise.resolve(undefined),
       ]);
       return {
         name,

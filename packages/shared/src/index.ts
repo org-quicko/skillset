@@ -39,3 +39,4 @@ export * from "./connection.js";
 export * from "./integration.js";
 export * from "./repository.js";
 export * from "./namespace.js";
+export * from "./resource-submission.js";

@@ -49,7 +49,8 @@ function artifact(body: string): Uint8Array {
  */
 function stubRegistry(state: { updatedAt: string; body: string }) {
   return stubFetch((url) => {
-    if (url === `${REGISTRY}/api/resources/skill/by-name/code-review`) {
+    // With or without the `?namespace=` a lockfile-driven lookup adds.
+    if (url.split("?")[0] === `${REGISTRY}/api/resources/skill/by-name/code-review`) {
       return jsonResponse(200, fakeSkill(state.updatedAt));
     }
     if (url.startsWith(`${REGISTRY}/api/resources/skill-1/artifact`)) {

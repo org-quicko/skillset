@@ -8,6 +8,7 @@ import { ImportsService } from "./features/imports/imports.service.js";
 import { IntegrationsService } from "./features/integrations/integrations.service.js";
 import { ResourcesService } from "./features/resources/resources.service.js";
 import { SetupService } from "./features/setup/setup.service.js";
+import { SubmissionsService } from "./features/submissions/submissions.service.js";
 import { TagsService } from "./features/tags/tags.service.js";
 import { UsersService } from "./features/users/users.service.js";
 import type { Logger } from "./lib/logger.js";
@@ -36,6 +37,7 @@ export interface Services {
   analytics: AnalyticsService;
   tags: TagsService;
   resources: ResourcesService;
+  submissions: SubmissionsService;
   users: UsersService;
   setup: SetupService;
   identityProviders: IdentityProvidersService;
@@ -74,12 +76,15 @@ export function buildServices(deps: ServiceDependencies): Services {
   const integrations = new IntegrationsService(deps.db, deps.logger, keys);
   const connections = new ConnectionsService(deps.db, deps.betterAuthSecret, deps.logger, integrations);
 
+  const resources = new ResourcesService(deps.db, deps.storage, deps.logger, tags, analytics, deps.publicUrl);
+
   return {
     auth,
     authenticator: new Authenticator(deps.db, auth),
     analytics,
     tags,
-    resources: new ResourcesService(deps.db, deps.storage, deps.logger, tags, analytics, deps.publicUrl),
+    resources,
+    submissions: new SubmissionsService(deps.db, deps.storage, deps.logger, resources, deps.publicUrl),
     users: new UsersService(deps.db, deps.logger),
     setup: new SetupService(deps.db, deps.logger),
     identityProviders: new IdentityProvidersService(deps.db, deps.logger, keys),

@@ -17,15 +17,17 @@ const LOGO = [
 // other rather than in isolation.
 //
 // Each row carries the flags a reader would not think to look for — a
-// Namespace on `install`, and publishing from a URL at all. `publish --from`
-// gets a row of its own rather than a bracket on the one above: it takes no
-// path, so showing both in one line would suggest they combine.
+// Namespace on `install`, and installing or publishing from a URL at all.
+// `install <url>` and `publish --from` each get a row of their own rather than
+// a bracket on the one above: neither takes the other form's arguments, so
+// showing both in one line would suggest they combine.
 const COMMANDS: readonly (readonly [string, string])[] = [
   ["skillset login --registry <url> --token <token>", "Authenticate this machine against a Registry"],
   ["skillset whoami", "Show which Registry and identity are active"],
   ["skillset search [query] [--tag <name>]", "Search the Registry's catalog, or list all of it"],
   ["skillset info <name> [--files]", "Read a Skill without installing it"],
-  ["skillset install <name> [--namespace <ns>] [--agent <id>]", "Install a Skill for a coding Agent"],
+  ["skillset install <name> [--namespace <ns>] [--agent <id>]", "Install a Skill from the Registry for a coding Agent"],
+  ["skillset install <url> [--agent <id>]", "Install from a GitHub or GitLab folder with your git, and submit it for approval"],
   ["skillset list [--scope <scope>]", "Show what this project has installed, and whether it is current"],
   ["skillset update [names...] [--force]", "Re-download Skills the Registry has moved on from"],
   ["skillset remove <name>", "Uninstall a Skill from this project"],

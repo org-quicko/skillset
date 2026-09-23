@@ -200,8 +200,10 @@ program
 
 program
   .command("install")
-  .description("Download and install a Skill for a coding Agent.")
-  .argument("<name>", "The Skill's name")
+  .description(
+    "Download and install a Skill for a coding Agent — by name from the Registry, or from a GitHub or GitLab URL cloned with your own git credentials.",
+  )
+  .argument("<name>", "The Skill's name, or a repository URL naming one Skill's folder")
   .option("--namespace <ns>", "Which party named the Skill, when a bare name matches more than one")
   .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
   .option("--scope <scope>", "Install scope: project or user")
@@ -227,8 +229,14 @@ program
     if (jsonMode()) return emitJson(() => runInstall(deps, options));
 
     p.intro(label("install"));
+    const s = p.spinner();
+    const progress = {
+      start: (message: string) => s.start(message),
+      stop: (message: string) => s.stop(message),
+      fail: (message: string) => s.error(pc.red(message)),
+    };
     try {
-      const report = await runInstall(deps, options);
+      const report = await runInstall({ ...deps, progress }, options);
       p.log.success(`Installed ${pc.cyan(report.skillDirectory)}`);
       if (report.link.kind === "symlink") {
         p.log.message(pc.dim(`${report.agent}: symlinked ${report.link.path}`));
@@ -245,6 +253,16 @@ program
       if (report.alsoServes.length > 0) {
         const names = report.alsoServes.map((id) => getAgent(id).displayName).join(", ");
         p.log.message(pc.dim(`Also serves: ${names} — no need to run this again for them.`));
+      }
+      const submission = report.submission;
+      if (submission?.status === "submitted") {
+        p.log.info("Submitted to the Registry — an Admin can approve it from the web interface.");
+      } else if (submission?.status === "already-published") {
+        p.log.message(pc.dim("Already in the Registry — nothing to submit."));
+      } else if (submission?.status === "not-logged-in") {
+        p.log.warn("Not submitted to the Registry — run `skillset login` and install again to submit it.");
+      } else if (submission?.status === "failed") {
+        p.log.warn(`Installed, but not submitted to the Registry: ${submission.message}`);
       }
       p.outro("Done");
     } catch (error) {
@@ -333,6 +351,7 @@ program
         else if (outcome.status === "restored") p.log.success(`${pc.cyan(outcome.name)} restored — its files were missing`);
         else if (outcome.status === "up-to-date") p.log.message(pc.dim(`${outcome.name} already current`));
         else if (outcome.status === "gone") p.log.warn(`${outcome.name} is no longer on the Registry — left installed`);
+        else if (outcome.status === "pending") p.log.message(pc.dim(`${outcome.name} is waiting on an Admin's approval`));
         else if (outcome.status === "skipped") {
           p.log.warn(`${outcome.name} has local changes — pass --force to replace it`);
         } else p.log.error(`${pc.red(outcome.name)}: ${outcome.message}`);

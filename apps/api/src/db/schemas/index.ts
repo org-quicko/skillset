@@ -18,6 +18,7 @@ export * from "./resource";
 export * from "./resource-analytics";
 export * from "./resource-directory";
 export * from "./resource-install-event";
+export * from "./resource-submission";
 export * from "./resource-tag";
 export * from "./tag";
 export * from "./token";

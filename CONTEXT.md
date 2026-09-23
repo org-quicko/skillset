@@ -223,6 +223,18 @@ repository reaches the Registry from the CLI. An MCP Server is never Imported â€
 a `server.json` a writer pastes.
 _Avoid_: Sync, clone, pull, link
 
+**Submission**:
+A Resource someone installed straight from a repository with `skillset install <url>` and put
+forward for the Registry, waiting for an Admin to approve it into a Resource or reject it. The CLI
+clones it with the User's own git, so a private repository they can reach is in range. Any signed-in
+role may submit, because submitting publishes nothing. A Submission is not a Resource: nothing in
+the catalog reads, searches or installs one. It carries the `(kind, namespace, name)` it would have
+as a Resource, derived from its Source the same way a publish's is, and it lands there on approval,
+credited to whoever submitted it. Until then the User's lockfile records the Skill with its Source
+and no Registry revision. `update` treats it as pending, then moves it onto the Registry's copy
+once it has been approved (ADR-0044).
+_Avoid_: Request, proposal, draft, pending Resource
+
 **Source**:
 Where a Resource came from, as one value every read returns. An Imported Resource's Source is the
 **repository** URL it was copied out of â€” without the ref or the folder, so a monorepo's Skills
