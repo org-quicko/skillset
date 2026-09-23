@@ -15,6 +15,7 @@ import { runSearch } from "./commands/search.js";
 import { runUpdate } from "./commands/update.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveConfigPath } from "./config.js";
+import { isRepositoryUrl } from "@in-org-quicko/skillset-installer";
 import { emitJson, jsonMode, setJsonMode } from "./json.js";
 import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken } from "./ui.js";
 
@@ -121,14 +122,23 @@ program
 program
   .command("publish")
   .description(
-    "Publish the Skill at [path], or every Skill beneath it (defaults to the current directory). Pass --from to publish from a repository URL instead.",
+    "Publish a Skill to the Registry: from a path — one Skill's directory, or a directory holding several — " +
+      "or from a GitHub or GitLab URL, cloned with your own git credentials.",
   )
-  .argument("[path]", "Path to a Skill's directory, or a directory holding several. Ignored when --from is given")
-  .option("--from <url>", "Publish from a GitHub or GitLab URL — a repository, a tree at a ref, or a folder in one. Public projects only")
-  .option("--source <url>", "Record the repository these files came from, for publishing a checkout of a private one --from cannot reach")
+  .argument("[target]", "A path (default: the current directory), or a GitHub or GitLab URL — a repository, or a folder in one")
+  .option("--name <skill>", "Required with a URL: which Skill to publish, by the name in its SKILL.md")
   .option("--yes", "Skip confirming a publish of more than one Skill")
   .option("--json", JSON_FLAG)
-  .action(async (path: string | undefined, opts: { from?: string; source?: string; yes?: boolean }) => {
+  .addHelpText(
+    "after",
+    examples([
+      "skillset publish                      # whatever is in this directory",
+      "skillset publish ./skills --yes",
+      "skillset publish https://github.com/acme/skills --name pdf",
+    ]),
+  )
+  .action(async (target: string | undefined, opts: { name?: string; yes?: boolean }) => {
+    const options = { target, skillName: opts.name, yes: opts.yes };
     // Non-interactive, for the same reason as `install` — so a multi-Skill
     // publish under `--json` needs `--yes` rather than a confirmation nobody
     // is there to give.
@@ -142,7 +152,7 @@ program
         confirm: async () => false,
       };
       return emitJson(async () => {
-        const result = await runPublish(deps, { path, from: opts.from, source: opts.source, yes: opts.yes });
+        const result = await runPublish(deps, options);
         // A partly-failed batch resolves rather than throws, so the exit code
         // is set here — otherwise `--json` would report success for a run the
         // formatted output calls a failure.
@@ -153,7 +163,18 @@ program
 
     p.intro(label("publish"));
     const s = p.spinner();
-    s.start("Validating and uploading");
+    const uploading = "Validating and uploading";
+    // A URL's first slow step is the clone, which reports itself; the upload
+    // spinner takes over once it is done.
+    if (!(target && isRepositoryUrl(target))) s.start(uploading);
+    const progress = {
+      start: (message: string) => s.start(message),
+      stop: (message: string) => {
+        s.stop(message);
+        s.start(uploading);
+      },
+      fail: (message: string) => s.error(pc.red(message)),
+    };
     try {
       const result = await runPublish(
         {
@@ -168,11 +189,12 @@ program
           confirm: async (names) => {
             s.stop("Waiting for confirmation");
             const proceed = await promptConfirm(`Publish and replace ${names.length} Skills: ${names.join(", ")}?`);
-            s.start("Validating and uploading");
+            s.start(uploading);
             return proceed;
           },
+          progress,
         },
-        { path, from: opts.from, source: opts.source, yes: opts.yes },
+        options,
       );
 
       if (!Array.isArray(result)) {
@@ -198,19 +220,44 @@ program
     }
   });
 
+/** Formats a command's usage examples for the end of its `--help`. */
+function examples(lines: readonly string[]): string {
+  return `\nExamples:\n${lines.map((line) => `  $ ${line}`).join("\n")}`;
+}
+
+/** `install`'s flags as commander parses them. */
+interface InstallFlags {
+  name?: string;
+  namespace?: string;
+  agent?: string;
+  scope?: string;
+  copy?: boolean;
+  force?: boolean;
+}
+
 program
   .command("install")
   .description(
-    "Download and install a Skill for a coding Agent — by name from the Registry, or from a GitHub or GitLab URL cloned with your own git credentials.",
+    "Install a Skill for a coding Agent: by name from the Registry, or from a GitHub or GitLab URL, cloned with " +
+      "your own git credentials and submitted to the Registry for approval.",
   )
-  .argument("<name>", "The Skill's name, or a repository URL naming one Skill's folder")
+  .argument("<target>", "A Skill's name in the Registry, or a GitHub or GitLab URL — a repository, or a folder in one")
+  .option("--name <skill>", "Required with a URL: which Skill to install, by the name in its SKILL.md")
   .option("--namespace <ns>", "Which party named the Skill, when a bare name matches more than one")
   .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
   .option("--scope <scope>", "Install scope: project or user")
   .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
   .option("--force", "Replace an already-installed Skill that has local changes, or that a different party named")
   .option("--json", JSON_FLAG)
-  .action(async (name: string, opts: { namespace?: string; agent?: string; scope?: string; copy?: boolean; force?: boolean }) => {
+  .addHelpText(
+    "after",
+    examples([
+      "skillset install code-review",
+      "skillset install pdf --namespace anthropics/skills",
+      "skillset install https://github.com/anthropics/skills --name pdf",
+    ]),
+  )
+  .action(async (target: string, opts: InstallFlags) => {
     const deps = {
       fetch,
       configPath: resolveConfigPath(process.env),
@@ -225,7 +272,15 @@ program
       promptChoice,
       promptAgent,
     };
-    const options = { name, namespace: opts.namespace, agent: opts.agent, scope: opts.scope, copy: opts.copy, force: opts.force };
+    const options = {
+      name: target,
+      skillName: opts.name,
+      namespace: opts.namespace,
+      agent: opts.agent,
+      scope: opts.scope,
+      copy: opts.copy,
+      force: opts.force,
+    };
     if (jsonMode()) return emitJson(() => runInstall(deps, options));
 
     p.intro(label("install"));

@@ -216,10 +216,8 @@ not a link: nothing is ever re-read, and nothing syncs. What was published recor
 it came from as its Source, a historical note rather than a reference — nothing follows it
 (ADR-0041) — and that Source is what gives it its Namespace (ADR-0042). Either surface Imports, and
 they reach different repositories because they read as different parties: the web reads through the
-writer's Connection, so a private folder is in range, and the CLI reads the Git Provider itself,
-anonymously, so a public one is (ADR-0043). Publishing a checkout with its repository declared is
-not an Import — the bytes came off a disk — but it records the same Source and is how a private
-repository reaches the Registry from the CLI. An MCP Server is never Imported — its whole payload is
+writer's Connection, and the CLI clones with the writer's own git — so each reaches whatever that
+party can (ADR-0044). An MCP Server is never Imported — its whole payload is
 a `server.json` a writer pastes.
 _Avoid_: Sync, clone, pull, link
 

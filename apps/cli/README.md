@@ -17,12 +17,12 @@ skillset login --registry <url>
 skillset search [query]      # what the team has published
 skillset info <name>         # read a Skill without installing it
 skillset install <name>      # install a Skill for a coding agent
-skillset install <url>       # install straight from a GitHub or GitLab folder
+skillset install <url> --name <skill>  # install straight from a GitHub or GitLab repo
 skillset list                # what's installed here, and whether it's current
 skillset update [names...]   # re-download whatever the Registry has moved on from
 skillset remove <name>       # uninstall a Skill
 skillset publish [path]      # defaults to the current directory
-skillset publish --from <url>  # publish from a public GitHub or GitLab URL
+skillset publish <url> --name <skill>  # publish straight from a GitHub or GitLab repo
 skillset whoami
 ```
 
@@ -50,12 +50,13 @@ named is refused; pass `--force` to replace it.
 ## Installing from a repository
 
 ```sh
-skillset install https://github.com/acme/skills/tree/main/pdf
+skillset install https://github.com/acme/skills --name pdf
+skillset install https://github.com/acme/skills/tree/main/pdf --name pdf   # or a folder in it
 ```
 
-The CLI clones just that folder with **your own git**, so any repository you can clone works —
+The CLI clones the repository with **your own git**, so any repository you can clone works —
 private ones included, over HTTPS or SSH, with whatever credentials git already has. It needs git
-on `PATH`, and the URL must name exactly one Skill.
+on `PATH`. `--name` is required: it picks the Skill by the `name` in its `SKILL.md`.
 
 The Skill is recorded in `skillset-lock.json` with the repository it came from. If you are logged
 in, it is also submitted to the Registry for an Admin to approve (Settings → Submissions). Until
@@ -65,18 +66,13 @@ Registry's copy.
 ## Publishing from a repository
 
 ```sh
-skillset publish --from https://github.com/acme/skills/tree/main/pdf
-skillset publish --from https://github.com/acme/skills   # every Skill in it
+skillset publish https://github.com/acme/skills --name pdf
 ```
 
-The CLI reads the repository itself, anonymously — **public projects only**, and no credential is
-sent. Each Skill records the repository as its Source, and takes its Namespace from it.
-
-For a private repository, clone it and declare where it came from:
-
-```sh
-skillset publish ./skills/pdf --source https://github.com/acme/private
-```
+Exactly like `install <url>`: the repository is cloned with **your own git**, so private ones
+work too, and `--name` (required) picks the Skill by the `name` in its `SKILL.md`. The Skill
+records the repository as its Source, and takes its Namespace from it. A Skill published from a
+path records no Source and reads as published straight to your Registry.
 
 Credentials are stored per-Registry after `login`. For CI, skip `login` and set:
 

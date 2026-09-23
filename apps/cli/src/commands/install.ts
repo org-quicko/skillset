@@ -1,17 +1,11 @@
 import { existsSync } from "node:fs";
-import { relative, sep } from "node:path";
 import {
   AGENT_IDS,
   AGENTS,
-  buildSkillBundle,
   detectAgent,
   extractSkillFiles,
-  importNamespace,
   nonUniversalProjectSkillsDirs,
-  parseSkillSourceUrl,
   ResourceSubmittedSchema,
-  resourceSourceUrl,
-  SKILL_FILE_NAME,
   SkillSchema,
   type AgentId,
   type Scope,
@@ -22,18 +16,19 @@ import {
   hashInstalledSkill,
   hashSkillFiles,
   installSkill,
+  isRepositoryUrl,
   readLockfile,
+  readRepositorySkill,
   resolveInstallTarget,
   resolveLockfilePath,
   type LockfileEntry,
+  type Progress,
   type WriteReport,
 } from "@in-org-quicko/skillset-installer";
 import { recordInstall } from "./installed.js";
 import { rethrowValidationError } from "../errors.js";
-import { checkoutFolder } from "../git.js";
 import { ApiError, downloadBinary, registryFetch, uploadArtifactFiles, type RegistryClient } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
-import { discoverSkillDirectories, walkSkillDirectory } from "../skill-directory.js";
 
 /** One selectable Agent, as the searchable prompt shows it. */
 export interface AgentChoice {
@@ -61,19 +56,18 @@ export interface InstallDeps extends SessionDeps {
    * the clone and the Submission. Absent under `--json`, where nothing may
    * write to stdout but the result. Always stopped before a prompt runs.
    */
-  progress?: InstallProgress;
+  progress?: Progress;
 }
 
-/** A spinner, or anything shaped like one. */
-export interface InstallProgress {
-  start(message: string): void;
-  stop(message: string): void;
-  fail(message: string): void;
-}
 
 export interface InstallOptions {
   /** A Skill's name at the Registry, or a GitHub or GitLab URL to install straight from (ADR-0044). */
   name: string;
+  /**
+   * `--name`: which Skill to install out of a URL, by the name its `SKILL.md`
+   * declares. Required with a URL, refused without one.
+   */
+  skillName?: string;
   /** Which party named it, when a bare name matches more than one (ADR-0042). */
   namespace?: string;
   agent?: string;
@@ -207,11 +201,6 @@ interface ResolvedSkill {
   bundle?: SkillBundle;
 }
 
-/** Whether an `install` argument is a URL to install straight from, rather than a name at the Registry. */
-export function isRepositoryUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value.trim());
-}
-
 /**
  * Resolves and downloads a Skill from the Registry.
  *
@@ -248,59 +237,19 @@ async function resolveFromRegistry(client: RegistryClient, options: InstallOptio
   };
 }
 
-/**
- * Reads the one Skill a Git Provider URL points at, through a checkout made
- * with the User's own git.
- *
- * @throws Error when the URL is not a Git Provider's, when git cannot clone
- * it, when the folder holds no Skill or more than one, or naming the rule when
- * the Skill fails the same checks a publish holds it to.
- *
- * @remarks
- * One Skill, not a batch: a URL naming a folder of several is refused with
- * each one's path, so the User picks which rather than getting all of them.
- */
-async function resolveFromUrl(url: string, env: NodeJS.ProcessEnv, progress?: InstallProgress): Promise<ResolvedSkill> {
-  const location = parseSkillSourceUrl(url);
-  const repository = resourceSourceUrl(location);
-  progress?.start(`Cloning ${repository}`);
-  let checkout;
-  try {
-    checkout = await checkoutFolder(location, env);
-  } catch (error) {
-    progress?.fail(`Could not clone ${repository}`);
-    throw error;
-  }
-  progress?.stop(`Cloned ${repository}`);
-
-  let files: SkillFile[];
-  try {
-    if (!existsSync(checkout.folder)) throw new Error(`${url}: that folder does not exist at this ref.`);
-    const directories = await discoverSkillDirectories(checkout.folder);
-    const [only] = directories;
-    if (!only) throw new Error(`No Skill found at ${url} — looked for a directory holding ${SKILL_FILE_NAME}.`);
-    if (directories.length > 1) {
-      const paths = directories.map((dir) => relative(checkout.folder, dir).split(sep).join("/"));
-      throw new Error(`${url} holds ${directories.length} Skills — point at one of: ${paths.join(", ")}.`);
-    }
-    files = await walkSkillDirectory(only);
-  } finally {
-    await checkout.cleanup();
-  }
-
-  const source = repository;
-  let bundle;
-  try {
-    bundle = buildSkillBundle(files, { source });
-  } catch (error) {
-    rethrowValidationError(error);
-  }
-
+/** Reads the named Skill out of a repository, recording it as from there rather than the Registry. */
+async function resolveFromUrl(
+  url: string,
+  env: NodeJS.ProcessEnv,
+  skillName: string,
+  progress?: Progress,
+): Promise<ResolvedSkill> {
+  const { bundle, namespace } = await readRepositorySkill(url, skillName, env, progress);
   return {
     name: bundle.name,
-    namespace: importNamespace(location),
+    namespace,
     files: bundle.files,
-    origin: { id: null, registry_updated_at: null, source },
+    origin: { id: null, registry_updated_at: null, source: bundle.request.source },
     bundle,
   };
 }
@@ -340,14 +289,15 @@ async function submitForApproval(client: RegistryClient, bundle: SkillBundle): P
  * @param deps - The fetch implementation, config-file path, environment, project root,
  * home directory, whether a terminal is attached, and how to prompt when a flag is missing.
  * @param options - The Skill's name or a repository URL, plus `--namespace`, `--agent`,
- * `--scope`, `--copy`, and `--force` when given.
+ * `--scope`, `--copy`, and `--force` when given, and `--name`, which a URL requires.
  * @returns Where the Skill's files were written, the Agent chosen, how its directory
  * was linked, and — for a URL — what became of submitting it for approval.
  * @throws Error when no Registry is configured; when `--scope` is missing and no terminal is
  * attached, so there is nothing to prompt and nothing to default to; when `--agent` or
- * `--scope` names something unknown; when `--namespace` is given with a URL; when git cannot
- * clone the URL or it does not name exactly one Skill; or, naming the rule, when the Skill
- * fails inspection.
+ * `--scope` names something unknown; when a URL is given without `--name` or with
+ * `--namespace`, or `--name` is given without a URL; when git cannot clone the URL, it holds
+ * no Skill, or `--name` matches none of its Skills; or, naming the rule, when the Skill fails
+ * inspection.
  * @throws ApiError when the Registry has no Skill by that name, or refuses the download.
  * @throws RegistryUnreachableError when the Registry cannot be reached.
  *
@@ -368,7 +318,7 @@ async function submitForApproval(client: RegistryClient, bundle: SkillBundle): P
  * @example
  * ```ts
  * await runInstall(deps, { name: "code-review", agent: "claude-code", scope: "project" });
- * await runInstall(deps, { name: "https://github.com/acme/skills/tree/main/pdf", scope: "project" });
+ * await runInstall(deps, { name: "https://github.com/acme/skills", skillName: "pdf", scope: "project" });
  * ```
  */
 export async function runInstall(deps: InstallDeps, options: InstallOptions): Promise<InstallReport> {
@@ -384,10 +334,17 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
   if (fromUrl && options.namespace) {
     throw new Error("--namespace names a Skill at the Registry; a URL already says which repository it came from.");
   }
+  if (fromUrl && !options.skillName) {
+    throw new Error("Pass --name with a URL to say which Skill to install — the name in its SKILL.md.");
+  }
+  if (!fromUrl && options.skillName) {
+    throw new Error("--name picks a Skill out of a repository URL; to install from the Registry, pass the name itself.");
+  }
 
-  const skill = fromUrl
-    ? await resolveFromUrl(options.name, deps.env, deps.progress)
-    : await resolveFromRegistry(client, options);
+  const skill =
+    fromUrl && options.skillName
+      ? await resolveFromUrl(options.name, deps.env, options.skillName, deps.progress)
+      : await resolveFromRegistry(client, options);
 
   // Agent before Scope, matching the ticket's prompt order. With no flag and no terminal, the
   // Agent is detected rather than prompted for.

@@ -1,22 +1,24 @@
 import { relative, resolve, sep } from "node:path";
 import {
   buildSkillBundle,
-  discoverSkillFolders,
-  parseSkillSourceUrl,
-  readSkillFolder,
-  resourceSourceUrl,
   SKILL_DISCOVERY_MAX_DEPTH,
   SKILL_FILE_NAME,
-  SkillFolderError,
   SkillPublishedSchema,
   SkillValidationError,
   type SkillBundle,
 } from "@in-org-quicko/skillset-shared";
 import { rethrowValidationError } from "../errors.js";
-import { discoverSkillDirectories, holdsSkillFile, walkSkillDirectory } from "../skill-directory.js";
 import { ApiError, registryFetch, uploadArtifactFiles, type RegistryClient } from "../http.js";
 import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 import { describeError } from "../ui.js";
+import {
+  discoverSkillDirectories,
+  holdsSkillFile,
+  isRepositoryUrl,
+  readRepositorySkill,
+  walkSkillDirectory,
+  type Progress,
+} from "@in-org-quicko/skillset-installer";
 
 export interface PublishDeps extends SessionDeps {
   cwd: string;
@@ -28,23 +30,21 @@ export interface PublishDeps extends SessionDeps {
    * `options.yes` was not passed.
    */
   confirm(names: readonly string[]): Promise<boolean>;
+  /** Reports the clone a URL publish starts with. Absent under `--json`. */
+  progress?: Progress;
 }
 
 export interface PublishOptions {
-  /** Defaults to `deps.cwd` — "the directory I am working in" (story 15). */
-  path?: string;
   /**
-   * `--from`: a GitHub or GitLab URL to read the Skill out of instead of the
-   * disk. Public projects only — see {@link bundlesFromUrl}.
+   * A path — defaulting to `deps.cwd`, "the directory I am working in" (story
+   * 15) — or a GitHub or GitLab URL to clone the Skill out of (ADR-0044).
    */
-  from?: string;
+  target?: string;
   /**
-   * `--source`: the repository these bytes came from, recorded as the
-   * Resource's Source (ADR-0041) and, through it, its Namespace (ADR-0042).
-   * For publishing a checkout of a private repository, which `--from` cannot
-   * reach. Ignored when `--from` is given, which knows its own.
+   * `--name`: which Skill to publish out of a URL, by the name its `SKILL.md`
+   * declares. Required with a URL, refused with a path.
    */
-  source?: string;
+  skillName?: string;
   /** Skips the multi-Skill confirmation prompt, for automation with no terminal attached. */
   yes?: boolean;
 }
@@ -97,11 +97,11 @@ async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bu
  * @throws Error naming the rule and the offending directory when a Skill fails the local
  * check — thrown before the Registry is contacted at all.
  */
-async function buildBundles(root: string, directories: readonly string[], source?: string): Promise<SkillBundle[]> {
+async function buildBundles(root: string, directories: readonly string[]): Promise<SkillBundle[]> {
   const bundles: SkillBundle[] = [];
   for (const directory of directories) {
     try {
-      bundles.push(buildSkillBundle(await walkSkillDirectory(directory), { source }));
+      bundles.push(buildSkillBundle(await walkSkillDirectory(directory)));
     } catch (error) {
       if (!(error instanceof SkillValidationError)) throw error;
       const label = relative(root, directory).split(sep).join("/") || ".";
@@ -109,68 +109,6 @@ async function buildBundles(root: string, directories: readonly string[], source
     }
   }
   return bundles;
-}
-
-/**
- * Reads every Skill a Git Provider URL points at, ready to publish.
- *
- * @param url - A GitHub or GitLab URL: a repository, a tree at a ref, or a
- * folder within one.
- * @param fetchImpl - The `fetch` to reach the provider with, injected the same way
- * every other request in this CLI is.
- * @returns Each Skill found, and whether the URL named exactly one — true when
- * the folder it points at is itself a Skill, mirroring what publishing a path
- * that holds a `SKILL.md` means.
- * @throws Error naming what went wrong when the project or folder cannot be
- * read: it does not exist, it is private, or the provider rate-limited the
- * walk.
- * @throws Error when the URL is not one of a Git Provider this Registry reads.
- *
- * @remarks
- * Anonymous, so **public projects only** (ADR-0010). This deliberately does not
- * go through the Registry's `/imports` routes: those exist because a browser
- * cannot read a repository, and they need a Connection granted through one —
- * neither of which applies to a CLI running on a machine that can already read
- * the repository itself. A private one is published by checking it out and
- * passing `--source`, which costs no credential handling here at all.
- *
- * Each Skill records the **repository** it came from as its Source, without the
- * ref or the folder (ADR-0041), so a monorepo's Skills share one — and through
- * it, one Namespace (ADR-0042).
- */
-async function bundlesFromUrl(url: string, fetchImpl: typeof fetch): Promise<{ bundles: SkillBundle[]; single: boolean }> {
-  const location = parseSkillSourceUrl(url);
-
-  let found;
-  try {
-    found = await discoverSkillFolders(location, { fetch: fetchImpl });
-  } catch (error) {
-    if (!(error instanceof SkillFolderError)) throw error;
-    throw new Error(`${url}: ${error.message}`);
-  }
-
-  if (found.length === 0) {
-    throw new Error(`No Skill found at ${url} — looked for a directory holding ${SKILL_FILE_NAME}.`);
-  }
-
-  const bundles: SkillBundle[] = [];
-  for (const folder of found) {
-    let files;
-    try {
-      files = await readSkillFolder(folder, { fetch: fetchImpl });
-    } catch (error) {
-      if (!(error instanceof SkillFolderError)) throw error;
-      throw new Error(`${folder.path || "/"}: ${error.message}`);
-    }
-    try {
-      bundles.push(buildSkillBundle(files, { source: resourceSourceUrl(folder) }));
-    } catch (error) {
-      if (!(error instanceof SkillValidationError)) throw error;
-      throw new Error(`${folder.path || "/"}: ${error.rule}: ${error.message}${error.field ? ` (${error.field})` : ""}`);
-    }
-  }
-
-  return { bundles, single: found.length === 1 && found[0]?.path === location.path };
 }
 
 /**
@@ -207,67 +145,72 @@ async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], op
 }
 
 /**
- * Publishes the Skill at a directory, or every Skill beneath it.
+ * Publishes the Skill at a directory, or every Skill beneath it — or one named
+ * Skill out of a GitHub or GitLab repository.
  *
  * @param deps - The fetch implementation, config-file path, environment, the directory a
- * relative `options.path` is resolved against, whether a terminal is attached, and how to
- * confirm publishing more than one Skill.
- * @param options - Where to look; defaults to `deps.cwd`. `from` reads from a Git Provider
- * URL instead of the disk, and records the repository as each Skill's Source. `source`
- * declares that repository by hand, for a checkout of one `from` cannot reach. `yes` skips
- * the confirmation before publishing more than one Skill, for automation with no terminal
- * attached.
- * @returns The published Skill's name, id, and publish timestamp, when `options.path` (or
- * `deps.cwd`) itself holds a `SKILL.md` — publishing that one Skill exactly as before. When
- * it does not, every Skill found beneath it up to `SKILL_DISCOVERY_MAX_DEPTH` levels deep is
- * published instead, and the outcome of each is returned individually rather than thrown: a
- * publish failure part-way through does not stop the rest from being attempted or reported.
+ * relative path is resolved against, whether a terminal is attached, how to confirm
+ * publishing more than one Skill, and how to report the clone a URL starts with.
+ * @param options - `target`, a path (default `deps.cwd`) or a repository URL; `skillName`
+ * (`--name`), which Skill to publish out of a URL; and `yes`, which skips the confirmation
+ * before publishing more than one Skill, for automation with no terminal attached.
+ * @returns The published Skill's name, id, and publish timestamp for a URL, or for a path
+ * that itself holds a `SKILL.md`. For any other path, every Skill found beneath it up to
+ * `SKILL_DISCOVERY_MAX_DEPTH` levels deep is published, and the outcome of each is returned
+ * individually rather than thrown: a failure part-way through does not stop the rest.
+ * @throws Error when a URL is given without `--name`, or `--name` with a path.
  * @throws Error naming the rule and the offending directory when a Skill fails the local
- * check — thrown before the Registry is contacted at all — or when no Skill is found at all.
+ * check — thrown before the Registry is contacted — or when no Skill is found at all.
+ * @throws Error with git's own message when a URL cannot be cloned, or naming every Skill
+ * found when none there declares `--name`.
  * @throws Error explaining how to authenticate when no Registry and Token are configured.
  * @throws Error when publishing more than one Skill needs confirmation and none can be
  * given — no terminal is attached and `--yes` was not passed — or when the User declines.
- * @throws Error about permissions when the Registry answers 403 for the single-Skill case,
+ * @throws Error about permissions when the Registry answers 403 for a single-Skill publish,
  * so a reader's Token is refused with a reason rather than a generic failure; and about the
- * Token itself on 401. A multi-Skill publish reports the same wording per Skill instead of
- * throwing it.
+ * Token itself on 401. A multi-Skill publish reports the same wording per Skill instead.
  * @throws ApiError for any other refusal, and `RegistryUnreachableError` when neither the
- * Registry nor storage can be reached — again, only for the single-Skill case.
+ * Registry nor storage can be reached — again, only for a single-Skill publish.
  *
  * @remarks
  * Every Skill is validated locally with the same shared rules the API applies before the
  * Registry is contacted for any of them (ADR-0001's upload comes after).
  *
+ * A URL is cloned with the User's own git, the same way `install` clones one, so any
+ * repository they can clone publishes — private ones included — and the repository is
+ * recorded as the Skill's Source and, through it, its Namespace (ADR-0041, ADR-0042,
+ * ADR-0044). A path records no Source: the Skill reads as published straight here.
+ *
  * @example
  * ```ts
- * const { name, id } = await runPublish(deps, { path: "./skills/code-review" }) as PublishResult;
- * ```
- * @example
- * ```ts
- * const outcomes = await runPublish(deps, { path: "./skills", yes: true }) as PublishOutcome[];
+ * const { name, id } = await runPublish(deps, { target: "./skills/code-review" }) as PublishResult;
+ * const outcomes = await runPublish(deps, { target: "./skills", yes: true }) as PublishOutcome[];
+ * await runPublish(deps, { target: "https://github.com/acme/skills", skillName: "pdf" });
  * ```
  */
 export async function runPublish(deps: PublishDeps, options: PublishOptions): Promise<PublishResult | PublishOutcome[]> {
-  // A URL replaces the disk entirely, so no path is resolved and nothing under
-  // `deps.cwd` is read. The two shapes of answer are the same as the local
-  // ones, and for the same reason: naming one Skill returns that Skill, and
-  // naming somewhere Skills live reports each of them.
-  if (options.from) {
-    const { bundles, single } = await bundlesFromUrl(options.from, deps.fetch);
-    if (single) {
-      const [only] = bundles;
-      if (!only) throw new Error(`No Skill found at ${options.from}.`);
-      return publishBundle(await openAuthenticatedClient(deps), deps.fetch, only);
-    }
-    return publishAll(deps, bundles, options);
+  const url = options.target !== undefined && isRepositoryUrl(options.target) ? options.target : null;
+  if (url && !options.skillName) {
+    throw new Error("Pass --name with a URL to say which Skill to publish — the name in its SKILL.md.");
+  }
+  if (!url && options.skillName) {
+    throw new Error("--name picks a Skill out of a repository URL; a path already says which Skill to publish.");
   }
 
-  const targetPath = options.path ? resolve(deps.cwd, options.path) : deps.cwd;
+  if (url && options.skillName) {
+    // Authenticated before cloning: a writer who is not logged in should hear
+    // that before waiting on a clone that was never going to be published.
+    const client = await openAuthenticatedClient(deps);
+    const { bundle } = await readRepositorySkill(url, options.skillName, deps.env, deps.progress);
+    return publishBundle(client, deps.fetch, bundle);
+  }
+
+  const targetPath = options.target ? resolve(deps.cwd, options.target) : deps.cwd;
 
   if (await holdsSkillFile(targetPath)) {
     let bundle;
     try {
-      bundle = buildSkillBundle(await walkSkillDirectory(targetPath), { source: options.source });
+      bundle = buildSkillBundle(await walkSkillDirectory(targetPath));
     } catch (error) {
       rethrowValidationError(error);
     }
@@ -281,5 +224,5 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
     );
   }
 
-  return publishAll(deps, await buildBundles(targetPath, directories, options.source), options);
+  return publishAll(deps, await buildBundles(targetPath, directories), options);
 }

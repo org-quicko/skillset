@@ -4,7 +4,7 @@
   "display_name": "Skill Registry",
   "version": "1.0.0",
   "description": "MCP server for searching, installing, and publishing Skills on a Skillset Registry.",
-  "long_description": "Search a team's self-hosted Skillset Registry, install Skills into this project for the detected Agent, and publish a Skill you authored back to the Registry. Reads need no credential; publishing needs a writer Token.",
+  "long_description": "Search a team's self-hosted Skillset Registry, install Skills into this project for the detected Agent, and publish a Skill to the Registry, from this project or from a repository you can clone. Reads need no credential; publishing needs a writer Token.",
   "author": {
     "name": "Quicko"
   },

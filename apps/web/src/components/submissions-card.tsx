@@ -114,7 +114,7 @@ export function SubmissionsCard() {
       <div className="flex flex-col gap-1">
         <h2 className="text-sm font-medium">Submissions</h2>
         <p className="max-w-2xl text-xs text-muted-foreground">
-          Skills your team installed from a repository with <code>skillset install &lt;url&gt;</code>, waiting for
+          Skills your team installed from a repository with <code>skillset install &lt;url&gt; --name &lt;skill&gt;</code>, waiting for
           you to add them to the Registry.
         </p>
       </div>

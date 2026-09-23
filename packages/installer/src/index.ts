@@ -392,3 +392,15 @@ export {
   type RegistryLookup,
   type SkillStatus,
 } from "./lockfile.js";
+
+export {
+  checkoutFolder,
+  discoverSkillDirectories,
+  holdsSkillFile,
+  isRepositoryUrl,
+  readRepositorySkill,
+  walkSkillDirectory,
+  type Checkout,
+  type Progress,
+  type RepositorySkill,
+} from "./repository.js";

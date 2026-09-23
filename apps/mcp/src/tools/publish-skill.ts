@@ -1,16 +1,15 @@
-import { access, readdir, readFile, realpath } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { realpath } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import {
   apiErrorFrom,
   buildSkillBundle,
   formatSkillValidationError,
-  isExcludedPath,
   SKILL_FILE_NAME,
   SkillPublishedSchema,
   SkillValidationError,
   type SkillBundle,
-  type SkillFile,
 } from "@in-org-quicko/skillset-shared";
+import { holdsSkillFile, readRepositorySkill, walkSkillDirectory } from "@in-org-quicko/skillset-installer";
 
 export interface PublishSkillDeps {
   fetchImpl: typeof fetch;
@@ -19,12 +18,26 @@ export interface PublishSkillDeps {
   token: string;
   /** Resolves a relative `path` against — the directory the server was started in. */
   cwd: string;
+  /** The environment git runs under for a `url`, so the User's own credentials apply (ADR-0044). */
+  env: NodeJS.ProcessEnv;
+}
+
+/** Where to publish from: a directory in this project, or one named Skill in a repository. */
+export interface PublishSkillInput {
+  /** A directory inside the project holding the Skill's own `SKILL.md`. */
+  path?: string;
+  /** A GitHub or GitLab URL — a repository, or a folder in one. */
+  url?: string;
+  /** Which Skill to publish out of `url`, by the name its `SKILL.md` declares. Required with `url`. */
+  name?: string;
 }
 
 export interface PublishSkillResult {
   name: string;
   id: string;
   published_at: string;
+  /** The repository it was published from, or `null` for a directory in this project. */
+  source: string | null;
   /** Every file that left this machine, and what they came to — see `publishSkill`. */
   files: { path: string; size: number }[];
   total_bytes: number;
@@ -79,44 +92,6 @@ async function containedPath(cwd: string, path: string | undefined): Promise<str
     );
   }
   return target;
-}
-
-/** Reads every file under `root`, skipping whatever `isExcludedPath` (shared) would exclude anyway. */
-async function walkSkillDirectory(root: string, dir: string = root): Promise<SkillFile[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: SkillFile[] = [];
-
-  for (const entry of entries) {
-    const absolutePath = join(dir, entry.name);
-    const relativePath = relative(root, absolutePath).split(sep).join("/");
-    if (isExcludedPath(relativePath)) continue;
-
-    if (entry.isDirectory()) {
-      files.push(...(await walkSkillDirectory(root, absolutePath)));
-    } else if (entry.isFile()) {
-      files.push({ path: relativePath, bytes: await readFile(absolutePath) });
-    }
-  }
-
-  return files;
-}
-
-/**
- * Whether `dir` itself holds a `SKILL.md` — the mark of a Skill's own root.
- *
- * @remarks
- * Only a missing file reads as `false`. Anything else `access` throws — a permission error, a
- * broken symlink — is a real problem with `dir` and is rethrown rather than silently reading as
- * "not a Skill".
- */
-async function holdsSkillFile(dir: string): Promise<boolean> {
-  try {
-    await access(join(dir, SKILL_FILE_NAME));
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 /** Uploads one file of the Artifact straight to its presigned destination (ADR-0001, ADR-0032). */
@@ -184,24 +159,30 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
     name: published.skill.name,
     id: published.skill.id,
     published_at: published.skill.published_at,
+    source: bundle.request.source ?? null,
     files: bundle.files.map((file) => ({ path: file.path, size: file.bytes.byteLength })),
     total_bytes: bundle.files.reduce((total, file) => total + file.bytes.byteLength, 0),
   };
 }
 
 /**
- * Publishes the Skill at a directory to the Registry.
+ * Publishes a Skill to the Registry — the one at a directory in this project,
+ * or one named Skill out of a GitHub or GitLab repository.
  *
- * @param deps - The injected `fetch`, the Registry's URL, the writer's Token, and the
- * directory a relative `path` is resolved against.
- * @param path - Where the Skill lives, relative to `deps.cwd`; defaults to `deps.cwd` itself.
- * Refused if it resolves outside `deps.cwd` (ISSUE-12).
- * @returns The published Skill's name, id, publish timestamp, and the list of files that were
- * uploaded with their sizes — so whoever is reading the Agent's output can see what left the
- * machine rather than having to trust that it was what they meant.
- * @throws Error naming `path` if it resolves outside `deps.cwd`, or if no directory is there.
- * @throws Error naming the directory when it holds no `SKILL.md` at its root — this tool
- * publishes exactly the Skill at `path`, not a discovery walk over several.
+ * @param deps - The injected `fetch`, the Registry's URL, the writer's Token, the directory a
+ * relative `path` is resolved against, and the environment git runs under for a `url`.
+ * @param input - Either `path`, relative to `deps.cwd` and defaulting to it; or `url` with
+ * `name`, the name the Skill's `SKILL.md` declares. `path` and `url` never combine.
+ * @returns The published Skill's name, id, publish timestamp, the repository it came from
+ * when there was one, and the list of files that were uploaded with their sizes — so
+ * whoever is reading the Agent's output can see what left the machine rather than having
+ * to trust that it was what they meant.
+ * @throws Error when both `path` and `url` are given, `url` is given without `name`, or
+ * `name` without `url`.
+ * @throws Error naming `path` if it resolves outside `deps.cwd`, if no directory is there,
+ * or if it holds no `SKILL.md` at its root — this tool publishes exactly one Skill.
+ * @throws Error with git's own message when `url` cannot be cloned, or naming every Skill
+ * found when none there declares `name`.
  * @throws Error naming the rule broken when the Skill fails the local validation rules
  * (`buildSkillBundle`) — thrown before the Registry is contacted at all.
  * @throws Error about the writer role when the Registry answers 403, and about the Token
@@ -210,21 +191,40 @@ async function publishBundle(deps: PublishSkillDeps, bundle: SkillBundle): Promi
  *
  * @remarks
  * Republishing an already-published name overwrites it completely rather than versioning
- * (ADR-0002) — the same behaviour `skillset publish` has always had, now available without a
- * terminal. Unlike `search_skills` and `install_skills`, this sends an `authorization` header:
+ * (ADR-0002) — the same behaviour `skillset publish` has, available without a terminal.
+ * Unlike `search_skills` and `install_skills`, this sends an `authorization` header:
  * publishing needs a writer Token, which is why it is the one tool this server is configured
  * with a Token for at all (ADR-0035).
  *
+ * A `url` is cloned with the User's own git exactly as `skillset publish <url> --name` clones
+ * it, and the repository is recorded as the Skill's Source and, through it, its Namespace
+ * (ADR-0044). That reaches private repositories the User can clone, which is the point — and
+ * why `name` is required, so the model has to say which Skill it means rather than having one
+ * chosen for it. A `path` stays confined to the project (ISSUE-12).
+ *
  * @example
  * ```ts
- * const { name, id } = await publishSkill(
- *   { fetchImpl: fetch, registry: "https://registry.example", token, cwd: process.cwd() },
- *   "./skills/code-review",
- * );
+ * const deps = { fetchImpl: fetch, registry, token, cwd: process.cwd(), env: process.env };
+ * await publishSkill(deps, { path: "./skills/code-review" });
+ * await publishSkill(deps, { url: "https://github.com/acme/skills", name: "pdf" });
  * ```
  */
-export async function publishSkill(deps: PublishSkillDeps, path?: string): Promise<PublishSkillResult> {
-  const targetPath = await containedPath(deps.cwd, path);
+export async function publishSkill(deps: PublishSkillDeps, input: PublishSkillInput = {}): Promise<PublishSkillResult> {
+  if (input.url && input.path !== undefined) {
+    throw new Error("Pass either path or url, not both.");
+  }
+  if (input.url && !input.name) {
+    throw new Error("Pass name with url to say which Skill to publish — the name in its SKILL.md.");
+  }
+  if (!input.url && input.name) {
+    throw new Error("name picks a Skill out of a url; a path already says which Skill to publish.");
+  }
+  if (input.url && input.name) {
+    const { bundle } = await readRepositorySkill(input.url, input.name, deps.env);
+    return publishBundle(deps, bundle);
+  }
+
+  const targetPath = await containedPath(deps.cwd, input.path);
 
   if (!(await holdsSkillFile(targetPath))) {
     throw new Error(`No ${SKILL_FILE_NAME} found at "${targetPath}" — point path at the Skill's own directory.`);

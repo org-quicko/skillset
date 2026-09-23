@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
@@ -65,7 +66,7 @@ function storagePath(url: string): string {
 }
 
 function baseDeps(overrides: Partial<PublishSkillDeps> & Pick<PublishSkillDeps, "fetchImpl" | "cwd">): PublishSkillDeps {
-  return { registry: REGISTRY, token: "writer-token", ...overrides };
+  return { registry: REGISTRY, token: "writer-token", env: {}, ...overrides };
 }
 
 /**
@@ -86,7 +87,7 @@ describe("publishSkill stays inside the project", () => {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
 
       const escape = relative(project, outside).split(sep).join("/");
-      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), escape)).rejects.toThrow(
+      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), { path: escape })).rejects.toThrow(
         /outside this project/,
       );
       expect(calls).toHaveLength(0);
@@ -102,7 +103,7 @@ describe("publishSkill stays inside the project", () => {
     try {
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
 
-      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), outside)).rejects.toThrow(
+      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), { path: outside })).rejects.toThrow(
         /outside this project/,
       );
       expect(calls).toHaveLength(0);
@@ -119,7 +120,7 @@ describe("publishSkill stays inside the project", () => {
       await symlink(outside, join(project, "skills"), "dir");
       const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
 
-      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), "skills")).rejects.toThrow(
+      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), { path: "skills" })).rejects.toThrow(
         /outside this project/,
       );
       expect(calls).toHaveLength(0);
@@ -137,7 +138,7 @@ describe("publishSkill stays inside the project", () => {
     const project = await mkdtemp(join(tmpdir(), "skillset-mcp-contained-"));
     try {
       const { fetch: fetchImpl } = stubFetch(() => jsonResponse(200, {}));
-      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), "skills/nope")).rejects.toThrow(
+      await expect(publishSkill(baseDeps({ fetchImpl, cwd: project }), { path: "skills/nope" })).rejects.toThrow(
         /No directory at "skills\/nope"/,
       );
     } finally {
@@ -201,6 +202,7 @@ describe("publishSkill", () => {
         name: "code-review",
         id: "skill-1",
         published_at: published.skill.published_at,
+        source: null,
         // Reported back so whoever reads the Agent's output can see what left
         // the machine (ISSUE-12).
         // In the order they were uploaded, which is the bundle's own order.
@@ -238,7 +240,7 @@ describe("publishSkill", () => {
         throw new Error(`Unexpected request to ${url}`);
       });
 
-      const result = await publishSkill(baseDeps({ fetchImpl, cwd: root }), "./skills/code-review");
+      const result = await publishSkill(baseDeps({ fetchImpl, cwd: root }), { path: "./skills/code-review" });
 
       expect(result.name).toBe("code-review");
     } finally {
@@ -272,5 +274,89 @@ describe("publishSkill", () => {
     } finally {
       await rm(skillDir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Publishing from a repository clones it with the User's own git, exactly as
+ * `skillset publish <url> --name` does (ADR-0044). A bare repository on disk
+ * stands in for GitHub through an `insteadOf` rewrite, so the real clone runs
+ * and nothing touches the network.
+ */
+describe("publishSkill from a url", () => {
+  const REPO_URL = "https://github.com/acme/skills";
+  let remotes: string;
+  let env: NodeJS.ProcessEnv;
+
+  beforeAll(async () => {
+    remotes = await mkdtemp(join(tmpdir(), "skillset-mcp-remotes-"));
+    const work = join(remotes, "work");
+    await mkdir(join(work, "skills", "review"), { recursive: true });
+    await writeFile(join(work, "skills", "review", "SKILL.md"), SKILL_MD);
+    const run = (args: string[], cwd: string) => execFileSync("git", args, { cwd, stdio: "pipe" });
+    run(["init", "--quiet", "--initial-branch=main"], work);
+    run(["add", "."], work);
+    run(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "skills"], work);
+    await mkdir(join(remotes, "acme"), { recursive: true });
+    run(["clone", "--quiet", "--bare", work, join(remotes, "acme", "skills.git")], remotes);
+    env = {
+      ...process.env,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: `url.file:///${remotes.replaceAll("\\", "/")}/.insteadOf`,
+      GIT_CONFIG_VALUE_0: "https://github.com/",
+    };
+  });
+
+  afterAll(async () => {
+    await rm(remotes, { recursive: true, force: true });
+  });
+
+  function stubRegistry() {
+    return stubFetch((url, init) => {
+      if (url === `${REGISTRY}/api/resources/skill/code-review`) {
+        return jsonResponse(200, { ...fakePublished(), upload: uploadFor(init?.body) });
+      }
+      if (isStorageUrl(url)) return new Response(null, { status: 200 });
+      throw new Error(`Unexpected request to ${url}`);
+    });
+  }
+
+  it("publishes the Skill name picks, recording the repository as its Source", async () => {
+    const { fetch: fetchImpl, calls } = stubRegistry();
+
+    const result = await publishSkill(baseDeps({ fetchImpl, cwd: remotes, env }), { url: REPO_URL, name: "code-review" });
+
+    expect(result.source).toBe(REPO_URL);
+    const put = calls.find((call) => call.url === `${REGISTRY}/api/resources/skill/code-review`);
+    expect((JSON.parse(String(put?.init?.body)) as { source?: string }).source).toBe(REPO_URL);
+  });
+
+  it("requires name with url, before cloning or contacting the Registry", async () => {
+    const { fetch: fetchImpl, calls } = stubRegistry();
+
+    await expect(publishSkill(baseDeps({ fetchImpl, cwd: remotes, env }), { url: REPO_URL })).rejects.toThrow(
+      /Pass name with url/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("names every Skill it found when name matches none", async () => {
+    const { fetch: fetchImpl } = stubRegistry();
+
+    await expect(
+      publishSkill(baseDeps({ fetchImpl, cwd: remotes, env }), { url: REPO_URL, name: "pdf" }),
+    ).rejects.toThrow("found: code-review.");
+  });
+
+  it("refuses path and url together, and name without url", async () => {
+    const { fetch: fetchImpl, calls } = stubRegistry();
+
+    await expect(
+      publishSkill(baseDeps({ fetchImpl, cwd: remotes, env }), { url: REPO_URL, name: "code-review", path: "." }),
+    ).rejects.toThrow(/either path or url/);
+    await expect(publishSkill(baseDeps({ fetchImpl, cwd: remotes, env }), { name: "code-review" })).rejects.toThrow(
+      /name picks a Skill out of a url/,
+    );
+    expect(calls).toEqual([]);
   });
 });

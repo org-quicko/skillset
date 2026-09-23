@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "registry": "https://expire-gothic-delouse.ngrok-free.dev/",
+  "skills": {
+    "apidog-api-testing": {
+      "id": null,
+      "registry_updated_at": null,
+      "source": "https://github.com/company-quicko/company-quicko-skills",
+      "namespace": "company-quicko/company-quicko-skills",
+      "content_hash": "sha256:f8ec892cf4bee5b1c819f5b61290a757da363255f97112667abf7aa1d23f25c2",
+      "installed_at": "2026-09-23T08:10:47.751Z",
+      "agent": "claude-code"
+    },
+    "ask-matt": {
+      "id": null,
+      "registry_updated_at": null,
+      "source": "https://github.com/mattpocock/skills",
+      "namespace": "mattpocock/skills",
+      "content_hash": "sha256:d6e7982a6e701d56361ea9b973cba52f95ed7a53de29015a87a1aa3b0c7bb718",
+      "installed_at": "2026-09-23T08:25:14.284Z",
+      "agent": "amp"
+    },
+    "domain-modeling": {
+      "id": null,
+      "registry_updated_at": null,
+      "source": "https://github.com/mattpocock/skills",
+      "namespace": "mattpocock/skills",
+      "content_hash": "sha256:a7cca39507629a301ef0743eaea620c7229197079aae3b0beffc4d8784a27c55",
+      "installed_at": "2026-09-23T08:26:22.395Z",
+      "agent": "amp"
+    },
+    "shadcn": {
+      "id": null,
+      "registry_updated_at": null,
+      "source": "https://github.com/shadcn-ui/ui",
+      "namespace": "shadcn-ui/ui",
+      "content_hash": "sha256:5f94dd6762cf1d45a0bb1fbb2e9d371a8c02935a8f65da7c437cc2f4a399a1dc",
+      "installed_at": "2026-09-23T08:24:11.387Z",
+      "agent": "claude-code"
+    },
+    "write-adapters": {
+      "id": "01a0c2b9-0d76-71e4-811c-c633af1401e6",
+      "namespace": "expire-gothic-delouse.ngrok-free.dev",
+      "registry_updated_at": "2026-09-21T06:48:22.645Z",
+      "content_hash": "sha256:e3bc6cf7a9f49e396c1d02ba542eeb05a7a6bba6589b734949fc5b20517adc78",
+      "installed_at": "2026-09-23T07:16:16.025Z",
+      "agent": "claude-code"
+    }
+  }
+}

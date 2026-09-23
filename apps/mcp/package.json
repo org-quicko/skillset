@@ -22,6 +22,7 @@
     "build": "bun run src/build.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test",
+    "discovery": "bun run src/write-discovery.ts",
     "package:mcpb": "bun run build && bunx @anthropic-ai/mcpb pack . skillset-mcp.mcpb"
   },
   "devDependencies": {

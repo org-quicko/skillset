@@ -43,7 +43,8 @@ const SERVER_INSTRUCTIONS =
   "catalog. installed_skills, update_skills and remove_skills are about this project: what it " +
   "currently uses, and whether each copy is current, outdated, or locally edited.\n\n" +
   "Then use install_skills with the exact names search_skills returned to install them, and publish_skill " +
-  "to share a Skill authored in this project back to the Registry.";
+  "to share a Skill with the Registry: one authored in this project, or one from a GitHub or GitLab " +
+  "repository the user names.";
 
 const SearchSkillsInputSchema = {
   query: z
@@ -98,7 +99,22 @@ const PublishSkillInputSchema = {
     .optional()
     .describe(
       "Directory holding the Skill's own SKILL.md, relative to the project root. Defaults to the project root " +
-        "itself. Must be the Skill's own directory, not a folder containing several Skills.",
+        "itself. Must be the Skill's own directory, not a folder containing several Skills. Omit when passing `url`.",
+    ),
+  url: z
+    .string()
+    .optional()
+    .describe(
+      "A GitHub or GitLab URL to publish from instead of this project — a repository, or a folder in one. " +
+        "Cloned with the User's own git credentials, so private repositories they can clone work. Requires `name`.",
+    ),
+  name: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "With `url`, and required with it: which Skill to publish, by the `name` in its SKILL.md frontmatter. " +
+        "If it matches none, the error lists every Skill the repository holds.",
     ),
 };
 
@@ -190,6 +206,7 @@ const PublishSkillOutputSchema = {
   name: z.string(),
   id: z.string(),
   published_at: z.string(),
+  source: z.string().nullable(),
   files: z.array(z.object({ path: z.string(), size: z.number() })),
   total_bytes: z.number(),
 };
@@ -365,10 +382,12 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
     {
       title: "Publish a Skill",
       description:
-        "Publish a Skill from this project to your team's shared Skillset Registry, so install_skills can install " +
-        "it for everyone else. Use this when the user asks to publish, share, or push a Skill they authored to " +
-        "the Registry. Pass `path` to the directory holding that Skill's own SKILL.md (defaults to the project " +
-        "root). Republishing an existing name overwrites it completely — there is no versioning. Requires a " +
+        "Publish a Skill to your team's shared Skillset Registry, so install_skills can install it for everyone " +
+        "else. Use this when the user asks to publish, share, or push a Skill to the Registry. Either pass `path` " +
+        "to the directory in this project holding that Skill's own SKILL.md (defaults to the project root), or " +
+        "pass `url` — a GitHub or GitLab repository or folder — together with `name`, the Skill's name from its " +
+        "SKILL.md, to publish it straight from that repository. Only publish a repository the user named. " +
+        "Republishing an existing name overwrites it completely — there is no versioning. Requires a " +
         "writer Token to be configured on this server (--token or SKILLSET_TOKEN); if none is configured, this " +
         "tool fails naming that as the reason rather than attempting the request.",
       annotations: {
@@ -378,8 +397,8 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
       inputSchema: PublishSkillInputSchema,
       outputSchema: PublishSkillOutputSchema,
     },
-    async ({ path }) => {
-      logger.debug(`publish_skill path=${path ?? "(project root)"}`);
+    async ({ path, url, name }) => {
+      logger.debug(`publish_skill ${url ? `url=${url} name=${name ?? "(none)"}` : `path=${path ?? "(project root)"}`}`);
       // Returned as an explicit `isError` result rather than thrown: a thrown Error still
       // reaches the caller as one (the SDK wraps it), but the message below is written for
       // the User, not the Agent — "restart this server" is an instruction only a person
@@ -400,7 +419,10 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
         };
       }
       try {
-        const result = await publishSkill({ fetchImpl, registry: config.registry, token: config.token, cwd: ctx.cwd }, path);
+        const result = await publishSkill(
+          { fetchImpl, registry: config.registry, token: config.token, cwd: ctx.cwd, env: ctx.env },
+          { path, url, name },
+        );
         return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: { ...result } };
       } catch (error) {
         return {

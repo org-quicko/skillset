@@ -1,0 +1,1090 @@
+{
+  "name": "skillset-mcp",
+  "title": "Skillset Skill Catalog",
+  "description": "MCP server for searching, installing, and publishing Skills on a Skillset Registry.",
+  "instructions": "Skillset is this team's remote Skill Registry. It is a network service, and its contents are NOT part of your built-in Skill catalog, your bundled/plugin Skills, or anything on this filesystem — you cannot see, list, or name a single Skill in it without calling search_skills.\n\nWhenever the user asks about Skills — whether one exists, to find/search/browse/list Skills, to add or install one, or describes a capability a Skill might cover — call search_skills FIRST, on every such request. Do this even when your own Skill catalog appears to already answer it: the two catalogs are different sets, and the team's Registry is the authoritative one here. Consulting your built-in catalog instead of calling search_skills is always a mistake, and answering \"no such Skill exists\" without having called search_skills is always wrong.\n\nThe Registry and this project are two different sets of Skills, and there is a tool for each. search_skills and read_skill are about the Registry: what the team has published, and what one of those Skills actually says. read_skill shows a Skill without installing it, so never install one merely to find out what it does, and call search_skills with no query at all to see the whole catalog. installed_skills, update_skills and remove_skills are about this project: what it currently uses, and whether each copy is current, outdated, or locally edited.\n\nThen use install_skills with the exact names search_skills returned to install them, and publish_skill to share a Skill with the Registry: one authored in this project, or one from a GitHub or GitLab repository the user names.",
+  "distribution": {
+    "npx": {
+      "package": "@in-org-quicko/skillset-mcp",
+      "command": "npx @in-org-quicko/skillset-mcp"
+    },
+    "mcpb": {
+      "description": "A single-file bundle for a host that installs an MCP server that way, e.g. Claude Desktop.",
+      "url": "/mcp.mcpb"
+    }
+  },
+  "transport": "stdio",
+  "remote": false,
+  "tools": [
+    {
+      "name": "search_skills",
+      "title": "Search Skillset Skills",
+      "description": "Search this team's REMOTE Skill Registry over the network. Its Skills are a different set from your built-in Skill catalog and from any Skill on this filesystem, and none of them are visible to you until this tool returns them. ALWAYS call this tool when the user asks whether a Skill exists, asks to find/search/locate/list a Skill, mentions Skillset or the Registry, or describes a capability that may have a Skill — including when your own catalog looks like it already answers, because it is a different catalog. Never substitute your built-in Skill catalog for this search, and never report that no Skill exists without having called this tool. Search by the user's task or exact Skill name, such as `adapter`, `write-adapters`, `review pull requests`, or `write changelogs`. Call this before calling install_skills so you have the exact Registry name. Read-only; installs and modifies nothing. Returns matching Skill names and descriptions, with optional tag and result-limit filters, and a `next_cursor` to page past the cap when the catalog holds more than fit in one page. Each result also carries `allowed_tools` — what that Skill claims the right to reach once loaded. Say what it names before installing a Skill that sets it: installing is what grants it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "A task description or an exact Skill name to find in the shared Skillset catalog. Examples: `adapter`, `write-adapters`, `review pull requests`, or `write changelogs`. OMIT THIS to list the whole catalog, which is how you answer `what Skills do we have?`.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Optional Tag NAME to narrow the search, e.g. `testing`. Not an id — names are what the Registry shows.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional maximum number of matching Skills to return per page.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "cursor": {
+            "description": "Opaque pagination token from a previous search_skills call's `next_cursor`. Omit for the first page — past the first page, a catalog larger than `limit` is otherwise unreachable.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "updated_at": {
+                  "type": "string"
+                },
+                "installs": {
+                  "type": "number"
+                },
+                "allowed_tools": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "tags",
+                "updated_at",
+                "installs",
+                "allowed_tools",
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "number"
+          },
+          "page_size": {
+            "type": "number"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "results",
+          "total",
+          "truncated",
+          "page",
+          "page_size",
+          "next_cursor"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "install_skills",
+      "title": "Install Skills",
+      "description": "Install one or more Agent Skills from your team's remote Skill Registry into this project, writing each into the directory your Agent loads Skills from (detected automatically — you don't supply a path or an agent name). Use this when the user asks to add, install, or set up a Skill; pass the exact Skill names returned by search_skills. Installs several at once, and one bad name doesn't stop the rest. Returns the detected Agent, where each Skill was written, and each Skill's SKILL.md so it's usable immediately. Set overwrite only when the user has explicitly asked to update or replace a Skill that's already installed. A Skill that is already installed comes back as `refused` with an `installed` field saying how that copy stands: `current` means it already matches the Registry and there is nothing to do; `outdated` means the Registry has moved on, so update_skills is the right call; `modified` or `untracked` means overwriting may discard someone's edits — say so and ask before retrying with overwrite.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "The Skill names to install, exactly as the Registry reports them (see search_skills)."
+          },
+          "overwrite": {
+            "description": "Replace an already-installed Skill completely. Only set this when the User has explicitly asked to update or replace it — never on a routine install.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "names"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "detection": {
+            "type": "object",
+            "properties": {
+              "agentId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "step": {
+                "type": "string",
+                "enum": [
+                  "override",
+                  "client-identity",
+                  "environment",
+                  "project-directory",
+                  "canonical-fallback"
+                ]
+              }
+            },
+            "required": [
+              "agentId",
+              "step"
+            ],
+            "additionalProperties": false
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "installed"
+                    },
+                    "skillDirectory": {
+                      "type": "string"
+                    },
+                    "link": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "canonical"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "symlink"
+                            },
+                            "path": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "copy"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "symlink-failed"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "alsoServes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skillMdBody": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "skillDirectory",
+                    "link",
+                    "alsoServes",
+                    "skillMdBody",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "fallback"
+                    },
+                    "artifactLocation": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "properties": {
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "size"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "files"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "intendedDirectory": {
+                      "type": "string"
+                    },
+                    "skillMdBody": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "artifactLocation",
+                    "manifest",
+                    "intendedDirectory",
+                    "skillMdBody"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "refused"
+                    },
+                    "existing": {
+                      "type": "string"
+                    },
+                    "installed": {
+                      "type": "string",
+                      "enum": [
+                        "current",
+                        "outdated",
+                        "modified",
+                        "untracked"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "existing",
+                    "installed"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "error"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "detection",
+          "outcomes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "publish_skill",
+      "title": "Publish a Skill",
+      "description": "Publish a Skill to your team's shared Skillset Registry, so install_skills can install it for everyone else. Use this when the user asks to publish, share, or push a Skill to the Registry. Either pass `path` to the directory in this project holding that Skill's own SKILL.md (defaults to the project root), or pass `url` — a GitHub or GitLab repository or folder — together with `name`, the Skill's name from its SKILL.md, to publish it straight from that repository. Only publish a repository the user named. Republishing an existing name overwrites it completely — there is no versioning. Requires a writer Token to be configured on this server (--token or SKILLSET_TOKEN); if none is configured, this tool fails naming that as the reason rather than attempting the request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Directory holding the Skill's own SKILL.md, relative to the project root. Defaults to the project root itself. Must be the Skill's own directory, not a folder containing several Skills. Omit when passing `url`.",
+            "type": "string"
+          },
+          "url": {
+            "description": "A GitHub or GitLab URL to publish from instead of this project — a repository, or a folder in one. Cloned with the User's own git credentials, so private repositories they can clone work. Requires `name`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "With `url`, and required with it: which Skill to publish, by the `name` in its SKILL.md frontmatter. If it matches none, the error lists every Skill the repository holds.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "path",
+                "size"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total_bytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "id",
+          "published_at",
+          "source",
+          "files",
+          "total_bytes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "read_skill",
+      "title": "Read a Skill",
+      "description": "Read one Skill from the Registry WITHOUT installing it: its full SKILL.md body, its Tags, when it was last updated, and every file it ships. Use this whenever you need to know what a Skill actually does, how it works, or whether it fits - reviewing a candidate before installing, answering a question about a Skill, or comparing two. Never call install_skills merely to find out what a Skill contains; that writes to the user's project, and this does not. Pass the exact name search_skills reported. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Skill's name, exactly as search_skills reported it."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "updated_at": {
+                "type": "string"
+              },
+              "installs": {
+                "type": "number"
+              },
+              "license": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "compatibility": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "allowed_tools": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "size"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "name",
+              "description",
+              "body",
+              "tags",
+              "updated_at",
+              "installs",
+              "license",
+              "compatibility",
+              "allowed_tools",
+              "source",
+              "files"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "installed_skills",
+      "title": "List Installed Skills",
+      "description": "List the Skills installed in THIS project and how each stands: `current`, `outdated` (the Registry has a newer version), `modified` (someone edited the installed copy) or `missing` (its files are gone). This is the local inventory, not the Registry's catalog - use search_skills for that. Call this before update_skills or remove_skills so you act on what is actually here, and whenever the user asks what Skills this project uses or whether anything is out of date. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "current",
+                    "outdated",
+                    "modified",
+                    "missing"
+                  ]
+                },
+                "directory": {
+                  "type": "string"
+                },
+                "installed_at": {
+                  "type": "string"
+                },
+                "registry_updated_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "status",
+                "directory",
+                "installed_at",
+                "registry_updated_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "skills"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "update_skills",
+      "title": "Update Installed Skills",
+      "description": "Re-download installed Skills the Registry has moved on from, replacing this project's copies. Omit `names` to update everything that has fallen behind. A Skill whose installed copy has local edits is SKIPPED and reported as refused, because an update cannot be undone - tell the user what was skipped and only pass `force` if they ask for those edits to be discarded. Use this when the user asks to update, refresh, or upgrade Skills.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "description": "The installed Skills to update. Omit to update every one this project has fallen behind on.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "force": {
+            "description": "Update a Skill even though its installed copy has local edits, discarding them. Only set this when the User has been told about the edits and asked for them to be discarded.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "detection": {
+            "type": "object",
+            "properties": {
+              "agentId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "step": {
+                "type": "string",
+                "enum": [
+                  "override",
+                  "client-identity",
+                  "environment",
+                  "project-directory",
+                  "canonical-fallback"
+                ]
+              }
+            },
+            "required": [
+              "agentId",
+              "step"
+            ],
+            "additionalProperties": false
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "installed"
+                    },
+                    "skillDirectory": {
+                      "type": "string"
+                    },
+                    "link": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "canonical"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "symlink"
+                            },
+                            "path": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "copy"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "symlink-failed"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "alsoServes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skillMdBody": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "skillDirectory",
+                    "link",
+                    "alsoServes",
+                    "skillMdBody",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "fallback"
+                    },
+                    "artifactLocation": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "properties": {
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "size"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "files"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "intendedDirectory": {
+                      "type": "string"
+                    },
+                    "skillMdBody": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "artifactLocation",
+                    "manifest",
+                    "intendedDirectory",
+                    "skillMdBody"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "refused"
+                    },
+                    "existing": {
+                      "type": "string"
+                    },
+                    "installed": {
+                      "type": "string",
+                      "enum": [
+                        "current",
+                        "outdated",
+                        "modified",
+                        "untracked"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "existing",
+                    "installed"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "error"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "detection",
+          "outcomes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "remove_skills",
+      "title": "Remove Installed Skills",
+      "description": "Uninstall Skills from this project: their files, this Agent's link to each, and their lockfile entries. Nothing is removed from the Registry - the team keeps the Skill, this project stops using it. Use this when the user asks to remove, uninstall, or stop using a Skill. Removing something that is not installed is harmless and reported as such.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "The installed Skills to uninstall from this project."
+          }
+        },
+        "required": [
+          "names"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "removed"
+                    },
+                    "skillDirectory": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "link": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "skillDirectory",
+                    "link"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "not-installed"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "error"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "outcomes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    }
+  ]
+}

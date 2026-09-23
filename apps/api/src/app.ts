@@ -4,6 +4,7 @@ import { serveStatic } from "hono/bun";
 import { csrf } from "hono/csrf";
 import { requestId } from "hono/request-id";
 import type postgres from "postgres";
+import mcpDiscovery from "../../../docs/mcp.json" with { type: "json" };
 import openapiSpec from "../../../docs/openapi.json" with { type: "json" };
 import type { Database } from "./db/client.js";
 import { authRoutes } from "./features/auth/auth.routes.js";
@@ -19,7 +20,6 @@ import { usersRoutes } from "./features/users/users.routes.js";
 import { notFound, onError } from "./lib/errors.js";
 import { createRouter } from "./lib/factory.js";
 import type { Logger } from "./lib/logger.js";
-import { MCP_MANIFEST } from "./lib/mcp-manifest.js";
 import { trustedOrigins } from "./lib/origins.js";
 import { clientIp } from "./middleware/client-ip.js";
 import { rateLimit } from "./middleware/rate-limit.js";
@@ -154,10 +154,13 @@ export type ApiType = ReturnType<typeof createApi>;
  * @remarks
  * `GET /openapi.json` serves `docs/openapi.json` verbatim — that file is the
  * hand-written wire contract, not generated from the routes below, so it and
- * the routes must be kept in sync by hand. `GET /mcp` serves a static
- * discovery document for the separate `@in-org-quicko/skillset-mcp` server;
- * it is descriptive only; this app never speaks the MCP protocol itself
- * (ADR-0033, {@link MCP_MANIFEST}). `GET /mcp.mcpb`, present only when
+ * the routes must be kept in sync by hand. `GET /mcp` serves `docs/mcp.json`,
+ * a discovery document for the separate `@in-org-quicko/skillset-mcp` server
+ * that is generated from that server itself (`apps/mcp/src/discovery.ts`) and
+ * held to it by a test there. It is descriptive only: this app never speaks
+ * the MCP protocol itself (ADR-0033). The server is stdio-only, run locally by
+ * each Agent, so the document says how to run it rather than being an
+ * endpoint to connect to. `GET /mcp.mcpb`, present only when
  * `deps.mcpbPath` is given, serves that server packed as a single file for a
  * host that installs one that way instead (ADR-0037).
  *
@@ -189,7 +192,7 @@ export function createApp(deps: AppDependencies): Hono {
   // that fallback would otherwise either 404 (an extension it can't find) or
   // swallow into the SPA shell (no extension).
   app.get("/openapi.json", (c) => c.json(openapiSpec));
-  app.get("/mcp", (c) => c.json(MCP_MANIFEST));
+  app.get("/mcp", (c) => c.json(mcpDiscovery));
   if (deps.mcpbPath) {
     const mcpbPath = deps.mcpbPath;
     app.get("/mcp.mcpb", (c) => {

@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
@@ -8,53 +7,22 @@ import { LOCKFILE_NAME, type LockfileEntry } from "@in-org-quicko/skillset-insta
 import { runInstall, type InstallDeps } from "../src/commands/install.js";
 import { runList } from "../src/commands/list.js";
 import { runUpdate } from "../src/commands/update.js";
+import { createSkillsRepository, gitEnv as fixtureEnv, PDF_MD, REPO_URL } from "./git-fixture.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
 
 const REGISTRY = "https://registry.example";
-const REPO_URL = "https://github.com/acme/skills";
-const PDF_MD = "---\nname: pdf\ndescription: Reads PDFs.\n---\nBody.\n";
 
 let remotes: string;
 
-/**
- * Builds `acme/skills` as a bare repository on disk, holding two Skills under
- * `skills/`. Every test then reaches it through `https://github.com/`, which
- * the environment below rewrites to this directory — so the real git clone
- * runs, and nothing touches the network.
- */
 beforeAll(async () => {
-  remotes = await mkdtemp(join(tmpdir(), "skillset-remotes-"));
-  const work = join(remotes, "work");
-  await mkdir(join(work, "skills", "pdf", "references"), { recursive: true });
-  await mkdir(join(work, "skills", "docx"), { recursive: true });
-  await writeFile(join(work, "skills", "pdf", "SKILL.md"), PDF_MD);
-  await writeFile(join(work, "skills", "pdf", "references", "forms.md"), "Forms.\n");
-  await writeFile(join(work, "skills", "docx", "SKILL.md"), "---\nname: docx\ndescription: Writes documents.\n---\nBody.\n");
-
-  const run = (args: string[], cwd: string) => execFileSync("git", args, { cwd, stdio: "pipe" });
-  run(["init", "--quiet", "--initial-branch=main"], work);
-  run(["add", "."], work);
-  run(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "skills"], work);
-  await mkdir(join(remotes, "acme"), { recursive: true });
-  run(["clone", "--quiet", "--bare", work, join(remotes, "acme", "skills.git")], remotes);
+  remotes = await createSkillsRepository();
 });
 
 afterAll(async () => {
   await rm(remotes, { recursive: true, force: true });
 });
 
-/** The process environment, with `https://github.com/` rewritten to the bare repositories above. */
-function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const base = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("SKILLSET_")));
-  return {
-    ...base,
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: `url.file:///${remotes.replaceAll("\\", "/")}/.insteadOf`,
-    GIT_CONFIG_VALUE_0: "https://github.com/",
-    SKILLSET_REGISTRY: REGISTRY,
-    ...extra,
-  };
-}
+const gitEnv = (extra: Record<string, string> = {}) => fixtureEnv(remotes, { SKILLSET_REGISTRY: REGISTRY, ...extra });
 
 function installDeps(fetchImpl: typeof fetch, cwd: string, env: NodeJS.ProcessEnv): InstallDeps {
   return {
@@ -119,6 +87,7 @@ describe("installing from a repository URL", () => {
 
       const report = await runInstall(installDeps(fetchImpl, cwd, gitEnv()), {
         name: `${REPO_URL}/tree/main/skills/pdf`,
+        skillName: "pdf",
         scope: "project",
         agent: "codex",
       });
@@ -172,6 +141,7 @@ describe("installing from a repository URL", () => {
 
       const report = await runInstall(installDeps(fetchImpl, cwd, gitEnv({ SKILLSET_TOKEN: "t" })), {
         name: `${REPO_URL}/tree/main/skills/pdf`,
+        skillName: "pdf",
         scope: "project",
         agent: "codex",
       });
@@ -194,6 +164,7 @@ describe("installing from a repository URL", () => {
 
       const report = await runInstall(installDeps(fetchImpl, cwd, gitEnv({ SKILLSET_TOKEN: "t" })), {
         name: `${REPO_URL}/tree/main/skills/pdf`,
+        skillName: "pdf",
         scope: "project",
         agent: "codex",
       });
@@ -203,13 +174,61 @@ describe("installing from a repository URL", () => {
     });
   });
 
-  it("refuses a URL holding more than one Skill, naming each", async () => {
+  it("picks one Skill out of a repository by the name its SKILL.md declares", async () => {
+    await withCwd(async (cwd) => {
+      const { fetch: fetchImpl } = stubFetch(() => notFound());
+
+      await runInstall(installDeps(fetchImpl, cwd, gitEnv()), {
+        name: REPO_URL,
+        skillName: "docx",
+        scope: "project",
+        agent: "codex",
+      });
+
+      expect(await readFile(join(cwd, ".agents", "skills", "docx", "SKILL.md"), "utf8")).toContain("name: docx");
+      expect(await lockEntry(cwd, "docx")).toMatchObject({ namespace: "acme/skills", source: REPO_URL });
+    });
+  });
+
+  it("requires --name with a URL, before cloning anything", async () => {
+    await withCwd(async (cwd) => {
+      const { fetch: fetchImpl } = stubFetch(() => notFound());
+      const events: string[] = [];
+      const progress = { start: (m: string) => events.push(m), stop: (m: string) => events.push(m), fail: (m: string) => events.push(m) };
+
+      await expect(
+        runInstall(
+          { ...installDeps(fetchImpl, cwd, gitEnv()), progress },
+          { name: `${REPO_URL}/tree/main/skills/pdf`, scope: "project", agent: "codex" },
+        ),
+      ).rejects.toThrow("Pass --name with a URL to say which Skill to install");
+      expect(events).toEqual([]);
+    });
+  });
+
+  it("names every Skill it found when --name matches none", async () => {
     await withCwd(async (cwd) => {
       const { fetch: fetchImpl } = stubFetch(() => notFound());
 
       await expect(
-        runInstall(installDeps(fetchImpl, cwd, gitEnv()), { name: REPO_URL, scope: "project", agent: "codex" }),
-      ).rejects.toThrow(/holds 2 Skills — point at one of: skills\/docx, skills\/pdf/);
+        runInstall(installDeps(fetchImpl, cwd, gitEnv()), {
+          name: REPO_URL,
+          skillName: "xlsx",
+          scope: "project",
+          agent: "codex",
+        }),
+      ).rejects.toThrow('No Skill named "xlsx" at https://github.com/acme/skills — found: docx, pdf.');
+    });
+  });
+
+  it("refuses --name without a URL", async () => {
+    await withCwd(async (cwd) => {
+      const { fetch: fetchImpl, calls } = stubFetch(() => notFound());
+
+      await expect(
+        runInstall(installDeps(fetchImpl, cwd, gitEnv()), { name: "pdf", skillName: "pdf", scope: "project" }),
+      ).rejects.toThrow(/--name picks a Skill out of a repository URL/);
+      expect(calls).toEqual([]);
     });
   });
 
@@ -220,6 +239,7 @@ describe("installing from a repository URL", () => {
       await expect(
         runInstall(installDeps(fetchImpl, cwd, gitEnv()), {
           name: "https://github.com/acme/missing",
+          skillName: "pdf",
           scope: "project",
           agent: "codex",
         }),
@@ -239,7 +259,7 @@ describe("installing from a repository URL", () => {
 
       await runInstall(
         { ...installDeps(fetchImpl, cwd, gitEnv()), progress },
-        { name: `${REPO_URL}/tree/main/skills/pdf`, scope: "project", agent: "codex" },
+        { name: `${REPO_URL}/tree/main/skills/pdf`, skillName: "pdf", scope: "project", agent: "codex" },
       );
       expect(events).toEqual([`start Cloning ${REPO_URL}`, `stop Cloned ${REPO_URL}`]);
 
@@ -247,7 +267,7 @@ describe("installing from a repository URL", () => {
       await expect(
         runInstall(
           { ...installDeps(fetchImpl, cwd, gitEnv()), progress },
-          { name: "https://github.com/acme/missing", scope: "project", agent: "codex" },
+          { name: "https://github.com/acme/missing", skillName: "pdf", scope: "project", agent: "codex" },
         ),
       ).rejects.toThrow();
       expect(events).toEqual(["start Cloning https://github.com/acme/missing", "fail Could not clone https://github.com/acme/missing"]);
@@ -261,6 +281,7 @@ describe("installing from a repository URL", () => {
       await expect(
         runInstall(installDeps(fetchImpl, cwd, gitEnv()), {
           name: `${REPO_URL}/tree/main/skills/pdf`,
+        skillName: "pdf",
           namespace: "acme/skills",
           scope: "project",
         }),
@@ -283,7 +304,7 @@ describe("a URL-installed Skill once its Submission is approved", () => {
         throw new Error(`Unexpected request to ${url}`);
       });
       const deps = installDeps(fetchImpl, cwd, gitEnv());
-      await runInstall(deps, { name: `${REPO_URL}/tree/main/skills/pdf`, scope: "project", agent: "codex" });
+      await runInstall(deps, { name: `${REPO_URL}/tree/main/skills/pdf`, skillName: "pdf", scope: "project", agent: "codex" });
 
       expect((await runList(deps, {})).skills[0]?.status).toBe("current");
       expect(await runUpdate(deps, {})).toEqual([{ name: "pdf", status: "pending" }]);

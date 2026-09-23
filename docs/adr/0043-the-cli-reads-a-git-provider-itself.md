@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted. Extends [ADR-0010](0010-github-fetch-is-client-side-and-public-only.md)'s anonymous path
+Superseded by [ADR-0044](0044-install-from-a-repository-with-the-users-git-and-submit-for-approval.md):
+the CLI now clones with the User's own git for both `install` and `publish`, and `--from` and
+`--source` are gone. Kept for the reasoning. Originally: accepted. Extends [ADR-0010](0010-github-fetch-is-client-side-and-public-only.md)'s anonymous path
 to a second caller. Does not reopen [ADR-0020](0020-private-repo-import-runs-server-side-as-the-caller.md)
 or [ADR-0024](0024-import-is-a-github-app-and-login-stays-an-oauth-app.md), which stay the web's
 path. Depends on [ADR-0041](0041-a-resource-records-where-it-came-from.md) for what gets recorded,
