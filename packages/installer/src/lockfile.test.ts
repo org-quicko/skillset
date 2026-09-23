@@ -27,7 +27,6 @@ function entry(overrides: Partial<LockfileEntry> = {}): LockfileEntry {
     registry_updated_at: "2026-09-21T06:48:42.469Z",
     content_hash: "sha256:abc",
     installed_at: "2026-09-21T07:00:00.000Z",
-    agent: "claude-code",
     ...overrides,
   };
 }

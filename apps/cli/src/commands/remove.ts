@@ -1,6 +1,6 @@
-import { AGENT_IDS, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
-import { readLockfile, removeSkill, resolveLockfilePath } from "@in-org-quicko/skillset-installer";
-import { forgetInstall, parseScopeFlag, type InstalledDeps } from "./installed.js";
+import type { Scope } from "@in-org-quicko/skillset-shared";
+import { removeSkill } from "@in-org-quicko/skillset-installer";
+import { detectAgentId, forgetInstall, parseScopeFlag, type InstalledDeps } from "./installed.js";
 
 export interface RemoveOptions {
   name: string;
@@ -17,11 +17,6 @@ export interface RemoveCommandReport {
   link: string | null;
   /** Whether a lockfile entry was dropped — `false` for a Skill installed before lockfiles, or by hand. */
   forgotten: boolean;
-}
-
-/** Narrows a lockfile's recorded Agent, which is a plain string on disk and may name an Agent this build no longer knows. */
-function knownAgent(recorded: string | null): AgentId | null {
-  return recorded !== null && (AGENT_IDS as readonly string[]).includes(recorded) ? (recorded as AgentId) : null;
 }
 
 /**
@@ -44,11 +39,10 @@ function knownAgent(recorded: string | null): AgentId | null {
  * whichever half is missing. The report says which halves were actually
  * there.
  *
- * The Agent unlinked is the one the lockfile *recorded at install time*,
- * not whichever Agent is detected now — removing a Skill installed for
- * Cursor from inside Claude Code must still unlink Cursor's directory. An
- * entry naming an Agent this build no longer knows unlinks nothing rather
- * than failing; the canonical copy still goes.
+ * The Agent unlinked is whichever {@link detectAgentId} resolves now, from
+ * the environment and the project's Agent directories — the lockfile
+ * records no Agent, so removing a Skill from a different Agent's context
+ * than the one it was installed for unlinks that Agent's directory instead.
  *
  * Needs no Registry and no Token: everything this does is local.
  *
@@ -59,14 +53,12 @@ function knownAgent(recorded: string | null): AgentId | null {
  */
 export async function runRemove(deps: InstalledDeps, options: RemoveOptions): Promise<RemoveCommandReport> {
   const scope = parseScopeFlag(options.scope);
-  const lockfile = await readLockfile(resolveLockfilePath(scope, deps), "");
-  const recorded = lockfile.skills[options.name];
 
   const report = await removeSkill(
     { cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir },
     options.name,
     scope,
-    knownAgent(recorded?.agent ?? null),
+    detectAgentId(deps),
   );
   const forgotten = await forgetInstall(deps, scope, options.name);
 

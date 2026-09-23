@@ -1,4 +1,5 @@
-import { SkillSchema, type Scope } from "@in-org-quicko/skillset-shared";
+import { existsSync } from "node:fs";
+import { detectAgent, nonUniversalProjectSkillsDirs, SkillSchema, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
 import {
   readInstalled as readInstalledAt,
   type InstalledSkill,
@@ -23,6 +24,29 @@ export function parseScopeFlag(value: string | undefined): Scope {
     throw new Error(`Unknown scope "${value}" — choose from: project, user.`);
   }
   return value;
+}
+
+/**
+ * Detects which Agent a command should act for from the environment and the
+ * project's Agent directories, the same ladder `install` falls back to when
+ * `--agent` and a prompt are both unavailable.
+ *
+ * @remarks
+ * `update` and `remove` call this instead of trusting a lockfile-recorded
+ * Agent: the lockfile no longer stores one, so both re-detect at call time
+ * and act on whichever Agent that resolves to now, which may differ from the
+ * one an earlier install resolved to.
+ *
+ * @param deps - Supplies the environment, project root, and home directory to
+ * resolve and stat Agent directories against.
+ * @returns The detected {@link AgentId}, or `null` when nothing resolved one.
+ */
+export function detectAgentId(deps: Pick<InstalledDeps, "env" | "cwd" | "homeDir">): AgentId | null {
+  const resolveCtx = { env: deps.env, homeDir: deps.homeDir, projectRoot: deps.cwd };
+  const agentDirsPresent = nonUniversalProjectSkillsDirs(resolveCtx)
+    .filter(({ dir }) => existsSync(dir))
+    .map(({ agentId }) => agentId);
+  return detectAgent({ env: deps.env, agentDirsPresent }).agentId;
 }
 
 /**

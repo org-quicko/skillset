@@ -270,7 +270,6 @@ async function installOneSkill(deps: InstallSkillsDeps, name: string): Promise<I
     registry_updated_at: skill.updated_at,
     content_hash: hashSkillFiles(files),
     installed_at: new Date().toISOString(),
-    agent: report.agent,
   });
 
   return {

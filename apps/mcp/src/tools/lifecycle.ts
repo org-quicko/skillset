@@ -1,4 +1,4 @@
-import { AGENT_IDS, SkillSchema, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
+import { SkillSchema, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
 import {
   forgetInstall,
   readInstalled,
@@ -39,11 +39,6 @@ export type RemoveSkillOutcome =
   | { name: string; status: "removed"; skillDirectory: string | null; link: string | null }
   | { name: string; status: "not-installed" }
   | { name: string; status: "error"; message: string };
-
-/** Narrows a lockfile's recorded Agent, which is a plain string on disk and may name an Agent this build no longer knows. */
-function knownAgent(recorded: string | null): AgentId | null {
-  return recorded !== null && (AGENT_IDS as readonly string[]).includes(recorded) ? (recorded as AgentId) : null;
-}
 
 /**
  * The Registry lookup `readInstalled` needs, over this server's plain `fetch`.
@@ -171,36 +166,33 @@ export async function updateSkills(
  * Uninstalls Skills: their files, the Agent's link to each, and their
  * lockfile entries.
  *
- * @param deps - The filesystem context and Scope. No Registry is consulted.
+ * @param deps - The filesystem context, Scope, and the Agent whose link to
+ * unlink for each Skill. No Registry is consulted.
  * @param names - The Skills to remove.
  * @returns One outcome per name, in the order given. One failing never
  * stops the rest.
  *
  * @remarks
- * The Agent unlinked is the one the lockfile recorded at install time, not
- * whichever Agent is running now — removing a Skill installed for Cursor
- * from inside Claude Code must still unlink Cursor's directory.
+ * The Agent unlinked is `deps.agentId` — the lockfile records no Agent, so
+ * this uses whatever the caller resolved for the current request, which may
+ * differ from the Agent an earlier install chose.
  *
  * A Skill with neither files nor a lockfile entry reads `not-installed`
  * rather than erroring, so removing something twice is harmless.
  *
  * @example
  * ```ts
- * await removeSkills(deps, ["code-review"]);
+ * await removeSkills({ ctx, scope: "project", agentId: "claude-code" }, ["code-review"]);
  * ```
  */
 export async function removeSkills(
-  deps: Pick<LifecycleDeps, "ctx" | "scope">,
+  deps: Pick<LifecycleDeps, "ctx" | "scope"> & { agentId: AgentId | null },
   names: readonly string[],
 ): Promise<RemoveSkillOutcome[]> {
-  const installed = await readInstalled(deps.ctx, deps.scope, null);
-  const byName = new Map(installed.map((skill) => [skill.name, skill]));
-
   const outcomes: RemoveSkillOutcome[] = [];
   for (const name of names) {
     try {
-      const recorded = byName.get(name);
-      const report = await removeSkill(deps.ctx, name, deps.scope, knownAgent(recorded?.entry.agent ?? null));
+      const report = await removeSkill(deps.ctx, name, deps.scope, deps.agentId);
       const forgotten = await forgetInstall(deps.ctx, deps.scope, name);
 
       outcomes.push(

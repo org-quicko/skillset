@@ -302,7 +302,8 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
   );
 
   // Resolved once, lazily: the client's identity is only known after the `initialize`
-  // handshake, and `install_skills` — the one tool that needs an Agent — never runs before then.
+  // handshake, and no tool that needs an Agent — `install_skills`, `update_skills`,
+  // `remove_skills` — runs before then.
   let detection: AgentDetection | undefined;
   const resolveDetection = (): AgentDetection => {
     if (!detection) {
@@ -514,7 +515,7 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
     },
     async ({ names }) => {
       logger.debug(`remove_skills names=${names.join(",")}`);
-      const outcomes = await removeSkills({ ctx, scope: config.scope }, names);
+      const outcomes = await removeSkills({ ctx, scope: config.scope, agentId: resolveDetection().agentId }, names);
       return { content: [{ type: "text", text: JSON.stringify(outcomes) }], structuredContent: { outcomes } };
     },
   );

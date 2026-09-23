@@ -1,6 +1,6 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useState } from "react";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/hooks/use-theme";
 import { Spinner } from "@/components/ui/spinner";
 import {
   defineMonacoThemes,

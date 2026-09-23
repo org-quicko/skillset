@@ -38,10 +38,12 @@ arbitrary command, build and install `skillset-mcp.mcpb` instead:
 bun run package:mcpb
 ```
 
-This packs `manifest.json` and the built `dist/cli.js` — the whole server, with every dependency
-already inlined by the build — into one `.mcpb` file with no `node_modules` inside it. Open the
-resulting file with the host's extension installer, which will prompt for the two settings
-`manifest.json` declares: the Registry URL, and, optionally, a writer Token for `publish_skill`.
+This builds `dist/cli.js` — the whole server, with every dependency already inlined — and packs it
+into one `.mcpb` file with no `node_modules` inside it. The bundle's `manifest.json` is generated
+at pack time (`src/mcpb.ts`): its version and description come from `package.json`, and its tools
+from the server itself, so there is no manifest in the repository to keep in step. Open the
+resulting file with the host's extension installer, which will prompt for the two settings the
+manifest declares: the Registry URL, and, optionally, a writer Token for `publish_skill`.
 
 Unlike `npx`, an installed bundle does **not** update itself — reinstall it to pick up a new
 version (see `docs/adr/0037-mcpb-packaging-is-an-additional-pinned-channel.md`).
@@ -52,7 +54,7 @@ required settings are filled in — check its logs for "has missing required con
 enabling automatically" if the model never seems to see the tools at all. Open the extension's own
 settings (not the chat) and set the Registry URL there; a disabled extension isn't offered to the
 model, so no phrasing in a chat message will make it get called. This also means changing
-`manifest.json`'s `name` (as ADR-0037's Consequences describes doing twice, chasing a naming
+the bundle's `name` (`MCPB_NAME` in `src/mcpb.ts`) (as ADR-0037's Consequences describes doing twice, chasing a naming
 collision) creates a new extension identity to that host and loses whatever was configured under
 the old name — expect to redo this after a rename.
 

@@ -1,10 +1,7 @@
-import { existsSync } from "node:fs";
 import {
   AGENT_IDS,
   AGENTS,
-  detectAgent,
   extractSkillFiles,
-  nonUniversalProjectSkillsDirs,
   ResourceSubmittedSchema,
   SkillSchema,
   type AgentId,
@@ -25,7 +22,7 @@ import {
   type Progress,
   type WriteReport,
 } from "@in-org-quicko/skillset-installer";
-import { recordInstall } from "./installed.js";
+import { detectAgentId, recordInstall } from "./installed.js";
 import { rethrowValidationError } from "../errors.js";
 import { ApiError, downloadBinary, registryFetch, uploadArtifactFiles, type RegistryClient } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
@@ -160,23 +157,6 @@ function parseChoice<T extends string>(value: string, allowed: readonly T[], lab
 
 const parseScope = (value: string): Scope => parseChoice(value, SCOPES, "scope");
 const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "Agent");
-
-/**
- * Detects which Agent to install for from the environment and the project's Agent
- * directories — the non-TTY path, where there is no prompt and `--agent` was not given.
- *
- * @param deps - Supplies the environment, project root, and home directory to resolve and
- * stat Agent directories against.
- * @returns The detected {@link AgentId}, or `null` when nothing resolved one — then the
- * install goes to `.agents/skills` and links nothing.
- */
-function detectAgentId(deps: Pick<InstallDeps, "env" | "cwd" | "homeDir">): AgentId | null {
-  const resolveCtx = { env: deps.env, homeDir: deps.homeDir, projectRoot: deps.cwd };
-  const agentDirsPresent = nonUniversalProjectSkillsDirs(resolveCtx)
-    .filter(({ dir }) => existsSync(dir))
-    .map(({ agentId }) => agentId);
-  return detectAgent({ env: deps.env, agentDirsPresent }).agentId;
-}
 
 /** What became of putting a Skill installed from a URL forward for the Registry (ADR-0044). */
 export type SubmissionOutcome =
@@ -365,7 +345,6 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
     namespace: skill.namespace,
     content_hash: hashSkillFiles(skill.files),
     installed_at: new Date().toISOString(),
-    agent: report.agent,
   });
 
   if (!skill.bundle) return report;

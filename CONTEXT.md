@@ -127,11 +127,12 @@ _Avoid_: File list, index, tree, contents
 **Lockfile**:
 A `skillset-lock.json` at a project root, or in a User's home directory for user Scope,
 recording every Skill installed *there*: its Resource id, the Registry's `updated_at` at the
-moment it was installed, a digest of the files that were written, when, and which Agent was
-linked. It is what makes an installed Skill's state answerable — whether the Registry has
-moved on, and whether anyone has edited the copy on disk — neither of which anything could
-tell before (ADR-0038). Advisory rather than authoritative: a missing or corrupt one reads as
-empty rather than failing an install, and nothing signs it.
+moment it was installed, a digest of the files that were written, and when. It is what makes
+an installed Skill's state answerable — whether the Registry has moved on, and whether anyone
+has edited the copy on disk — neither of which anything could tell before (ADR-0038). Records
+no Agent: `update`/`remove` re-detect which Agent to link or unlink at call time rather than
+trusting what install once resolved. Advisory rather than authoritative: a missing or corrupt
+one reads as empty rather than failing an install, and nothing signs it.
 _Avoid_: Manifest (which is an Artifact's file list), lock, state file
 
 **Status**:

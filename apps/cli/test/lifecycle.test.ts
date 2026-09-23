@@ -101,13 +101,12 @@ describe("the lockfile `install` writes", () => {
 
       const lockfile = JSON.parse(await readFile(join(cwd, LOCKFILE_NAME), "utf8")) as {
         registry: string;
-        skills: Record<string, { id: string; registry_updated_at: string; content_hash: string; agent: string | null }>;
+        skills: Record<string, { id: string; registry_updated_at: string; content_hash: string }>;
       };
       expect(lockfile.registry).toBe(REGISTRY);
       expect(lockfile.skills["code-review"]).toMatchObject({
         id: "skill-1",
         registry_updated_at: FIRST_PUBLISH,
-        agent: "codex",
       });
       expect(lockfile.skills["code-review"]?.content_hash).toStartWith("sha256:");
     });

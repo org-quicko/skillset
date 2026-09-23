@@ -19,6 +19,14 @@ rather than re-litigated. What ADR-0033 still holds: no tool writes without a To
 
 ## Decision
 
+> **Amended:** `manifest.json` is no longer kept in the repository. `bun run package:mcpb` now
+> generates it (`apps/mcp/src/mcpb.ts`) — version, description, and license from `package.json`,
+> and a `tools` list with full descriptions read from the running server, the same source as
+> `docs/mcp.json` — validates it against the packer's own 0.3 schema, and packs a staging
+> directory holding only `dist/cli.js`, the manifest, a minimal `package.json`, `LICENSE`, and
+> `README.md` through `packExtension`, so `.mcpbignore` is gone too. The settings, `mcp_config`,
+> and name below are unchanged, and now live in that file as constants.
+
 - `manifest.json` at `apps/mcp/manifest.json` is the MCPB descriptor. Its `server.mcp_config` runs
   `node dist/cli.js --registry <user_config.registry>` — the same entry point `npx` runs today, not
   a separate build.

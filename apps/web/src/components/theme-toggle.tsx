@@ -1,7 +1,7 @@
 import { ContrastIcon, MoonIcon, SunIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useTheme, type Theme } from "@/components/theme-provider";
+import { useTheme, type Theme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof SunIcon }[] = [

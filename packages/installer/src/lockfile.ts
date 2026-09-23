@@ -37,7 +37,7 @@ export interface LockfileEntry {
    * instead (ADR-0002).
    *
    * `null` for a Skill installed straight from a repository (ADR-0044). The
-   * first time the Registry reports one — its Submission was approved — the
+   * first time the Registry reports one ï¿½ its Submission was approved ï¿½ the
    * two differ, the Skill reads `outdated`, and `update` moves it onto the
    * Registry's copy with nothing else to do.
    */
@@ -50,8 +50,6 @@ export interface LockfileEntry {
   /** `sha256:<hex>` over the files as installed â€” see {@link hashSkillFiles}. */
   content_hash: string;
   installed_at: string;
-  /** The Agent whose directory was linked, or `null` when none was resolved. */
-  agent: string | null;
 }
 
 /** Every Skill installed at one Scope, and the Registry they came from. */

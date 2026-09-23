@@ -1,19 +1,11 @@
-import { createContext, useContext, useEffect, useState } from "react";
-
-export type Theme = "dark" | "light" | "system";
+import { useEffect, useState } from "react";
+import { ThemeProviderContext, type Theme } from "@/hooks/use-theme";
 
 type ThemeProviderProps = {
   children: React.ReactNode;
   defaultTheme?: Theme;
   storageKey?: string;
 };
-
-type ThemeProviderState = {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-};
-
-const ThemeProviderContext = createContext<ThemeProviderState | undefined>(undefined);
 
 /**
  * Applies `light`/`dark` (or the OS preference, for `system`) to
@@ -71,22 +63,4 @@ export function ThemeProvider({
       {children}
     </ThemeProviderContext.Provider>
   );
-}
-
-/**
- * Reads the current theme and a setter for it.
- *
- * @throws {Error} If called outside a {@link ThemeProvider}.
- *
- * @example
- * ```tsx
- * const { theme, setTheme } = useTheme();
- * ```
- */
-export function useTheme(): ThemeProviderState {
-  const context = useContext(ThemeProviderContext);
-
-  if (context === undefined) throw new Error("useTheme must be used within a ThemeProvider");
-
-  return context;
 }

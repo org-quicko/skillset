@@ -231,7 +231,7 @@ describe("removeSkills", () => {
       const { fetch: fetchImpl } = stubRegistry({ updatedAt: FIRST_PUBLISH, body: "Body.\n" });
       await install(fetchImpl, cwd, homeDir);
 
-      const outcomes = await removeSkills({ ctx: { cwd, env: {}, homeDir }, scope: "project" }, ["code-review"]);
+      const outcomes = await removeSkills({ ctx: { cwd, env: {}, homeDir }, scope: "project", agentId: null }, ["code-review"]);
 
       expect(outcomes).toMatchObject([{ name: "code-review", status: "removed" }]);
       expect(await Bun.file(join(cwd, LOCKFILE_NAME)).exists()).toBe(false);
@@ -241,7 +241,7 @@ describe("removeSkills", () => {
 
   it("reports not-installed rather than failing, so removing twice is harmless", async () => {
     await withTempRoots(async ({ cwd, homeDir }) => {
-      const outcomes = await removeSkills({ ctx: { cwd, env: {}, homeDir }, scope: "project" }, ["never-installed"]);
+      const outcomes = await removeSkills({ ctx: { cwd, env: {}, homeDir }, scope: "project", agentId: null }, ["never-installed"]);
       expect(outcomes).toEqual([{ name: "never-installed", status: "not-installed" }]);
     });
   });

@@ -2,9 +2,9 @@
 
 `skillset install` and `install_skills` now write a `skillset-lock.json` at the project root
 (or the home directory, for user Scope), recording for each Skill its Registry id, the
-Registry's `updated_at` at the moment it was installed, a SHA-256 digest of the files that
-were written, and which Agent was linked. `list`/`installed_skills`, `update`/`update_skills`,
-and `remove`/`remove_skills` are built on it.
+Registry's `updated_at` at the moment it was installed, and a SHA-256 digest of the files that
+were written. `list`/`installed_skills`, `update`/`update_skills`, and `remove`/`remove_skills`
+are built on it.
 
 This is what makes a Skill's state answerable at all. Before it, an installed Skill was a
 detached copy on disk with no link back: nothing could say whether it was current, whether
@@ -72,10 +72,12 @@ signs it, so it is not a security boundary — it detects accidents, not tamperi
 **A Skill installed before this, or by hand, has no entry.** It cannot be judged, and
 `install` will replace it as it always did. The first `install`/`update` records one.
 
-**Removal unlinks the Agent the lockfile recorded**, not whichever Agent is detected now —
-removing a Skill installed for Cursor from inside Claude Code has to unlink Cursor's
-directory. An entry naming an Agent a later build no longer knows unlinks nothing; the
-canonical copy still goes.
+**Removal and update unlink whichever Agent is detected now**, not one the lockfile
+remembers — the lockfile records no Agent, so `remove`/`remove_skills` and `update`/
+`update_skills` run the same detection ladder `install` falls back to (ADR-0034) and act on
+its answer. Removing a Skill installed for Cursor from a Claude Code session can therefore
+unlink Claude Code's directory instead of Cursor's, if that is what the ladder resolves to
+when the command runs; the canonical copy always still goes.
 
 **The orchestration lives in `packages/installer`, not in each client.** `readInstalled`,
 `recordInstall`, and `forgetInstall` are shared, with the Registry reached through an injected

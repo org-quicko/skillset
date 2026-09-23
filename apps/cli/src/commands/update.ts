@@ -1,9 +1,9 @@
-import { AGENT_IDS, extractSkillFiles, SkillSchema, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
+import { extractSkillFiles, SkillSchema, type Scope } from "@in-org-quicko/skillset-shared";
 import { hashSkillFiles, installSkill } from "@in-org-quicko/skillset-installer";
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch, type RegistryClient } from "../http.js";
 import { openReadClient } from "../session.js";
-import { parseScopeFlag, readInstalled, recordInstall, type InstalledDeps, type InstalledSkill } from "./installed.js";
+import { detectAgentId, parseScopeFlag, readInstalled, recordInstall, type InstalledDeps, type InstalledSkill } from "./installed.js";
 
 export interface UpdateOptions {
   /** The Skills to update; empty means every one the lockfile records. */
@@ -23,11 +23,6 @@ export type UpdateOutcome =
   | { name: string; status: "pending" }
   | { name: string; status: "error"; message: string };
 
-/** Narrows a lockfile's recorded Agent, which is a plain string on disk and may name an Agent this build no longer knows. */
-function knownAgent(recorded: string | null): AgentId | null {
-  return recorded !== null && (AGENT_IDS as readonly string[]).includes(recorded) ? (recorded as AgentId) : null;
-}
-
 /**
  * Re-downloads one Skill and writes it over the installed copy.
  *
@@ -36,6 +31,10 @@ function knownAgent(recorded: string | null): AgentId | null {
  * republished under the same name is followed even if the row behind it
  * changed — name is the publishing identity (ADR-0026), and the id is kept
  * for reporting rather than for resolution.
+ *
+ * The Agent linked is whichever {@link detectAgentId} resolves right now,
+ * not whatever install originally chose — the lockfile records no Agent, so
+ * an update run from a different Agent's context links that Agent instead.
  */
 async function reinstall(
   deps: InstalledDeps,
@@ -58,7 +57,7 @@ async function reinstall(
     rethrowValidationError(error);
   }
 
-  const agentId = knownAgent(installed.entry.agent);
+  const agentId = detectAgentId(deps);
   await installSkill({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, skill.name, files, scope, agentId, {
     copy: false,
   });
@@ -69,7 +68,6 @@ async function reinstall(
     registry_updated_at: skill.updated_at,
     content_hash: hashSkillFiles(files),
     installed_at: new Date().toISOString(),
-    agent: agentId,
   });
 
   return { to: skill.updated_at };
