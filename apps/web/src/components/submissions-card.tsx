@@ -1,13 +1,39 @@
 import type { ResourceSubmission } from "@in-org-quicko/skillset-shared";
-import { CheckIcon, XIcon } from "lucide-react";
+import { CheckIcon, FileTextIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApproveSubmission, useRejectSubmission, useSubmissions } from "@/hooks/use-submissions";
 import { apiErrorMessage } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+
+/** A read-only look at a pending Submission's `SKILL.md`, opened from its tile. */
+function SkillMdDialog({ submission }: { submission: ResourceSubmission }) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="xs">
+          <FileTextIcon />
+          SKILL.md
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="flex max-h-[80vh] w-full max-w-[920px] flex-col gap-4 sm:max-w-[920px]">
+        <DialogHeader>
+          <DialogTitle>
+            {submission.name}
+            <span className="ml-1.5 font-normal text-muted-foreground">SKILL.md</span>
+          </DialogTitle>
+        </DialogHeader>
+        <pre className="min-h-0 flex-1 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+          {submission.body}
+        </pre>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /**
  * One pending Submission: what it is, where it came from, who put it forward,
@@ -90,12 +116,9 @@ function SubmissionTile({ submission }: { submission: ResourceSubmission }) {
           <span className="text-muted-foreground">{submission.allowed_tools}</span>
         </p>
       )}
-      <details className="mt-3">
-        <summary className="cursor-pointer text-xs text-muted-foreground">SKILL.md</summary>
-        <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
-          {submission.body}
-        </pre>
-      </details>
+      <div className="mt-3">
+        <SkillMdDialog submission={submission} />
+      </div>
     </Panel>
   );
 }
