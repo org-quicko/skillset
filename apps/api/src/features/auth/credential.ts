@@ -1,6 +1,4 @@
-import { and, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { accounts } from "../../db/schemas/index.js";
 
 /**
  * The `provider_id` Better Auth stores a password under. Not a Provider kind
@@ -8,9 +6,6 @@ import { accounts } from "../../db/schemas/index.js";
  * sits in the same table as the external accounts on purpose.
  */
 export const CREDENTIAL_PROVIDER_ID = "credential";
-
-/** A Drizzle handle: the pool, or a transaction inside one. */
-type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /**
  * Writes a User's password, replacing any they already had.
@@ -24,7 +19,8 @@ type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0]
  * one atomic act: a `users` row with no credential would be a User nobody can
  * log in as and no route can repair.
  *
- * @param db - The database or transaction to write through.
+ * @param db - The database or transaction to write through (a Kysely
+ * `Transaction` is a `Database`).
  * @param userId - The User the password belongs to.
  * @param passwordHash - The argon2id hash, from `hashPassword`.
  * @example
@@ -33,22 +29,22 @@ type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0]
  * ```
  */
 export async function setPasswordCredential(
-  db: Executor,
+  db: Database,
   userId: string,
   passwordHash: string,
 ): Promise<void> {
   await db
-    .insert(accounts)
+    .insertInto("accounts")
     .values({
       user_id: userId,
       account_id: userId,
       provider_id: CREDENTIAL_PROVIDER_ID,
       password: passwordHash,
     })
-    .onConflictDoUpdate({
-      target: [accounts.provider_id, accounts.account_id],
-      set: { password: passwordHash, updated_at: new Date() },
-    });
+    .onConflict((oc) =>
+      oc.columns(["provider_id", "account_id"]).doUpdateSet({ password: passwordHash, updated_at: new Date() }),
+    )
+    .execute();
 }
 
 /**
@@ -68,10 +64,11 @@ export async function setPasswordCredential(
  * ```
  */
 export async function getPasswordCredential(db: Database, userId: string): Promise<string | null> {
-  const [account] = await db
-    .select({ password: accounts.password })
-    .from(accounts)
-    .where(and(eq(accounts.user_id, userId), eq(accounts.provider_id, CREDENTIAL_PROVIDER_ID)))
-    .limit(1);
+  const account = await db
+    .selectFrom("accounts")
+    .select("password")
+    .where("user_id", "=", userId)
+    .where("provider_id", "=", CREDENTIAL_PROVIDER_ID)
+    .executeTakeFirst();
   return account?.password ?? null;
 }

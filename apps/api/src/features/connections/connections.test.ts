@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { ConnectionList, Role } from "@in-org-quicko/skillset-shared";
-import { and, eq } from "drizzle-orm";
-import { connections, integrations, users, type IntegrationRow, type UserRow } from "../../db/schemas/index.js";
+import type { IntegrationRow, NewConnectionRow, UserRow } from "../../db/tables.js";
 import { createLogger } from "../../lib/logger.js";
 import { deriveKeys, openSecret } from "../../lib/secrets.js";
 import { ConnectionsService } from "./connections.service.js";
@@ -151,10 +150,10 @@ describe("Connections (ADR-0024)", () => {
     provider = "github",
     app_slug: string | null = "acme-registry",
   ): Promise<IntegrationRow> {
-    await context.db.delete(connections);
-    await context.db.delete(integrations);
-    const [row] = await context.db
-      .insert(integrations)
+    await context.db.deleteFrom("connections").execute();
+    await context.db.deleteFrom("integrations").execute();
+    return context.db
+      .insertInto("integrations")
       .values({
         provider,
         display_name: provider,
@@ -162,9 +161,8 @@ describe("Connections (ADR-0024)", () => {
         client_secret: "the-secret",
         app_slug,
       })
-      .returning();
-    if (!row) throw new Error("Integration insert did not return a row.");
-    return row;
+      .returningAll()
+      .executeTakeFirstOrThrow();
   }
 
   function start(cookie: string, provider = "github", integrationId?: string) {
@@ -211,8 +209,8 @@ describe("Connections (ADR-0024)", () => {
     });
 
     it("refuses a Git Provider with no Integration", async () => {
-      await context.db.delete(connections);
-      await context.db.delete(integrations);
+      await context.db.deleteFrom("connections").execute();
+      await context.db.deleteFrom("integrations").execute();
       const res = await start(writerCookie);
 
       expect(res.status).toBe(409);
@@ -287,7 +285,7 @@ describe("Connections (ADR-0024)", () => {
 
       expect(res.status).toBe(302);
       expect(res.headers.get("location")).toContain("/settings/connected-accounts?repositories=github");
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("says so plainly when the writer declined, instead of blaming the state", async () => {
@@ -301,7 +299,7 @@ describe("Connections (ADR-0024)", () => {
 
       expect(res.status).toBe(400);
       expect(((await res.json()) as ApiError).error.code).toBe("authorization_declined");
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
   });
 
@@ -312,7 +310,7 @@ describe("Connections (ADR-0024)", () => {
 
       expect(res.status).toBe(400);
       expect(((await res.json()) as ApiError).error.code).toBe("invalid_state");
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("refuses a tampered state", async () => {
@@ -327,7 +325,7 @@ describe("Connections (ADR-0024)", () => {
       );
 
       expect(res.status).toBe(400);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("refuses a state minted for a different User", async () => {
@@ -343,7 +341,7 @@ describe("Connections (ADR-0024)", () => {
       );
 
       expect(res.status).toBe(400);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("refuses a state with no matching nonce cookie", async () => {
@@ -354,7 +352,7 @@ describe("Connections (ADR-0024)", () => {
       const res = await callback(writerCookie, `code=abc&state=${encodeURIComponent(state)}`);
 
       expect(res.status).toBe(400);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("refuses a nonce that does not match the one in the state", async () => {
@@ -368,7 +366,7 @@ describe("Connections (ADR-0024)", () => {
       );
 
       expect(res.status).toBe(400);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("refuses an expired state", async () => {
@@ -384,7 +382,7 @@ describe("Connections (ADR-0024)", () => {
       await expect(
         service.complete(writer, "github", { code: "abc", state, nonce, error: undefined }, stub({}).fetch),
       ).rejects.toThrow(/could not be verified/);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("burns the nonce, so a replay of the same callback fails", async () => {
@@ -428,7 +426,7 @@ describe("Connections (ADR-0024)", () => {
         stub({ [TOKEN_URL]: exchange(), [USER_URL]: ACCOUNT }).fetch,
       );
 
-      const [row] = await context.db.select().from(connections);
+      const [row] = await context.db.selectFrom("connections").selectAll().execute();
       expect(row?.access_token).not.toBe("ghu_fresh_access");
       expect(await decryptGrant(row?.access_token)).toBe("ghu_fresh_access");
       expect(await decryptGrant(row?.refresh_token)).toBe("ghr_fresh_refresh");
@@ -444,7 +442,7 @@ describe("Connections (ADR-0024)", () => {
         stub({ [TOKEN_URL]: exchange(), [USER_URL]: ACCOUNT }).fetch,
       );
 
-      const [row] = await context.db.select().from(connections);
+      const [row] = await context.db.selectFrom("connections").selectAll().execute();
       const eightHours = Date.now() + 28_800_000;
       expect(row?.expires_at?.getTime()).toBeGreaterThan(eightHours - 60_000);
       expect(row?.refresh_token_expires_at).not.toBeNull();
@@ -463,7 +461,7 @@ describe("Connections (ADR-0024)", () => {
         }).fetch,
       );
 
-      const [row] = await context.db.select().from(connections);
+      const [row] = await context.db.selectFrom("connections").selectAll().execute();
       expect(row?.expires_at).toBeNull();
       expect(row?.refresh_token).toBeNull();
     });
@@ -480,7 +478,7 @@ describe("Connections (ADR-0024)", () => {
         );
       }
 
-      const rows = await context.db.select().from(connections);
+      const rows = await context.db.selectFrom("connections").selectAll().execute();
       expect(rows).toHaveLength(1);
       expect(rows[0]?.external_account_login).toBe("second-account");
     });
@@ -497,7 +495,7 @@ describe("Connections (ADR-0024)", () => {
           stub({ [TOKEN_URL]: new Response("nope", { status: 401 }) }).fetch,
         ),
       ).rejects.toThrow(/would not complete/);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("reports an exchange that returns an error body rather than a token", async () => {
@@ -512,7 +510,7 @@ describe("Connections (ADR-0024)", () => {
           stub({ [TOKEN_URL]: { error: "bad_verification_code" } }).fetch,
         ),
       ).rejects.toThrow(/would not complete/);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("reports a 2xx that is not JSON as a refused exchange", async () => {
@@ -534,7 +532,7 @@ describe("Connections (ADR-0024)", () => {
           }).fetch,
         ),
       ).rejects.toMatchObject({ code: "exchange_failed" });
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("never follows a redirect on an outbound request", async () => {
@@ -549,20 +547,23 @@ describe("Connections (ADR-0024)", () => {
   });
 
   describe("using a Connection's token", () => {
-    async function seedConnection(overrides: Record<string, unknown> = {}) {
+    async function seedConnection(overrides: Partial<NewConnectionRow> = {}) {
       const integration = await seedIntegration();
-      await context.db.insert(connections).values({
-        user_id: writer.id,
-        provider: "github",
-        integration_id: integration.id,
-        external_account_id: "1",
-        external_account_login: "ada-work",
-        access_token: await encryptLegacy("ghu_stored_access"),
-        refresh_token: await encryptLegacy("ghr_stored_refresh"),
-        expires_at: new Date(Date.now() + 3_600_000),
-        refresh_token_expires_at: new Date(Date.now() + 30 * 86_400_000),
-        ...overrides,
-      });
+      await context.db
+        .insertInto("connections")
+        .values({
+          user_id: writer.id,
+          provider: "github",
+          integration_id: integration.id,
+          external_account_id: "1",
+          external_account_login: "ada-work",
+          access_token: await encryptLegacy("ghu_stored_access"),
+          refresh_token: await encryptLegacy("ghr_stored_refresh"),
+          expires_at: new Date(Date.now() + 3_600_000),
+          refresh_token_expires_at: new Date(Date.now() + 30 * 86_400_000),
+          ...overrides,
+        })
+        .execute();
     }
 
     it("returns a token that is not close to expiring, without refreshing", async () => {
@@ -600,7 +601,7 @@ describe("Connections (ADR-0024)", () => {
         stub({ [TOKEN_URL]: exchange({ access_token: "ghu_refreshed", refresh_token: "ghr_rotated" }) }).fetch,
       );
 
-      const [row] = await context.db.select().from(connections);
+      const [row] = await context.db.selectFrom("connections").selectAll().execute();
       expect(await decryptGrant(row?.access_token)).toBe("ghu_refreshed");
       expect(await decryptGrant(row?.refresh_token)).toBe("ghr_rotated");
       expect(row?.expires_at?.getTime()).toBeGreaterThan(Date.now() + 60_000);
@@ -617,7 +618,7 @@ describe("Connections (ADR-0024)", () => {
 
       expect(await service.accessTokenFor(writer.id, "github", provider.fetch)).toBe("ghu_refreshed");
 
-      const [row] = await context.db.select().from(connections);
+      const [row] = await context.db.selectFrom("connections").selectAll().execute();
       // Still readable under the *legacy* key, because this refresh did not
       // rewrite it — which is the ISSUE-9 migration path working: a row
       // written before per-purpose keys keeps opening until something
@@ -645,7 +646,7 @@ describe("Connections (ADR-0024)", () => {
 
       await expect(service.accessTokenFor(writer.id, "github", provider.fetch)).rejects.toThrow(/Reconnect/);
       // Deleting it would lose the writer's own record of what they granted.
-      expect(await context.db.select().from(connections)).toHaveLength(1);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toHaveLength(1);
     });
 
     it("never says sign in again, which refreshes nothing after ADR-0024", async () => {
@@ -722,10 +723,10 @@ describe("Connections (ADR-0024)", () => {
       });
 
       expect(res.status).toBe(204);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
       // The writer's account and their ability to sign in are untouched.
-      expect(await context.db.select().from(users).where(eq(users.id, writer.id))).toHaveLength(1);
-      expect(await context.db.select().from(integrations)).toHaveLength(1);
+      expect(await context.db.selectFrom("users").selectAll().where("id", "=", writer.id).execute()).toHaveLength(1);
+      expect(await context.db.selectFrom("integrations").selectAll().execute()).toHaveLength(1);
     });
 
     it("refuses to disconnect what was never connected", async () => {
@@ -773,8 +774,8 @@ describe("Connections (ADR-0024)", () => {
 
   describe("choosing between multiple Integrations for a provider (ADR-0025)", () => {
     async function seedSecondIntegration() {
-      const [row] = await context.db
-        .insert(integrations)
+      return context.db
+        .insertInto("integrations")
         .values({
           provider: "github",
           display_name: "GitHub (second app)",
@@ -782,9 +783,8 @@ describe("Connections (ADR-0024)", () => {
           client_secret: "the-second-secret",
           app_slug: "acme-registry-2",
         })
-        .returning();
-      if (!row) throw new Error("Integration insert did not return a row.");
-      return row;
+        .returningAll()
+        .executeTakeFirstOrThrow();
     }
 
     it("refuses to start without saying which app, when more than one is configured", async () => {
@@ -828,7 +828,7 @@ describe("Connections (ADR-0024)", () => {
         stub({ [TOKEN_URL]: exchange(), [USER_URL]: ACCOUNT }).fetch,
       );
 
-      const [row] = await context.db.select().from(connections);
+      const [row] = await context.db.selectFrom("connections").selectAll().execute();
       expect(row?.integration_id).toBe(second.id);
     });
   });
@@ -838,37 +838,43 @@ describe("Connections (ADR-0024)", () => {
       await seedIntegration();
       await expect(
         (async () =>
-          context.db.insert(connections).values({
-            user_id: writer.id,
-            provider: "github",
-            // A well-formed id naming no Integration at all, not a malformed
-            // one — this is `integration_id`'s foreign key doing the work,
-            // which is what makes "you cannot connect through an app this
-            // Registry has not registered" a database invariant now that
-            // `provider` alone (ADR-0025) no longer carries one.
-            integration_id: "00000000-0000-0000-0000-000000000000",
-            external_account_id: "1",
-            external_account_login: "x",
-            access_token: "cipher",
-          }))(),
+          context.db
+            .insertInto("connections")
+            .values({
+              user_id: writer.id,
+              provider: "github",
+              // A well-formed id naming no Integration at all, not a malformed
+              // one — this is `integration_id`'s foreign key doing the work,
+              // which is what makes "you cannot connect through an app this
+              // Registry has not registered" a database invariant now that
+              // `provider` alone (ADR-0025) no longer carries one.
+              integration_id: "00000000-0000-0000-0000-000000000000",
+              external_account_id: "1",
+              external_account_login: "x",
+              access_token: "cipher",
+            })
+            .execute())(),
       ).rejects.toThrow();
     });
 
     it("refuses to remove an Integration writers are still connected against", async () => {
       const integration = await seedIntegration();
-      await context.db.insert(connections).values({
-        user_id: writer.id,
-        provider: "github",
-        integration_id: integration.id,
-        external_account_id: "1",
-        external_account_login: "x",
-        access_token: await encryptLegacy("ghu_x"),
-      });
+      await context.db
+        .insertInto("connections")
+        .values({
+          user_id: writer.id,
+          provider: "github",
+          integration_id: integration.id,
+          external_account_id: "1",
+          external_account_login: "x",
+          access_token: await encryptLegacy("ghu_x"),
+        })
+        .execute();
 
       // RESTRICT, not CASCADE: silently dropping a writer's credential when an
       // Admin tidies up configuration is the failure mode worth being loud about.
       await expect(
-        (async () => context.db.delete(integrations).where(eq(integrations.id, integration.id)))(),
+        (async () => context.db.deleteFrom("integrations").where("id", "=", integration.id).execute())(),
       ).rejects.toThrow();
     });
 
@@ -881,18 +887,21 @@ describe("Connections (ADR-0024)", () => {
         password: PASSWORD,
         role: "writer",
       });
-      await context.db.insert(connections).values({
-        user_id: doomed.id,
-        provider: "github",
-        integration_id: integration.id,
-        external_account_id: "1",
-        external_account_login: "x",
-        access_token: await encryptLegacy("ghu_x"),
-      });
+      await context.db
+        .insertInto("connections")
+        .values({
+          user_id: doomed.id,
+          provider: "github",
+          integration_id: integration.id,
+          external_account_id: "1",
+          external_account_login: "x",
+          access_token: await encryptLegacy("ghu_x"),
+        })
+        .execute();
 
-      await context.db.delete(users).where(eq(users.id, doomed.id));
+      await context.db.deleteFrom("users").where("id", "=", doomed.id).execute();
       expect(
-        await context.db.select().from(connections).where(and(eq(connections.user_id, doomed.id))),
+        await context.db.selectFrom("connections").selectAll().where("user_id", "=", doomed.id).execute(),
       ).toEqual([]);
     });
   });

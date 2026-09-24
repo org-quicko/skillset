@@ -12,10 +12,10 @@ import {
   type SkillFile,
   type SkillPayload,
 } from "@in-org-quicko/skillset-shared";
-import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from "kysely";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
-import { resourceDirectory, resourceTags, resources, users, type UserRow } from "../../db/schemas/index.js";
+import type { DB } from "../../db/database.js";
+import type { UserRow } from "../../db/tables.js";
 import {
   AmbiguousResourceNameError,
   ArtifactFileNotFoundError,
@@ -73,35 +73,36 @@ export function namespaceForSource(source: string | null, publicUrl: string): st
 }
 
 /**
+ * The columns a Skill is read from. `payload` carries the Kind's own fields
+ * (ADR-0026); `readSkill` below unpacks a Skill's into the flat shape the
+ * wire has always had — the only shape assembled today, since `skill` is the
+ * only registered Kind (ticket 3 generalises this once a second one exists).
+ *
  * The wire's `published_by` is the Publisher object, not the column: the
  * email snapshot on the Resource row is always present, while the id and
  * names come from the User row and are null once that User has been removed
- * (docs/data-model.md). Selecting it in this shape is what lets a caller
- * respond with `SkillSchema.parse(row)` and no mapping step.
- *
- * `payload` carries the Kind's own fields (ADR-0026); `readSkill` below
- * unpacks a Skill's into the flat shape the wire has always had — the only
- * shape assembled today, since `skill` is the only registered Kind (ticket 3
- * generalises this once a second one exists).
+ * (docs/data-model.md). `readSkill` assembles it from the `publisher_*`
+ * columns here.
  */
-const skillSelection = {
-  id: resources.id,
-  kind: resources.kind,
-  namespace: resources.namespace,
-  name: resources.name,
-  description: resources.description,
-  body: resources.body,
-  payload: resources.payload,
-  source: resources.source,
-  published_at: resources.published_at,
-  updated_at: resources.updated_at,
-  published_by: {
-    user_id: users.id,
-    email: resources.published_by_email,
-    first_name: users.first_name,
-    last_name: users.last_name,
-  },
-};
+const skillSelection = [
+  "resources.id",
+  "resources.kind",
+  "resources.namespace",
+  "resources.name",
+  "resources.description",
+  "resources.body",
+  "resources.payload",
+  "resources.source",
+  "resources.published_at",
+  "resources.updated_at",
+  "resources.published_by_email",
+  "users.id as publisher_user_id",
+  "users.first_name as publisher_first_name",
+  "users.last_name as publisher_last_name",
+] as const;
+
+/** Narrows `resources` (joined to `users`) to the one Resource a read is after. */
+type ResourceIdentity = (eb: ExpressionBuilder<DB, "resources" | "users">) => Expression<SqlBool>;
 
 // The Publisher is null-per-field, not null-as-a-whole: `leftJoin` nulls out
 // only the columns that come from `users`, while `email` — snapshotted onto
@@ -237,7 +238,7 @@ function prefixToken(lastToken: string | undefined): string | undefined {
  * @example
  * buildTsQuery("postgre") // matches "postgresql-migrations"
  */
-function buildTsQuery(query: string): SQL {
+function buildTsQuery(query: string): RawBuilder<unknown> {
   const tokens = query.match(/-?"[^"]*"|-?\S+/g) ?? [];
   const prefix = prefixToken(tokens[tokens.length - 1]);
   if (!prefix) return sql`websearch_to_tsquery('english', ${query})`;
@@ -263,9 +264,9 @@ function buildTsQuery(query: string): SQL {
  */
 interface SearchMatcher {
   /** Narrows to the rows this matcher considers a match. */
-  condition: SQL;
+  condition: RawBuilder<SqlBool>;
   /** How well each row matches, for `sort_by=relevance`. */
-  rank: SQL;
+  rank: RawBuilder<number>;
 }
 
 /**
@@ -285,8 +286,8 @@ interface SearchMatcher {
 function buildExactMatcher(query: string): SearchMatcher {
   const tsQuery = buildTsQuery(query);
   return {
-    condition: sql`${resourceDirectory.search} @@ ${tsQuery}`,
-    rank: sql`ts_rank_cd(${resourceDirectory.search}, ${tsQuery})`,
+    condition: sql<SqlBool>`${sql.ref("resource_directory.search")} @@ ${tsQuery}`,
+    rank: sql<number>`ts_rank_cd(${sql.ref("resource_directory.search")}, ${tsQuery})`,
   };
 }
 
@@ -323,8 +324,8 @@ const FUZZY_MATCH_THRESHOLD = 0.4;
  * and a `gin_trgm_ops` index, together.
  */
 function buildFuzzyMatcher(query: string): SearchMatcher {
-  const best = sql`GREATEST(word_similarity(${query}, ${resourceDirectory.name}), word_similarity(${query}, ${resourceDirectory.description}))`;
-  return { condition: sql`${best} >= ${FUZZY_MATCH_THRESHOLD}`, rank: best };
+  const best = sql<number>`GREATEST(word_similarity(${query}, ${sql.ref("resource_directory.name")}), word_similarity(${query}, ${sql.ref("resource_directory.description")}))`;
+  return { condition: sql<SqlBool>`${best} >= ${FUZZY_MATCH_THRESHOLD}`, rank: best };
 }
 
 /** The install trend chart's fixed window — see `ResourcesService.getInstallTrend`. */
@@ -418,16 +419,17 @@ export class ResourcesService {
   ): Promise<Page<ResourceDirectoryEntry>> {
     const { page, pageSize, tagIds, sortBy, sortOrder, kind } = query;
 
-    const matches = matcher?.condition;
-    const kindFilter = kind ? eq(resourceDirectory.kind, kind) : undefined;
-    const tagFilter =
-      tagIds.length > 0
-        ? inArray(
-            resourceDirectory.id,
-            this.db.select({ id: resourceTags.resource_id }).from(resourceTags).where(inArray(resourceTags.tag_id, tagIds)),
-          )
-        : undefined;
-    const where = and(kindFilter, matches, tagFilter);
+    const where = (eb: ExpressionBuilder<DB, "resource_directory">): Expression<SqlBool> => {
+      const filters: Expression<SqlBool>[] = [];
+      if (kind) filters.push(eb("kind", "=", kind));
+      if (matcher) filters.push(matcher.condition);
+      if (tagIds.length > 0) {
+        filters.push(
+          eb("id", "in", eb.selectFrom("resource_tags").select("resource_tags.resource_id").where("tag_id", "in", tagIds)),
+        );
+      }
+      return eb.and(filters);
+    };
 
     // `relevance` without a term never reaches here — the query schema
     // rewrites it to `updated_at` — but the rank comes from `matcher`, so
@@ -437,42 +439,46 @@ export class ResourcesService {
       sortBy === "relevance" && matcher
         ? matcher.rank
         : sortBy === "installs"
-          ? resourceDirectory.install_count
-          : resourceDirectory.updated_at;
-    const ordering: SQL[] = [sortOrder === "asc" ? asc(sortExpression) : desc(sortExpression)];
-    // Rank ties are common — every Resource matching on the same single
-    // low-weight lexeme scores alike — so recency breaks them before `id`
-    // does, which is insertion order and reads as arbitrary to a reader.
-    if (sortBy === "relevance") ordering.push(desc(resourceDirectory.updated_at));
-    // Tiebreak on id (uuidv7, so insertion-ordered). Without one, rows
-    // sharing every preceding sort value have no stable order across
-    // requests, and infinite scroll repeats or skips rows.
-    ordering.push(asc(resourceDirectory.id));
+          ? sql.ref<number>("resource_directory.install_count")
+          : sql.ref<Date>("resource_directory.updated_at");
 
     const rows = await this.db
-      .select({
-        id: resourceDirectory.id,
-        kind: resourceDirectory.kind,
-        namespace: resourceDirectory.namespace,
-        name: resourceDirectory.name,
-        description: resourceDirectory.description,
-        published_by_name: resourceDirectory.published_by_name,
-        updated_at: resourceDirectory.updated_at,
-        source: resourceDirectory.source,
-        allowed_tools: resourceDirectory.allowed_tools,
-        installs: resourceDirectory.install_count,
-        tags: resourceDirectory.tags,
-      })
-      .from(resourceDirectory)
+      .selectFrom("resource_directory")
+      .select([
+        "id",
+        "kind",
+        "namespace",
+        "name",
+        "description",
+        "published_by_name",
+        "updated_at",
+        "source",
+        "allowed_tools",
+        "install_count as installs",
+        "tags",
+      ])
       .where(where)
-      .orderBy(...ordering)
+      .orderBy(sortExpression, sortOrder)
+      // Rank ties are common — every Resource matching on the same single
+      // low-weight lexeme scores alike — so recency breaks them before `id`
+      // does, which is insertion order and reads as arbitrary to a reader.
+      .$if(sortBy === "relevance", (qb) => qb.orderBy("updated_at", "desc"))
+      // Tiebreak on id (uuidv7, so insertion-ordered). Without one, rows
+      // sharing every preceding sort value have no stable order across
+      // requests, and infinite scroll repeats or skips rows.
+      .orderBy("id", "asc")
       .limit(pageSize)
-      .offset((page - 1) * pageSize);
+      .offset((page - 1) * pageSize)
+      .execute();
 
-    const [totals] = await this.db.select({ total: count() }).from(resourceDirectory).where(where);
+    const { total } = await this.db
+      .selectFrom("resource_directory")
+      .select((eb) => eb.fn.countAll<number>().as("total"))
+      .where(where)
+      .executeTakeFirstOrThrow();
 
     const items = rows.map((row) => ({ ...row, source: this.resolveSource(row.source) }));
-    return { items, page, page_size: pageSize, total: totals?.total ?? 0 };
+    return { items, page, page_size: pageSize, total };
   }
 
   /**
@@ -496,12 +502,18 @@ export class ResourcesService {
    * ```
    */
   async getStats(): Promise<ResourceDirectoryStats> {
-    const [rows, installs] = await Promise.all([
-      this.db.select({ skills: count(), publishers: countDistinct(resources.published_by_email) }).from(resources),
+    const [counts, installs] = await Promise.all([
+      this.db
+        .selectFrom("resources")
+        .select((eb) => [
+          eb.fn.countAll<number>().as("skills"),
+          eb.fn.count<number>("published_by_email").distinct().as("publishers"),
+        ])
+        .executeTakeFirstOrThrow(),
       this.analytics.getTotalInstallCount(),
     ]);
 
-    return { skills: rows[0]?.skills ?? 0, publishers: rows[0]?.publishers ?? 0, installs };
+    return { ...counts, installs };
   }
 
   /**
@@ -521,7 +533,7 @@ export class ResourcesService {
    * ```
    */
   async get(id: string): Promise<SkillDetail> {
-    return this.readSkill(eq(resources.id, id));
+    return this.readSkill((eb) => eb("resources.id", "=", id));
   }
 
   /**
@@ -569,8 +581,8 @@ export class ResourcesService {
    */
   async getByName(kind: string, name: string, namespace?: string): Promise<SkillDetail> {
     const named = namespace ?? (await this.resolveNamespace(kind, name));
-    return this.readSkill(
-      and(eq(resources.kind, kind), eq(resources.namespace, named), eq(resources.name, name)) as SQL,
+    return this.readSkill((eb) =>
+      eb.and({ "resources.kind": kind, "resources.namespace": named, "resources.name": name }),
     );
   }
 
@@ -585,9 +597,11 @@ export class ResourcesService {
    */
   private async resolveNamespace(kind: string, name: string): Promise<string> {
     const candidates = await this.db
-      .select({ namespace: resources.namespace })
-      .from(resources)
-      .where(and(eq(resources.kind, kind), eq(resources.name, name)));
+      .selectFrom("resources")
+      .select("namespace")
+      .where("kind", "=", kind)
+      .where("name", "=", name)
+      .execute();
 
     const [only] = candidates;
     if (!only) throw new ResourceNotFoundError();
@@ -598,33 +612,6 @@ export class ResourcesService {
     throw new AmbiguousResourceNameError(name, candidates.map((candidate) => candidate.namespace).sort());
   }
 
-  /**
-   * Reads the one Skill matching `identity`, whole.
-   *
-   * @remarks
-   * The single place a Skill is assembled. Every read path goes through it —
-   * by id, by `(kind, name)`, and the response to a publish — so a column
-   * added to `skillSelection` reaches all three at once. It used to be
-   * assembled three times, twice as this select and once as a hand-written
-   * literal, and nothing failed if a new column reached only some of them.
-   *
-   * Tags and install count are not columns on `resources`: Tags are a join
-   * through `resource_tags` (ADR-0011) and the count comes off the
-   * `resource_analytics` view (ADR-0012), so both are fetched alongside — and
-   * concurrently, since neither depends on the other. `license`,
-   * `compatibility`, `metadata`, and `allowed_tools` come out of `payload`
-   * (ADR-0026), unpacked back into the flat shape the wire has always had —
-   * a Skill-only assembly, since that's the only Kind a row here can be.
-   *
-   * @param identity - The condition identifying the Resource, over
-   * `resources` — by id alone, or by `(kind, name)`.
-   * @returns `SkillDetail`
-   * @throws ResourceNotFoundError if nothing matches.
-   * @example
-   * ```ts
-   * const skill = await this.readSkill(eq(resources.id, id));
-   * ```
-   */
   /**
    * Resolves a Resource's stored `source` into the one every read returns.
    *
@@ -648,13 +635,40 @@ export class ResourcesService {
     return stored ?? reverseDomain(this.publicUrl);
   }
 
-  private async readSkill(identity: SQL): Promise<SkillDetail> {
-    const [skill] = await this.db
+  /**
+   * Reads the one Skill matching `identity`, whole.
+   *
+   * @remarks
+   * The single place a Skill is assembled. Every read path goes through it —
+   * by id, by `(kind, name)`, and the response to a publish — so a column
+   * added to `skillSelection` reaches all three at once. It used to be
+   * assembled three times, twice as this select and once as a hand-written
+   * literal, and nothing failed if a new column reached only some of them.
+   *
+   * Tags and install count are not columns on `resources`: Tags are a join
+   * through `resource_tags` (ADR-0011) and the count comes off the
+   * `resource_analytics` view (ADR-0012), so both are fetched alongside — and
+   * concurrently, since neither depends on the other. `license`,
+   * `compatibility`, `metadata`, and `allowed_tools` come out of `payload`
+   * (ADR-0026), unpacked back into the flat shape the wire has always had —
+   * a Skill-only assembly, since that's the only Kind a row here can be.
+   *
+   * @param identity - The condition identifying the Resource, over
+   * `resources` — by id alone, or by `(kind, namespace, name)`.
+   * @returns `SkillDetail`
+   * @throws ResourceNotFoundError if nothing matches.
+   * @example
+   * ```ts
+   * const skill = await this.readSkill((eb) => eb("resources.id", "=", id));
+   * ```
+   */
+  private async readSkill(identity: ResourceIdentity): Promise<SkillDetail> {
+    const skill = await this.db
+      .selectFrom("resources")
+      .leftJoin("users", "users.id", "resources.published_by")
       .select(skillSelection)
-      .from(resources)
-      .leftJoin(users, eq(resources.published_by, users.id))
       .where(identity)
-      .limit(1);
+      .executeTakeFirst();
     if (!skill) throw new ResourceNotFoundError();
 
     const [tags, installs] = await Promise.all([
@@ -679,7 +693,12 @@ export class ResourcesService {
       source: this.resolveSource(skill.source),
       published_at: skill.published_at,
       updated_at: skill.updated_at,
-      published_by: skill.published_by,
+      published_by: {
+        user_id: skill.publisher_user_id,
+        email: skill.published_by_email,
+        first_name: skill.publisher_first_name,
+        last_name: skill.publisher_last_name,
+      },
       tags,
       installs,
     };
@@ -752,8 +771,8 @@ export class ResourcesService {
     // and search can use without joining `users`, surviving a rename or
     // removal.
     const published_by_name = `${publisher.first_name} ${publisher.last_name}`;
-    const upserted = await this.db
-      .insert(resources)
+    const row = await this.db
+      .insertInto("resources")
       .values({
         kind,
         namespace,
@@ -767,13 +786,12 @@ export class ResourcesService {
         published_at,
         source,
       })
-      .onConflictDoUpdate({
-        // Matches resources_kind_namespace_name_unique, which is NULLS NOT
-        // DISTINCT (ADR-0042) — so a republish of a Skill published here, whose
-        // namespace is null, still conflicts with the row already there and
-        // updates it rather than inserting a second one.
-        target: [resources.kind, resources.namespace, resources.name],
-        set: {
+      // Matches resources_kind_namespace_name_unique, which is NULLS NOT
+      // DISTINCT (ADR-0042) — so a republish of a Skill published here, whose
+      // namespace is null, still conflicts with the row already there and
+      // updates it rather than inserting a second one.
+      .onConflict((oc) =>
+        oc.columns(["kind", "namespace", "name"]).doUpdateSet({
           description,
           body,
           payload: skillPayload,
@@ -783,10 +801,10 @@ export class ResourcesService {
           published_at,
           source,
           updated_at: new Date(),
-        },
-      })
-      .returning();
-    const row = firstRow(upserted, "Skill upsert");
+        }),
+      )
+      .returning("id")
+      .executeTakeFirstOrThrow();
 
     await this.pruneArtifactFiles(row.id, manifest);
     const uploads = await Promise.all(
@@ -811,7 +829,7 @@ export class ResourcesService {
       // or `resource_install_events`, and nothing but `refreshInstallCounts`
       // ever writes `resource_analytics` (ADR-0012); a brand new Skill simply
       // has neither yet.
-      skill: await this.readSkill(eq(resources.id, row.id)),
+      skill: await this.readSkill((eb) => eb("resources.id", "=", row.id)),
       upload: { files: uploads, expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS },
     };
   }
@@ -840,7 +858,7 @@ export class ResourcesService {
     try {
       const objects = await this.storage.list(artifactPrefix(id));
       await Promise.all(objects.map((object) => this.storage.delete(object.key)));
-      await this.db.delete(resources).where(eq(resources.id, id));
+      await this.db.deleteFrom("resources").where("id", "=", id).execute();
     } catch (cause) {
       throw new ResourceDeleteFailedError(cause);
     }
@@ -1062,7 +1080,7 @@ export class ResourcesService {
    * @throws ResourceNotFoundError if no Resource exists by `id`.
    */
   private async getNameOrThrow(id: string): Promise<string> {
-    const [row] = await this.db.select({ name: resources.name }).from(resources).where(eq(resources.id, id)).limit(1);
+    const row = await this.db.selectFrom("resources").select("name").where("id", "=", id).executeTakeFirst();
     if (!row) throw new ResourceNotFoundError();
     return row.name;
   }

@@ -1,13 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@in-org-quicko/skillset-shared";
-import { eq } from "drizzle-orm";
-import { setPasswordCredential } from "../auth/credential.js";
-import { hashPassword } from "../auth/password.js";
-import { resourceInstallEvents, users } from "../../db/schemas/index.js";
 import {
   refreshInstallCounts,
   SIGN_IN_PATH,
+  seedUserWithPassword,
   startTestContext,
   stopTestContext,
   type TestContext,
@@ -50,18 +47,7 @@ async function createUserAndLogIn(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: Role },
 ): Promise<Session> {
-  const [row] = await context.db
-    .insert(users)
-    .values({
-      first_name: body.first_name,
-      last_name: body.last_name,
-      email: body.email,
-      role: body.role,
-    })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
-
-  await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
+  const row = await seedUserWithPassword(context, body);
 
   const res = await context.app.request(SIGN_IN_PATH, {
     method: "POST",
@@ -237,7 +223,11 @@ describe("Recording installs (ticket 22)", () => {
     await download(context, reader, skillId);
     await download(context, reader, skillId);
 
-    const events = await context.db.select().from(resourceInstallEvents).where(eq(resourceInstallEvents.resource_id, skillId));
+    const events = await context.db
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", skillId)
+      .execute();
     expect(events.length).toBe(2);
     expect(events.every((event) => event.source === "web")).toBe(true);
   });

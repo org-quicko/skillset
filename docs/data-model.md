@@ -1,16 +1,15 @@
 # Data Model
 
-Postgres 18. Twelve tables, one materialized view, and one plain view. One table or view per file
-under `apps/api/src/db/schemas/`, managed with Drizzle migrations. Both views are created in
-hand-written SQL because Drizzle has no generator for a view (ADR-0012); everything else,
-generated columns and check constraints included, comes out of `bun run db:generate`.
+Postgres 18. Twelve tables, one materialized view, and one plain view, built by the migrations in
+`apps/api/src/db/migrations/` (ADR-0045). Their TypeScript types are generated from those
+migrations into `apps/api/src/db/database.ts` by `bun run db:types`.
 
 Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag,
 Git Provider, Integration, Connection, Import.
 
 Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
 TypeScript type — there is no separate camelCase domain shape or conversion boundary. Types are
-`z.infer`red from the Zod schemas in `@in-org-quicko/skillset-shared`, so a Drizzle row, a wire payload,
+`z.infer`red from the Zod schemas in `@in-org-quicko/skillset-shared`, so a database row, a wire payload,
 and a TypeScript type all agree on the same field names by construction. A column name appearing
 in a wire payload is therefore expected, not a leak.
 

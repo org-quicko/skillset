@@ -1,8 +1,6 @@
 import type { ArtifactFileUpload, ArtifactUpload, ResourceSubmission, SkillPayload } from "@in-org-quicko/skillset-shared";
-import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
-import { resourceSubmissions, resources, type ResourceSubmissionRow, type UserRow } from "../../db/schemas/index.js";
+import type { ResourceSubmissionRow, UserRow } from "../../db/tables.js";
 import type { Logger } from "../../lib/logger.js";
 import {
   ARTIFACT_UPLOAD_CONTENT_TYPE,
@@ -112,15 +110,12 @@ export class SubmissionsService {
       submitted_by_email: submitter.email,
       submitted_by_name: `${submitter.first_name} ${submitter.last_name}`,
     };
-    const upserted = await this.db
-      .insert(resourceSubmissions)
+    const row = await this.db
+      .insertInto("resource_submissions")
       .values({ kind, namespace, name, ...fields })
-      .onConflictDoUpdate({
-        target: [resourceSubmissions.kind, resourceSubmissions.namespace, resourceSubmissions.name],
-        set: { ...fields, updated_at: new Date() },
-      })
-      .returning();
-    const row = firstRow(upserted, "Submission upsert");
+      .onConflict((oc) => oc.columns(["kind", "namespace", "name"]).doUpdateSet({ ...fields, updated_at: new Date() }))
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     // A resubmission's manifest replaces the last one whole, so nothing the
     // earlier copy uploaded survives to be approved alongside it.
@@ -146,7 +141,7 @@ export class SubmissionsService {
 
   /** Every pending Submission, newest first. */
   async list(): Promise<ResourceSubmission[]> {
-    const rows = await this.db.select().from(resourceSubmissions).orderBy(desc(resourceSubmissions.updated_at));
+    const rows = await this.db.selectFrom("resource_submissions").selectAll().orderBy("updated_at", "desc").execute();
     return rows.map(toSubmission);
   }
 
@@ -183,8 +178,8 @@ export class SubmissionsService {
     const objects = await this.storage.list(submissionPrefix(id));
     if (objects.length === 0) throw new SubmissionIncompleteError();
 
-    const inserted = await this.db
-      .insert(resources)
+    const { id: resourceId } = await this.db
+      .insertInto("resources")
       .values({
         kind: submission.kind,
         namespace: submission.namespace,
@@ -197,8 +192,8 @@ export class SubmissionsService {
         published_by_email: submission.submitted_by_email,
         published_by_name: submission.submitted_by_name,
       })
-      .returning({ id: resources.id });
-    const resourceId = firstRow(inserted, "Resource insert").id;
+      .returning("id")
+      .executeTakeFirstOrThrow();
 
     for (const object of objects) {
       const path = submissionPathFromKey(id, object.key);
@@ -207,7 +202,7 @@ export class SubmissionsService {
       await this.storage.put(artifactFileKey(resourceId, path), bytes, ARTIFACT_UPLOAD_CONTENT_TYPE);
     }
     await this.deleteFiles(id);
-    await this.db.delete(resourceSubmissions).where(eq(resourceSubmissions.id, id));
+    await this.db.deleteFrom("resource_submissions").where("id", "=", id).execute();
 
     this.logger.info({ submission_id: id, resource_id: resourceId }, "submission approved");
     return this.resources.get(resourceId);
@@ -222,22 +217,24 @@ export class SubmissionsService {
   async reject(id: string): Promise<void> {
     await this.getRow(id);
     await this.deleteFiles(id);
-    await this.db.delete(resourceSubmissions).where(eq(resourceSubmissions.id, id));
+    await this.db.deleteFrom("resource_submissions").where("id", "=", id).execute();
     this.logger.info({ submission_id: id }, "submission rejected");
   }
 
   private async getRow(id: string): Promise<ResourceSubmissionRow> {
-    const [row] = await this.db.select().from(resourceSubmissions).where(eq(resourceSubmissions.id, id)).limit(1);
+    const row = await this.db.selectFrom("resource_submissions").selectAll().where("id", "=", id).executeTakeFirst();
     if (!row) throw new SubmissionNotFoundError();
     return row;
   }
 
   private async isPublished(kind: string, namespace: string, name: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: resources.id })
-      .from(resources)
-      .where(and(eq(resources.kind, kind), eq(resources.namespace, namespace), eq(resources.name, name)))
-      .limit(1);
+    const row = await this.db
+      .selectFrom("resources")
+      .select("id")
+      .where("kind", "=", kind)
+      .where("namespace", "=", namespace)
+      .where("name", "=", name)
+      .executeTakeFirst();
     return row !== undefined;
   }
 

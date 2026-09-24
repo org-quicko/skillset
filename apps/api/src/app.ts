@@ -3,9 +3,9 @@ import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { csrf } from "hono/csrf";
 import { requestId } from "hono/request-id";
-import type postgres from "postgres";
 import mcpDiscovery from "../../../docs/mcp.json" with { type: "json" };
 import openapiSpec from "../../../docs/openapi.json" with { type: "json" };
+import { sql } from "kysely";
 import type { Database } from "./db/client.js";
 import { authRoutes } from "./features/auth/auth.routes.js";
 import { connectionsRoutes } from "./features/connections/connections.routes.js";
@@ -64,7 +64,6 @@ const RATE_LIMIT = {
 };
 
 export interface AppDependencies {
-  sql: postgres.Sql;
   db: Database;
   /** Better Auth's signing secret (ADR-0016). */
   betterAuthSecret: string;
@@ -119,7 +118,7 @@ function createApi(deps: AppDependencies) {
       await next();
     })
     .get("/health", async (c) => {
-      await deps.sql`SELECT 1`;
+      await sql`SELECT 1`.execute(deps.db);
       return c.json({ status: "ok" });
     })
     .route("/setup", setupRoutes)
@@ -166,7 +165,7 @@ export type ApiType = ReturnType<typeof createApi>;
  *
  * @example
  * ```ts
- * const app = createApp({ sql, db, betterAuthSecret, publicUrl, storage, logger });
+ * const app = createApp({ db, betterAuthSecret, publicUrl, storage, logger });
  * ```
  */
 export function createApp(deps: AppDependencies): Hono {

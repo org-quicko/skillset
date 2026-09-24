@@ -17,7 +17,7 @@ export default tseslint.config(
     // problems this config reported came from that one file, which is enough
     // noise to hide every real finding and to leave `bun run lint` — and so
     // `prebuild` — failing as its normal state.
-    ignores: ["**/dist/**", "**/node_modules/**", "**/.claude/**", "**/drizzle/**", "_ds/**"],
+    ignores: ["**/dist/**", "**/node_modules/**", "**/.claude/**", "apps/api/src/db/database.ts", "_ds/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

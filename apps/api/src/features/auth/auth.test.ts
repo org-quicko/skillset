@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq } from "drizzle-orm";
 import { CREDENTIAL_PROVIDER_ID } from "./credential.js";
-import { accounts, sessions, users } from "../../db/schemas/index.js";
 import { SIGN_IN_PATH, SIGN_OUT_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "../../../test/context.js";
 
 interface ApiError {
@@ -85,12 +83,17 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   });
 
   it("stores the password hashed with argon2id, never in plaintext", async () => {
-    const [user] = await context.db.select().from(users).where(eq(users.email, "ada@example.com")).limit(1);
-    const [credential] = await context.db
-      .select()
-      .from(accounts)
-      .where(and(eq(accounts.user_id, user!.id), eq(accounts.provider_id, CREDENTIAL_PROVIDER_ID)))
-      .limit(1);
+    const user = await context.db
+      .selectFrom("users")
+      .selectAll()
+      .where("email", "=", "ada@example.com")
+      .executeTakeFirstOrThrow();
+    const credential = await context.db
+      .selectFrom("accounts")
+      .selectAll()
+      .where("user_id", "=", user.id)
+      .where("provider_id", "=", CREDENTIAL_PROVIDER_ID)
+      .executeTakeFirst();
 
     // The column moved from users to accounts (ADR-0016); the algorithm did
     // not, which is what keeps every pre-migration hash verifiable.
@@ -99,7 +102,7 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   });
 
   it("carries only the User's identity in the session — never the role", async () => {
-    const [session] = await context.db.select().from(sessions).limit(1);
+    const session = await context.db.selectFrom("sessions").selectAll().executeTakeFirst();
 
     // ADR-0005's rule survives the move from a JWT to a row: the session says
     // who you are and nothing about what you may do, so a demotion cannot be
@@ -126,7 +129,11 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     });
     expect(res.status).toBe(409);
 
-    const [row] = await context.db.select().from(users).where(eq(users.email, "grace@example.com")).limit(1);
+    const row = await context.db
+      .selectFrom("users")
+      .selectAll()
+      .where("email", "=", "grace@example.com")
+      .executeTakeFirst();
     expect(row).toBeUndefined();
   });
 
@@ -196,12 +203,15 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
   it("does not assume a User has a password (ADR-0007) — login fails cleanly, not with a crash", async () => {
     // No credential row at all, which is what a User who only ever arrived
     // through an Identity Provider looks like (ADR-0007).
-    await context.db.insert(users).values({
-      email: "sso-user@example.com",
-      first_name: "Sso",
-      last_name: "User",
-      role: "reader",
-    });
+    await context.db
+      .insertInto("users")
+      .values({
+        email: "sso-user@example.com",
+        first_name: "Sso",
+        last_name: "User",
+        role: "reader",
+      })
+      .execute();
 
     const res = await context.app.request(SIGN_IN_PATH, {
       method: "POST",
@@ -215,13 +225,13 @@ describe("Bootstrap, sessions, and identity (ticket 02)", () => {
     let res = await context.app.request("/api/users/me", { headers: { cookie: superadminCookie } });
     expect(((await res.json()) as ApiUser).role).toBe("superadmin");
 
-    await context.db.update(users).set({ role: "writer" }).where(eq(users.email, "ada@example.com"));
+    await context.db.updateTable("users").set({ role: "writer" }).where("email", "=", "ada@example.com").execute();
 
     res = await context.app.request("/api/users/me", { headers: { cookie: superadminCookie } });
     expect(((await res.json()) as ApiUser).role).toBe("writer");
 
     // Restore, so later tests keep seeing a Superadmin.
-    await context.db.update(users).set({ role: "superadmin" }).where(eq(users.email, "ada@example.com"));
+    await context.db.updateTable("users").set({ role: "superadmin" }).where("email", "=", "ada@example.com").execute();
   });
 
   it("revokes the session on logout, not merely the cookie", async () => {

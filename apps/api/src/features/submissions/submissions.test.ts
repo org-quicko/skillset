@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { resourceSubmissions, resources } from "../../db/schemas/index.js";
 import {
   seedUserWithPassword,
   signIn,
@@ -42,8 +41,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await context.db.delete(resourceSubmissions);
-  await context.db.delete(resources);
+  await context.db.deleteFrom("resource_submissions").execute();
+  await context.db.deleteFrom("resources").execute();
 });
 
 async function submit(cookie: string, body: Record<string, unknown> = {}): Promise<Response> {

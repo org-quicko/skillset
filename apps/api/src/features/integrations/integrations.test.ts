@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@in-org-quicko/skillset-shared";
-import { eq } from "drizzle-orm";
-import { connections, integrations, users } from "../../db/schemas/index.js";
 import { deriveKeys, openClientSecret } from "../../lib/secrets.js";
 import {
   seedUserWithPassword,
@@ -110,8 +108,8 @@ describe("Integrations (ADR-0024)", () => {
     // Connections reference `integrations.id` with RESTRICT, so they go
     // first — that FK exists precisely so a live Integration cannot be removed
     // out from under a writer's grant.
-    await context.db.delete(connections);
-    await context.db.delete(integrations);
+    await context.db.deleteFrom("connections").execute();
+    await context.db.deleteFrom("integrations").execute();
   }
 
   function post(cookie: string, body: Record<string, unknown>) {
@@ -178,7 +176,7 @@ describe("Integrations (ADR-0024)", () => {
       await clearIntegrations();
       await post(admin.cookie, integrationBody({ client_secret: "the-real-secret" }));
 
-      const [row] = await context.db.select().from(integrations);
+      const [row] = await context.db.selectFrom("integrations").selectAll().execute();
       // A database dump is the threat this closes: the GitHub App secret is
       // enough to exchange every writer's refresh token (ISSUE-9).
       expect(row?.client_secret).not.toBe("the-real-secret");
@@ -254,7 +252,7 @@ describe("Integrations (ADR-0024)", () => {
 
       const res = await patch(admin.cookie, id, { app_slug: null });
       expect(res.status).toBe(400);
-      expect((await context.db.select().from(integrations))[0]?.app_slug).toBe("acme-skill-registry");
+      expect((await context.db.selectFrom("integrations").selectAll().execute())[0]?.app_slug).toBe("acme-skill-registry");
     });
   });
 
@@ -295,7 +293,7 @@ describe("Integrations (ADR-0024)", () => {
       expect(res.status).toBe(200);
       expect(((await res.json()) as ApiIntegration).display_name).toBe("GitHub (work)");
 
-      const [row] = await context.db.select().from(integrations);
+      const [row] = await context.db.selectFrom("integrations").selectAll().execute();
       expect(await storedSecret(row?.client_secret)).toBe("original-secret");
     });
 
@@ -305,7 +303,7 @@ describe("Integrations (ADR-0024)", () => {
 
       expect((await patch(admin.cookie, id, { client_secret: "rotated-secret" })).status).toBe(200);
 
-      const [row] = await context.db.select().from(integrations);
+      const [row] = await context.db.selectFrom("integrations").selectAll().execute();
       expect(await storedSecret(row?.client_secret)).toBe("rotated-secret");
     });
 
@@ -326,7 +324,7 @@ describe("Integrations (ADR-0024)", () => {
       const id = await created(admin.cookie, { description: "Keep me." });
 
       expect((await patch(admin.cookie, id, { display_name: "GitHub" })).status).toBe(200);
-      expect((await context.db.select().from(integrations))[0]?.description).toBe("Keep me.");
+      expect((await context.db.selectFrom("integrations").selectAll().execute())[0]?.description).toBe("Keep me.");
     });
 
     it("leaves an app slug alone when the field is omitted", async () => {
@@ -334,7 +332,7 @@ describe("Integrations (ADR-0024)", () => {
       const id = await created(admin.cookie, { app_slug: "acme-registry" });
 
       expect((await patch(admin.cookie, id, { display_name: "GitHub" })).status).toBe(200);
-      expect((await context.db.select().from(integrations))[0]?.app_slug).toBe("acme-registry");
+      expect((await context.db.selectFrom("integrations").selectAll().execute())[0]?.app_slug).toBe("acme-registry");
     });
 
     it("cannot repoint an Integration at a different Git Provider", async () => {
@@ -345,7 +343,7 @@ describe("Integrations (ADR-0024)", () => {
       // such field and sending one changes nothing rather than moving the
       // registration.
       expect((await patch(admin.cookie, id, { provider: "gitlab" })).status).toBe(200);
-      expect((await context.db.select().from(integrations))[0]?.provider).toBe("github");
+      expect((await context.db.selectFrom("integrations").selectAll().execute())[0]?.provider).toBe("github");
     });
 
     it("refuses an edit to an id with no Integration", async () => {
@@ -375,15 +373,22 @@ describe("Integrations (ADR-0024)", () => {
    */
   /** Seeds a Connection held against `integrationId`, for tests exercising what happens to it. */
   async function seedConnection(integrationId: string) {
-    const [user] = await context.db.select().from(users).where(eq(users.email, "ada@example.com"));
-    await context.db.insert(connections).values({
-      user_id: user?.id ?? "",
-      provider: "github",
-      integration_id: integrationId,
-      external_account_id: "1",
-      external_account_login: "ada-work",
-      access_token: "ciphertext",
-    });
+    const user = await context.db
+      .selectFrom("users")
+      .select("id")
+      .where("email", "=", "ada@example.com")
+      .executeTakeFirst();
+    await context.db
+      .insertInto("connections")
+      .values({
+        user_id: user?.id ?? "",
+        provider: "github",
+        integration_id: integrationId,
+        external_account_id: "1",
+        external_account_login: "ada-work",
+        access_token: "ciphertext",
+      })
+      .execute();
   }
 
   describe("repointing an Integration at a different app", () => {
@@ -393,7 +398,7 @@ describe("Integrations (ADR-0024)", () => {
       await seedConnection(id);
 
       expect((await patch(admin.cookie, id, { client_id: "Iv1.second-app" })).status).toBe(200);
-      expect(await context.db.select().from(connections)).toEqual([]);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
     it("keeps them when only the secret is rotated", async () => {
@@ -404,7 +409,7 @@ describe("Integrations (ADR-0024)", () => {
       // A secret belongs to the app, not to the grant: the tokens stay valid,
       // so dropping them would cost every writer a reconnection for nothing.
       expect((await patch(admin.cookie, id, { client_secret: "rotated" })).status).toBe(200);
-      expect(await context.db.select().from(connections)).toHaveLength(1);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toHaveLength(1);
     });
 
     it("keeps them when the same client id is re-saved", async () => {
@@ -414,7 +419,7 @@ describe("Integrations (ADR-0024)", () => {
 
       // Re-saving an unchanged form must not be destructive.
       expect((await patch(admin.cookie, id, { client_id: "Iv1.first-app" })).status).toBe(200);
-      expect(await context.db.select().from(connections)).toHaveLength(1);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toHaveLength(1);
     });
   });
 
@@ -453,7 +458,7 @@ describe("Integrations (ADR-0024)", () => {
       const id = await created(admin.cookie);
 
       expect((await del(admin.cookie, id)).status).toBe(204);
-      expect(await context.db.select().from(integrations)).toEqual([]);
+      expect(await context.db.selectFrom("integrations").selectAll().execute()).toEqual([]);
     });
 
     it("refuses when a Connection still references it, and leaves both rows in place", async () => {
@@ -467,8 +472,8 @@ describe("Integrations (ADR-0024)", () => {
 
       // Refused loudly, not silently — the Integration and the writer's grant
       // against it are both still there afterwards.
-      expect(await context.db.select().from(integrations)).toHaveLength(1);
-      expect(await context.db.select().from(connections)).toHaveLength(1);
+      expect(await context.db.selectFrom("integrations").selectAll().execute()).toHaveLength(1);
+      expect(await context.db.selectFrom("connections").selectAll().execute()).toHaveLength(1);
     });
 
     it("refuses a delete for an id with no Integration", async () => {

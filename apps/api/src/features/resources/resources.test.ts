@@ -1,13 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, registryNamespace, type Role } from "@in-org-quicko/skillset-shared";
-import { asc, eq } from "drizzle-orm";
-import { setPasswordCredential } from "../auth/credential.js";
-import { hashPassword } from "../auth/password.js";
-import { resourceInstallEvents, resources, users } from "../../db/schemas/index.js";
 import {
   refreshInstallCounts,
   SIGN_IN_PATH,
+  seedUserWithPassword,
   startTestContext,
   stopTestContext,
   type TestContext,
@@ -115,18 +112,7 @@ async function createUserAndLogIn(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: Role },
 ): Promise<Session> {
-  const [row] = await context.db
-    .insert(users)
-    .values({
-      first_name: body.first_name,
-      last_name: body.last_name,
-      email: body.email,
-      role: body.role,
-    })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
-
-  await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
+  const row = await seedUserWithPassword(context, body);
 
   const res = await context.app.request(SIGN_IN_PATH, {
     method: "POST",
@@ -244,7 +230,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     // (ADR-0026, ADR-0032).
     expect(decodeURIComponent(target?.url ?? "")).toContain(`resources/${published.skill.id}/SKILL.md`);
 
-    const [row] = await context.db.select().from(resources).where(eq(resources.name, "code-review")).limit(1);
+    const [row] = await context.db.selectFrom("resources").selectAll().where("name", "=", "code-review").execute();
     expect(row?.id).toBe(published.skill.id);
     expect(row?.body).toBe("# Review\n\nSteps here.\n");
     expect(row?.published_by_email).toBe(writer.email);
@@ -385,7 +371,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     // of the same name (ticket 16).
     expect(secondPublished.skill.id).toBe(firstPublished.skill.id);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "shared-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "shared-skill").execute();
     expect(rows.length).toBe(1);
     expect(rows[0]?.description).toBe("Second version.");
     expect(rows[0]?.body).toBe("Second body.\n");
@@ -483,7 +469,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       expect(body.error.code).toBe(code);
       expect(body.error.field).toBe(field);
 
-      const rows = await context.db.select().from(resources).where(eq(resources.name, name));
+      const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", name).execute();
       expect(rows.length).toBe(0);
     });
   }
@@ -557,7 +543,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(skill.metadata).toEqual({ author: "quicko", version: "1.0" });
     expect(skill.allowed_tools).toBe("Bash(git:*) Read");
 
-    const [row] = await context.db.select().from(resources).where(eq(resources.name, "full-frontmatter-skill"));
+    const [row] = await context.db.selectFrom("resources").selectAll().where("name", "=", "full-frontmatter-skill").execute();
     const payload = row?.payload as { license: string | null; metadata: Record<string, string> | null } | undefined;
     expect(payload?.license).toBe("Apache-2.0");
     expect(payload?.metadata).toEqual({ author: "quicko", version: "1.0" });
@@ -681,7 +667,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    await context.db.delete(users).where(eq(users.id, departing.id));
+    await context.db.deleteFrom("users").where("id", "=", departing.id).execute();
 
     const res = await context.app.request(`/api/resources/${publishedSkill.id}`, {
       headers: { cookie: reader.cookie },
@@ -729,7 +715,7 @@ describe("Listing Skills (ticket 03)", () => {
     // explicitly instead of relying on the installs-first default, so ties
     // don't make the test's own expectations flaky.
     const base = Date.UTC(2026, 0, 1);
-    await context.db.insert(resources).values(
+    await context.db.insertInto("resources").values(
       Array.from({ length: 51 }, (_, index) => ({
         kind: "skill",
         namespace: TEST_NAMESPACE,
@@ -743,7 +729,7 @@ describe("Listing Skills (ticket 03)", () => {
         published_at: new Date(base + index * 60_000),
         updated_at: new Date(base + index * 60_000),
       })),
-    );
+    ).execute();
   }, 60_000);
 
   afterAll(async () => {
@@ -852,7 +838,7 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
 
   it("counts Skills, distinct Publishers by their email snapshot, and total Installs", async () => {
     const [one] = await context.db
-      .insert(resources)
+      .insertInto("resources")
       .values({
         kind: "skill",
         namespace: TEST_NAMESPACE,
@@ -864,9 +850,10 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
         published_by_email: "grace@example.com",
         published_by_name: "Grace Hopper",
       })
-      .returning();
+      .returningAll()
+      .execute();
     const [two] = await context.db
-      .insert(resources)
+      .insertInto("resources")
       .values({
         kind: "skill",
         namespace: TEST_NAMESPACE,
@@ -878,16 +865,17 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
         published_by_email: "grace@example.com",
         published_by_name: "Grace Hopper",
       })
-      .returning();
+      .returningAll()
+      .execute();
     if (!one || !two) throw new Error("Insert did not return the created Skills.");
 
     await context.db
-      .insert(resourceInstallEvents)
+      .insertInto("resource_install_events")
       .values([
         { resource_id: one.id, source: "web" },
         { resource_id: one.id, source: "cli" },
         { resource_id: two.id, source: "web" },
-      ]);
+      ]).execute();
     await refreshInstallCounts(context);
 
     const res = await context.app.request("/api/resources/stats");
@@ -1050,7 +1038,7 @@ describe("Searching Skills (ticket 10)", () => {
     // share one publisher except "solo-effort", searched for by publisher
     // name alone (ticket 23).
     const base = Date.UTC(2026, 1, 1);
-    await context.db.insert(resources).values([
+    await context.db.insertInto("resources").values([
       ...Array.from({ length: 51 }, (_, index) => ({
         kind: "skill",
         namespace: TEST_NAMESPACE,
@@ -1155,7 +1143,7 @@ describe("Searching Skills (ticket 10)", () => {
         published_at: new Date(base + 57 * 60_000),
         updated_at: new Date(base + 57 * 60_000),
       },
-    ]);
+    ]).execute();
   }, 60_000);
 
   afterAll(async () => {
@@ -1247,7 +1235,7 @@ describe("Searching Skills (ticket 10)", () => {
   });
 
   it("reads a Skill by id without going through search", async () => {
-    const [row] = await context.db.select({ id: resources.id }).from(resources).where(eq(resources.name, "postgresql-migrations"));
+    const [row] = await context.db.selectFrom("resources").select("id").where("name", "=", "postgresql-migrations").execute();
     if (!row) throw new Error("Seed Skill was not inserted.");
 
     const res = await context.app.request(`/api/resources/${row.id}`, { headers: { cookie: reader.cookie } });
@@ -1272,7 +1260,7 @@ describe("Ranking search results by relevance", () => {
     container = started.container;
     context = started.context;
 
-    await context.db.insert(resources).values([
+    await context.db.insertInto("resources").values([
       {
         kind: "skill",
         namespace: TEST_NAMESPACE,
@@ -1312,7 +1300,7 @@ describe("Ranking search results by relevance", () => {
         published_at: new Date(base + 120_000),
         updated_at: new Date(base + 120_000),
       },
-    ]);
+    ]).execute();
   }, 60_000);
 
   afterAll(async () => {
@@ -1386,11 +1374,11 @@ describe("Falling back to fuzzy matching (ADR-0040)", () => {
     container = started.container;
     context = started.context;
 
-    await context.db.insert(resources).values([
+    await context.db.insertInto("resources").values([
       seed("building-angular-applications", "Builds Angular applications.", 0),
       seed("kubernetes-operator", "Writes a Kubernetes operator.", 1),
       seed("changelog-writer", "Drafts a changelog entry.", 2),
-    ]);
+    ]).execute();
   }, 60_000);
 
   afterAll(async () => {
@@ -1536,9 +1524,10 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     }
 
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, publishedSkill.id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", publishedSkill.id)
+      .execute();
     expect(events.length).toBe(2);
   });
 
@@ -1566,12 +1555,13 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     }
 
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, publishedSkill.id))
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", publishedSkill.id)
       // uuidv7 ids sort in insertion order, unlike `created_at`, which can
       // tie at this resolution for requests issued back-to-back.
-      .orderBy(asc(resourceInstallEvents.id));
+      .orderBy("id", "asc")
+      .execute();
     expect(events.map((event) => event.source)).toEqual(cases.map((c) => c.expected));
   });
 
@@ -1814,7 +1804,7 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
 
       // A failing manifest rejects the publish exactly like a failing
       // required field does (ADR-0009) — nothing about the Skill changes.
-      const rows = await context.db.select().from(resources).where(eq(resources.name, name));
+      const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", name).execute();
       expect(rows.length).toBe(0);
     });
   }
@@ -1896,9 +1886,10 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
 
     // Refused before a byte was read, so nothing counted as an Install.
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", id)
+      .execute();
     expect(events.length).toBe(0);
   });
 
@@ -1910,9 +1901,10 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
 
     // Previewing is not obtaining (ADR-0028) — only the zip download counts.
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", id)
+      .execute();
     expect(events.length).toBe(0);
   });
 });
@@ -1978,7 +1970,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     });
     expect(res.status).toBe(204);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "doomed-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "doomed-skill").execute();
     expect(rows.length).toBe(0);
     // Every file, not just the one at the root — an Artifact is a prefix now
     // (ADR-0032).
@@ -2010,7 +2002,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     });
     expect(res.status).toBe(204);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "never-uploaded-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "never-uploaded-skill").execute();
     expect(rows.length).toBe(0);
   });
 
@@ -2036,7 +2028,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     const anonymous = await context.app.request(`/api/resources/${publishedSkill.id}`, { method: "DELETE" });
     expect(anonymous.status).toBe(401);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "protected-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "protected-skill").execute();
     expect(rows.length).toBe(1);
   });
 
@@ -2113,7 +2105,7 @@ describe("Namespaces (ADR-0042)", () => {
     await publish(context, writer, "pdf", { description: "A.", body: "Body.", source: ANTHROPIC });
     await publish(context, writer, "pdf", { description: "B.", body: "Body.", source: OBRA });
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "pdf"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "pdf").execute();
     expect(rows.length).toBe(2);
 
     const theirs = await context.app.request("/api/resources/skill/by-name/pdf?namespace=obra/superpowers");
@@ -2150,7 +2142,7 @@ describe("Namespaces (ADR-0042)", () => {
 
     // An insert, not an update: the Imported row keeps its own Namespace and
     // stays where it is, which is why a bare read now prefers ours.
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "moved"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "moved").execute();
     expect(rows.map((row) => row.namespace).sort()).toEqual(["anthropics/skills", TEST_NAMESPACE].sort());
   });
 });

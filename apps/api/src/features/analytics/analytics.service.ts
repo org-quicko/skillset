@@ -1,6 +1,5 @@
-import { inArray, sql, sum } from "drizzle-orm";
+import { sql } from "kysely";
 import type { Database } from "../../db/client.js";
-import { resourceAnalytics, resourceInstallEvents } from "../../db/schemas/index.js";
 import type { Logger } from "../../lib/logger.js";
 
 /** Where a recorded Install came from — see `resourceInstallSourceEnum` (ADR-0012). */
@@ -35,7 +34,7 @@ export class AnalyticsService {
    * `refreshInstallCounts` next runs.
    *
    * At most one Install per client per Resource per day is kept, which is
-   * what `onConflictDoNothing` and the unique index on
+   * what `on conflict do nothing` and the unique index on
    * `resource_install_events` do between them (ISSUE-23). The endpoint is
    * unauthenticated, so without that the count — and the catalog's
    * most-installed sort — was whatever anyone cared to make it. A repeat
@@ -56,11 +55,12 @@ export class AnalyticsService {
   async recordInstall(skillId: string, source: InstallSource, clientFingerprint?: string): Promise<void> {
     try {
       await this.db
-        .insert(resourceInstallEvents)
+        .insertInto("resource_install_events")
         .values({ resource_id: skillId, source, client_fingerprint: clientFingerprint ?? null })
-        // No `target`: the index it would name is on an expression, and every
-        // unique constraint on this table is this one anyway.
-        .onConflictDoNothing();
+        // No conflict target: the index it would name is on an expression, and
+        // every unique constraint on this table is this one anyway.
+        .onConflict((oc) => oc.doNothing())
+        .execute();
     } catch (cause) {
       this.logger.error({ err: cause, skill_id: skillId, source }, "failed to record install");
     }
@@ -79,7 +79,7 @@ export class AnalyticsService {
    * complete in milliseconds at this scale.
    */
   async refreshInstallCounts(): Promise<void> {
-    await this.db.refreshMaterializedView(resourceAnalytics);
+    await this.db.schema.refreshMaterializedView("resource_analytics").execute();
   }
 
   /**
@@ -104,9 +104,10 @@ export class AnalyticsService {
     if (skillIds.length === 0) return new Map();
 
     const rows = await this.db
-      .select({ resource_id: resourceAnalytics.resource_id, install_count: resourceAnalytics.install_count })
-      .from(resourceAnalytics)
-      .where(inArray(resourceAnalytics.resource_id, skillIds));
+      .selectFrom("resource_analytics")
+      .select(["resource_id", "install_count"])
+      .where("resource_id", "in", skillIds)
+      .execute();
 
     return new Map(rows.map((row) => [row.resource_id, row.install_count]));
   }
@@ -148,13 +149,14 @@ export class AnalyticsService {
    * ```
    */
   async getTotalInstallCount(): Promise<number> {
-    // `sum` maps to `string` (a bigint total could exceed safe integer range
-    // in principle) and reads SQL NULL over zero rows — coalesced back to
-    // `'0'` so an install-free Registry gets a count, not a parse of `null`.
-    const [row] = await this.db
-      .select({ total: sql<string>`coalesce(${sum(resourceAnalytics.install_count)}, '0')` })
-      .from(resourceAnalytics);
-    return Number(row?.total ?? 0);
+    // `sum` of a bigint is a `numeric`, which pg returns as a string, and is
+    // SQL NULL over zero rows — coalesced to 0 so an install-free Registry
+    // gets a count, not a parse of `null`.
+    const row = await this.db
+      .selectFrom("resource_analytics")
+      .select(sql<string>`coalesce(sum(${sql.ref("install_count")}), 0)`.as("total"))
+      .executeTakeFirstOrThrow();
+    return Number(row.total);
   }
 
   /**
@@ -179,20 +181,34 @@ export class AnalyticsService {
    * ```
    */
   async getInstallTimeseries(resourceId: string, days: number): Promise<InstallTrendPoint[]> {
-    const rows = await this.db.execute<{ date: string; count: number }>(sql`
-      select gs.day::date::text as date, coalesce(count(rie.id), 0)::int as count
-      from generate_series(
-        (current_date - ${days - 1} * interval '1 day')::date,
-        current_date::date,
-        interval '1 day'
-      ) as gs(day)
-      left join ${resourceInstallEvents} as rie
-        on rie.resource_id = ${resourceId}
-        and rie.created_at >= gs.day
-        and rie.created_at < gs.day + interval '1 day'
-      group by gs.day
-      order by gs.day
-    `);
+    // `gs.day` is a `timestamp`: the series is built from dates stepped by an
+    // interval. Returned as `::date::text` so `date` stays a `YYYY-MM-DD`
+    // string rather than a JS `Date` pg would parse a bare `date` into.
+    const rows = await this.db
+      .selectFrom(
+        this.db
+          .selectNoFrom(
+            sql<Date>`generate_series(
+              (current_date - ${days - 1} * interval '1 day')::date,
+              current_date::date,
+              interval '1 day'
+            )`.as("day"),
+          )
+          .as("gs"),
+      )
+      .leftJoin("resource_install_events as rie", (join) =>
+        join
+          .on("rie.resource_id", "=", resourceId)
+          .onRef("rie.created_at", ">=", "gs.day")
+          .on("rie.created_at", "<", sql<Date>`${sql.ref("gs.day")} + interval '1 day'`),
+      )
+      .select([
+        sql<string>`${sql.ref("gs.day")}::date::text`.as("date"),
+        sql<number>`coalesce(count(${sql.ref("rie.id")}), 0)::int`.as("count"),
+      ])
+      .groupBy("gs.day")
+      .orderBy("gs.day")
+      .execute();
     return rows.map((row) => ({ date: row.date, count: row.count }));
   }
 }

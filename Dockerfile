@@ -40,7 +40,6 @@ COPY docs/mcp.json docs/mcp.json
 COPY packages/shared packages/shared
 COPY apps/api/package.json apps/api/package.json
 COPY apps/api/src apps/api/src
-COPY apps/api/drizzle apps/api/drizzle
 COPY --from=build-web /app/apps/web/dist apps/web/dist
 COPY --from=build-mcp /app/apps/mcp/skillset-mcp.mcpb apps/mcp/skillset-mcp.mcpb
 

@@ -41,8 +41,8 @@ Search matches a term with Postgres full-text first, and falls back to trigram m
 when that finds nothing — so `angulr` still finds `building-angular-applications`
 ([ADR-0040](docs/adr/0040-a-mistyped-search-falls-back-to-trigrams.md)).
 
-That fallback needs the **`pg_trgm`** extension, which migration `0003_trigram_search.sql`
-creates on startup. On most managed Postgres, `CREATE EXTENSION` requires a privileged role.
+That fallback needs the **`pg_trgm`** extension, which the baseline migration
+(`apps/api/src/db/migrations/0000_baseline.ts`) creates on startup. On most managed Postgres, `CREATE EXTENSION` requires a privileged role.
 If the role in `DATABASE_URL` does not have it, the migration fails and the app will not
 start — have a DBA create the extension once, against the same database:
 
@@ -57,10 +57,10 @@ names.
 ### Which Postgres schema it uses
 
 Everything lives in the schema `DB_SCHEMA` names, defaulting to `public`. Set it when the database
-is shared with other applications, a schema each, rather than dedicated to this Registry — the
-schema is created on startup, and the shipped migrations name their schema through a placeholder
-that is resolved when they run, so one build runs against any schema. See
-[ADR-0036](docs/adr/0036-schema-placement-is-a-deployment-choice.md).
+is shared with other applications, a schema each, rather than dedicated to this Registry. The
+schema is created on startup and every query is qualified with it at runtime, so one build runs
+against any schema. See [ADR-0036](docs/adr/0036-schema-placement-is-a-deployment-choice.md) and
+[ADR-0045](docs/adr/0045-kysely-so-the-schema-is-chosen-at-runtime.md).
 
 Nothing else needs configuring for it: every query and every migration is schema-qualified from
 this one variable, so `DATABASE_URL` needs no `search_path`.
@@ -134,7 +134,7 @@ and `publish_skill` (which needs `--token` / `SKILLSET_TOKEN`). See
 
 ## Development
 
-This is a Bun workspace: `apps/api` (Hono + Drizzle + Postgres), `apps/web`
+This is a Bun workspace: `apps/api` (Hono + Kysely + Postgres), `apps/web`
 (Vite + React + Tailwind + shadcn/ui), `apps/cli` (the `skillset` command), `apps/mcp` (the MCP
 server), and `packages/shared` (the rules and schemas all of them are built against).
 

@@ -1,6 +1,5 @@
-import { eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { tokens, users, type TokenRow, type UserRow } from "../../db/schemas/index.js";
+import type { TokenRow, UserRow } from "../../db/tables.js";
 import type { AuthRegistry } from "./instance.js";
 import { digestsMatch, hashTokenSecret } from "./token.js";
 
@@ -70,18 +69,22 @@ export class Authenticator {
     if (!secret) return null;
 
     const digest = hashTokenSecret(secret);
-    const [token] = await this.db.select().from(tokens).where(eq(tokens.token_hash, digest)).limit(1);
+    const token = await this.db.selectFrom("tokens").selectAll().where("token_hash", "=", digest).executeTakeFirst();
     if (!token || !digestsMatch(token.token_hash, digest)) return null;
 
     const user = await this.findUser(token.user_id);
     if (!user) return null;
 
-    await this.db.update(tokens).set({ last_used_at: new Date(), updated_at: new Date() }).where(eq(tokens.id, token.id));
+    await this.db
+      .updateTable("tokens")
+      .set({ last_used_at: new Date(), updated_at: new Date() })
+      .where("id", "=", token.id)
+      .execute();
     return { kind: "token", user, token };
   }
 
   private async findUser(id: string): Promise<UserRow | null> {
-    const [user] = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
+    const user = await this.db.selectFrom("users").selectAll().where("id", "=", id).executeTakeFirst();
     return user ?? null;
   }
 }

@@ -6,10 +6,8 @@ import {
   type GitProviderOAuth,
 } from "@in-org-quicko/skillset-shared";
 import { deriveKeys, openClientSecret, openSecret, sealSecret, type DerivedKeys } from "../../lib/secrets.js";
-import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
-import { connections, type ConnectionRow, type IntegrationRow, type UserRow } from "../../db/schemas/index.js";
+import type { ConnectionRow, IntegrationRow, UserRow } from "../../db/tables.js";
 import { ConnectionDeclinedError, ConnectionExchangeFailedError, ConnectionExpiredError, ConnectionNotFoundError, ConnectionStateInvalidError, IntegrationChoiceRequiredError, NotConnectedError, ProviderNotConnectableError } from "./connections.errors.js";
 import { IntegrationNotConfiguredError } from "../integrations/integrations.errors.js";
 import type { Logger } from "../../lib/logger.js";
@@ -274,8 +272,8 @@ export class ConnectionsService {
     // write two different ciphertexts for the same secret, which is confusing
     // to anyone reading a stored row against this query.
     const grant = await this.grantColumns(tokens);
-    const rows = await this.db
-      .insert(connections)
+    const row = await this.db
+      .insertInto("connections")
       .values({
         user_id: user.id,
         provider,
@@ -284,18 +282,17 @@ export class ConnectionsService {
         external_account_login: account.login,
         ...grant,
       })
-      .onConflictDoUpdate({
-        target: [connections.user_id, connections.provider],
-        set: {
+      .onConflict((oc) =>
+        oc.columns(["user_id", "provider"]).doUpdateSet({
           integration_id: integration.id,
           external_account_id: account.id,
           external_account_login: account.login,
           ...grant,
           updated_at: this.now(),
-        },
-      })
-      .returning();
-    const row = firstRow(rows, "Connection upsert");
+        }),
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     this.logger.info(
       { user_id: user.id, provider, external_account_login: account.login },
@@ -322,16 +319,11 @@ export class ConnectionsService {
    */
   async listForUser(userId: string): Promise<ConnectionListing[]> {
     return this.db
-      .select({
-        provider: connections.provider,
-        integration_id: connections.integration_id,
-        external_account_login: connections.external_account_login,
-        created_at: connections.created_at,
-        updated_at: connections.updated_at,
-      })
-      .from(connections)
-      .where(eq(connections.user_id, userId))
-      .orderBy(asc(connections.created_at));
+      .selectFrom("connections")
+      .select(["provider", "integration_id", "external_account_login", "created_at", "updated_at"])
+      .where("user_id", "=", userId)
+      .orderBy("created_at")
+      .execute();
   }
 
   /**
@@ -411,11 +403,12 @@ export class ConnectionsService {
    */
   async disconnect(userId: string, provider: string): Promise<void> {
     const deleted = await this.db
-      .delete(connections)
-      .where(and(eq(connections.user_id, userId), eq(connections.provider, provider)))
-      .returning({ id: connections.id });
+      .deleteFrom("connections")
+      .where("user_id", "=", userId)
+      .where("provider", "=", provider)
+      .executeTakeFirst();
 
-    if (deleted.length === 0) throw new ConnectionNotFoundError();
+    if (deleted.numDeletedRows === 0n) throw new ConnectionNotFoundError();
     this.logger.info({ user_id: userId, provider }, "connection disconnected");
   }
 
@@ -448,11 +441,12 @@ export class ConnectionsService {
    * ```
    */
   async accessTokenFor(userId: string, provider: string, fetchImpl?: typeof fetch): Promise<string> {
-    const [row] = await this.db
-      .select()
-      .from(connections)
-      .where(and(eq(connections.user_id, userId), eq(connections.provider, provider)))
-      .limit(1);
+    const row = await this.db
+      .selectFrom("connections")
+      .selectAll()
+      .where("user_id", "=", userId)
+      .where("provider", "=", provider)
+      .executeTakeFirst();
     if (!row) throw new NotConnectedError(provider);
 
     const stillGood =
@@ -511,12 +505,13 @@ export class ConnectionsService {
     // would destroy a working credential and leave the Connection unable to
     // refresh ever again.
     await this.db
-      .update(connections)
+      .updateTable("connections")
       .set({
         ...(await this.grantColumns(tokens, row)),
         updated_at: this.now(),
       })
-      .where(eq(connections.id, row.id));
+      .where("id", "=", row.id)
+      .execute();
 
     return tokens.access_token;
   }
@@ -693,11 +688,12 @@ export class ConnectionsService {
    * ```
    */
   async integrationFor(userId: string, provider: string): Promise<IntegrationRow | undefined> {
-    const [row] = await this.db
-      .select({ integration_id: connections.integration_id })
-      .from(connections)
-      .where(and(eq(connections.user_id, userId), eq(connections.provider, provider)))
-      .limit(1);
+    const row = await this.db
+      .selectFrom("connections")
+      .select("integration_id")
+      .where("user_id", "=", userId)
+      .where("provider", "=", provider)
+      .executeTakeFirst();
     if (!row) return undefined;
 
     return this.integrations.findById(row.integration_id);

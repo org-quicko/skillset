@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { registryNamespace } from "@in-org-quicko/skillset-shared";
 import cron from "node-cron";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
@@ -20,10 +19,10 @@ const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 
 async function main() {
   const config = loadConfig();
-  const { sql, db } = createDatabase(config.databaseUrl);
+  const { db } = createDatabase(config.databaseUrl, config.dbSchema);
 
-  await waitForDatabase(sql);
-  await runMigrations(sql, db, registryNamespace(config.publicUrl));
+  await waitForDatabase(db);
+  await runMigrations(db, config.dbSchema);
 
   const storage = new S3StorageAdapter({
     bucket: config.storage.bucket,
@@ -48,7 +47,6 @@ async function main() {
   const mcpbPath = (await Bun.file(mcpbFile).exists()) ? mcpbFile : undefined;
 
   const app = createApp({
-    sql,
     db,
     storage,
     webRoot,

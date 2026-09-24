@@ -1,5 +1,10 @@
 # Schema Placement Is a Deployment Choice
 
+> **Partly superseded by ADR-0045.** The decision stands; the mechanism does not. The API is on
+> Kysely, which applies the schema per query through `withSchema`, so the schema factory and
+> `drizzle.config.ts` are gone, and so is the sentinel below: the migrations were rebuilt as one
+> Kysely baseline.
+
 The Registry's Postgres objects live in whatever schema the operator names in `DB_SCHEMA`, not in
 `public`. The database this runs against is meant to be divided by schema — one per app — rather
 than dedicated to the Registry alone, and which schema the Registry gets is not known when the

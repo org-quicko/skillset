@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
-import { identityProviders, resourceInstallEvents, resources } from "./db/schemas/index.js";
 import { AnalyticsService } from "./features/analytics/analytics.service.js";
 import { createLogger } from "./lib/logger.js";
 import { deriveKeys, openClientSecret } from "./lib/secrets.js";
@@ -171,7 +169,7 @@ describe("mutations and where they came from (ISSUE-17, ISSUE-20)", () => {
     });
 
     expect(res.status).toBe(403);
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "forged"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "forged").execute();
     expect(rows.length).toBe(0);
   });
 
@@ -242,9 +240,10 @@ describe("install counts and who can run them up (ISSUE-23)", () => {
 
   async function eventCount(): Promise<number> {
     const rows = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", id)
+      .execute();
     return rows.length;
   }
 
@@ -351,7 +350,7 @@ describe("who administers the Registry's logins (ISSUE-2)", () => {
     expect(JSON.stringify(await res.json())).not.toContain("client-secret");
 
     // A database dump must not hand over the OAuth app's credentials either.
-    const [row] = await context.db.select().from(identityProviders).limit(1);
+    const row = await context.db.selectFrom("identity_providers").selectAll().executeTakeFirst();
     expect(row?.client_secret).not.toBe("client-secret");
     expect(await openClientSecret(deriveKeys(TEST_AUTH_SECRET).clientSecrets, row?.client_secret ?? "")).toBe(
       "client-secret",

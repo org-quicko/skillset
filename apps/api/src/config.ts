@@ -1,8 +1,11 @@
 import cron from "node-cron";
+import { readDbSchema } from "./db/schemaName.js";
 
 export interface Config {
   port: number;
   databaseUrl: string;
+  /** The Postgres schema every table lives in, from `DB_SCHEMA` (ADR-0036). */
+  dbSchema: string;
   betterAuthSecret: string;
   /**
    * Absolute base URL this Registry is reached at. Required: Better Auth
@@ -50,7 +53,7 @@ export interface Config {
  * `ANALYTICS_REFRESH_CRON` is set to something `node-cron` cannot parse as a
  * cron expression (ADR-0012). `TRUSTED_PROXY_IPS` is a comma-separated list
  * and is not validated: an entry that is not an address simply never matches
- * a hop, which fails closed.
+ * a hop, which fails closed. Throws as `readDbSchema` does if `DB_SCHEMA` is not a usable schema name.
  * @example
  * ```ts
  * const config = loadConfig();
@@ -103,6 +106,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     port,
     databaseUrl,
+    dbSchema: readDbSchema(env.DB_SCHEMA),
     betterAuthSecret,
     publicUrl,
     analyticsRefreshCron,

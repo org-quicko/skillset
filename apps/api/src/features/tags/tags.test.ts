@@ -1,10 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@in-org-quicko/skillset-shared";
-import { setPasswordCredential } from "../auth/credential.js";
-import { hashPassword } from "../auth/password.js";
-import { users } from "../../db/schemas/index.js";
-import { SIGN_IN_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "../../../test/context.js";
+import { SIGN_IN_PATH, seedUserWithPassword, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "../../../test/context.js";
 
 interface ApiTag {
   id: string;
@@ -39,18 +36,7 @@ async function createUserAndLogIn(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: Role },
 ): Promise<Session> {
-  const [row] = await context.db
-    .insert(users)
-    .values({
-      first_name: body.first_name,
-      last_name: body.last_name,
-      email: body.email,
-      role: body.role,
-    })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
-
-  await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
+  const row = await seedUserWithPassword(context, body);
 
   const res = await context.app.request(SIGN_IN_PATH, {
     method: "POST",

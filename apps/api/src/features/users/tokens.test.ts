@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Role as UserRole } from "@in-org-quicko/skillset-shared";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
-import { tokens, users } from "../../db/schemas/index.js";
 import { SIGN_IN_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "../../../test/context.js";
 
 interface ApiToken {
@@ -60,16 +58,16 @@ async function createUserAndLogIn(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: UserRole },
 ): Promise<{ cookie: string; user: ApiUser }> {
-  const [row] = await context.db
-    .insert(users)
+  const row = await context.db
+    .insertInto("users")
     .values({
       first_name: body.first_name,
       last_name: body.last_name,
       email: body.email,
       role: body.role,
     })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
+    .returningAll()
+    .executeTakeFirstOrThrow();
 
   await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
 
@@ -162,7 +160,7 @@ describe("Tokens (ticket 05)", () => {
     });
     const created = (await res.json()) as ApiTokenCreated;
 
-    const [row] = await context.db.select().from(tokens).where(eq(tokens.id, created.id)).limit(1);
+    const row = await context.db.selectFrom("tokens").selectAll().where("id", "=", created.id).executeTakeFirst();
     expect(row?.token_hash).toBe(sha256Hex(created.secret));
     expect(row?.token_hash).not.toBe(created.secret);
     expect(row?.token_hash).not.toStartWith("$argon2id$");
@@ -271,7 +269,7 @@ describe("Tokens (ticket 05)", () => {
     let meRes = await context.app.request("/api/users/me", { headers: { authorization: `Bearer ${created.secret}` } });
     expect(((await meRes.json()) as ApiUser).role).toBe("reader");
 
-    await context.db.update(users).set({ role: "writer" }).where(eq(users.email, "grace@example.com"));
+    await context.db.updateTable("users").set({ role: "writer" }).where("email", "=", "grace@example.com").execute();
 
     meRes = await context.app.request("/api/users/me", { headers: { authorization: `Bearer ${created.secret}` } });
     expect(((await meRes.json()) as ApiUser).role).toBe("writer");

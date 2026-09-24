@@ -6,14 +6,12 @@ import {
   type UserCreate,
   type UserUpdateName,
 } from "@in-org-quicko/skillset-shared";
-import { and, count, desc, eq, ne } from "drizzle-orm";
 import { getPasswordCredential, setPasswordCredential } from "../auth/credential.js";
 import { generateInitialPassword, hashPassword, verifyPassword } from "../auth/password.js";
 import { generateTokenSecret, hashTokenSecret } from "../auth/token.js";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
 import { isUniqueViolation } from "../../db/pg-errors.js";
-import { sessions, tokens, users, type TokenRow, type UserRow } from "../../db/schemas/index.js";
+import type { TokenRow, UserRow } from "../../db/tables.js";
 import { EmailTakenError, SuperadminProtectedError, TokenNotFoundError, UserNotFoundError } from "./users.errors.js";
 import { ValidationError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logger.js";
@@ -48,19 +46,23 @@ export class UsersService {
     const page = parsePage(rawPage);
 
     const rows = await this.db
-      .select()
-      .from(users)
-      .orderBy(desc(users.created_at))
+      .selectFrom("users")
+      .selectAll()
+      .orderBy("created_at", "desc")
       .limit(USER_PAGE_SIZE)
-      .offset((page - 1) * USER_PAGE_SIZE);
+      .offset((page - 1) * USER_PAGE_SIZE)
+      .execute();
 
-    const [totals] = await this.db.select({ total: count() }).from(users);
+    const totals = await this.db
+      .selectFrom("users")
+      .select((eb) => eb.fn.countAll<number>().as("total"))
+      .executeTakeFirstOrThrow();
 
     return {
       items: rows,
       page,
       page_size: USER_PAGE_SIZE,
-      total: totals?.total ?? 0,
+      total: totals.total,
     };
   }
 
@@ -94,9 +96,9 @@ export class UsersService {
     try {
       // The row and its credential are written together: a User with no
       // password could not log in, and no route creates one afterwards.
-      created = await this.db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(users)
+      created = await this.db.transaction().execute(async (tx) => {
+        const row = await tx
+          .insertInto("users")
           .values({
             first_name: input.first_name,
             last_name: input.last_name,
@@ -110,8 +112,8 @@ export class UsersService {
             role: input.role,
             must_change_password: true,
           })
-          .returning();
-        const row = firstRow(inserted, "User insert");
+          .returningAll()
+          .executeTakeFirstOrThrow();
 
         await setPasswordCredential(tx, row.id, password_hash);
         return row;
@@ -137,12 +139,12 @@ export class UsersService {
    * ```
    */
   async updateOwnName(user: UserRow, input: UserUpdateName): Promise<UserRow> {
-    const rows = await this.db
-      .update(users)
+    return this.db
+      .updateTable("users")
       .set({ ...input, updated_at: new Date() })
-      .where(eq(users.id, user.id))
-      .returning();
-    return firstRow(rows, "User name update");
+      .where("id", "=", user.id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
   }
 
   /**
@@ -189,25 +191,21 @@ export class UsersService {
     }
 
     const password_hash = await hashPassword(input.new_password);
-    const revoked = await this.db.transaction(async (tx) => {
+    const revoked = await this.db.transaction().execute(async (tx) => {
       await setPasswordCredential(tx, user.id, password_hash);
       // `must_change_password` is a column on the User, not the credential.
       await tx
-        .update(users)
+        .updateTable("users")
         .set({ must_change_password: false, updated_at: new Date() })
-        .where(eq(users.id, user.id));
+        .where("id", "=", user.id)
+        .execute();
 
-      // Better Auth owns this table (db/schemas/README.md), and this is the
+      // Better Auth owns this table (ADR-0016), and this is the
       // one place anything else writes to it: there is no API for "revoke
       // every session but this one".
-      const deleted = await tx
-        .delete(sessions)
-        .where(
-          keepSessionId
-            ? and(eq(sessions.user_id, user.id), ne(sessions.id, keepSessionId))
-            : eq(sessions.user_id, user.id),
-        )
-        .returning({ id: sessions.id });
+      let deletion = tx.deleteFrom("sessions").where("user_id", "=", user.id);
+      if (keepSessionId) deletion = deletion.where("id", "!=", keepSessionId);
+      const deleted = await deletion.returning("id").execute();
       return deleted.length;
     });
 
@@ -243,12 +241,12 @@ export class UsersService {
     const target = await this.getOrThrow(userId);
     if (target.role === "superadmin") throw new SuperadminProtectedError();
 
-    const rows = await this.db
-      .update(users)
+    const updated = await this.db
+      .updateTable("users")
       .set({ role, updated_at: new Date() })
-      .where(eq(users.id, userId))
-      .returning();
-    const updated = firstRow(rows, "User role update");
+      .where("id", "=", userId)
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     this.logger.info({ actor_id: actor.id, user_id: userId, role }, "user role changed");
     return updated;
@@ -281,13 +279,18 @@ export class UsersService {
     const target = await this.getOrThrow(userId);
     if (target.role === "superadmin") throw new SuperadminProtectedError();
 
-    await this.db.delete(users).where(eq(users.id, userId));
+    await this.db.deleteFrom("users").where("id", "=", userId).execute();
     this.logger.info({ actor_id: actor.id, user_id: userId }, "user removed");
   }
 
   /** Lists a User's own Tokens, newest first. */
   async listTokens(owner: UserRow): Promise<TokenRow[]> {
-    return this.db.select().from(tokens).where(eq(tokens.user_id, owner.id)).orderBy(desc(tokens.created_at));
+    return this.db
+      .selectFrom("tokens")
+      .selectAll()
+      .where("user_id", "=", owner.id)
+      .orderBy("created_at", "desc")
+      .execute();
   }
 
   /**
@@ -300,14 +303,18 @@ export class UsersService {
    * @param owner - The User the Token belongs to.
    * @param name - A caller-supplied label for the Token.
    * @returns `{ token: TokenRow; secret: string }`
+   * @example
+   * ```ts
+   * const { token, secret } = await usersService.mintToken(user, "laptop");
+   * ```
    */
   async mintToken(owner: UserRow, name: string): Promise<{ token: TokenRow; secret: string }> {
     const secret = generateTokenSecret();
-    const inserted = await this.db
-      .insert(tokens)
+    const created = await this.db
+      .insertInto("tokens")
       .values({ user_id: owner.id, name, token_hash: hashTokenSecret(secret) })
-      .returning();
-    const created = firstRow(inserted, "Token insert");
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     this.logger.info({ user_id: owner.id, token_id: created.id }, "token minted");
     return { token: created, secret };
@@ -331,18 +338,20 @@ export class UsersService {
    */
   async deleteToken(owner: UserRow, tokenId: string): Promise<void> {
     const deleted = await this.db
-      .delete(tokens)
-      .where(and(eq(tokens.id, tokenId), eq(tokens.user_id, owner.id)))
-      .returning({ id: tokens.id });
+      .deleteFrom("tokens")
+      .where("id", "=", tokenId)
+      .where("user_id", "=", owner.id)
+      .returning("id")
+      .executeTakeFirst();
 
-    if (deleted.length === 0) {
+    if (!deleted) {
       throw new TokenNotFoundError();
     }
     this.logger.info({ user_id: owner.id, token_id: tokenId }, "token deleted");
   }
 
   private async getOrThrow(userId: string): Promise<UserRow> {
-    const [row] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const row = await this.db.selectFrom("users").selectAll().where("id", "=", userId).executeTakeFirst();
     if (!row) throw new UserNotFoundError();
     return row;
   }
