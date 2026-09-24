@@ -1,7 +1,6 @@
 services:
   app:
-    # image: ghcr.io/org-quicko/skillset:1.0.1-alpha
-    build: .
+    image: labsatquicko/skillset
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
