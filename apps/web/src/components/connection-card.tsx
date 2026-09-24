@@ -135,18 +135,26 @@ export function ConnectionCard() {
   const { pathname, search, replace } = useRouter();
 
   // The OAuth callback (`connections.routes.ts`) bounces the browser back here
-  // with `?connected=<provider>` on success or `?declined=<provider>` when the
-  // writer cancelled at the provider instead of a failure. `replace`, not
+  // with `?connected=<provider>` on success, `?declined=<provider>` when the
+  // writer cancelled at the provider, or `?connection_error=<message>` for
+  // every other way completing it can fail (a tampered or expired state, an
+  // Integration removed mid-flow, an exchange the provider refused) — the
+  // message is the API's own, carried in the query string rather than kept in
+  // a JSON body a top-level navigation can never read. `replace`, not
   // `navigate` — this is cleanup of a one-time signal, not a step the back
   // button should revisit.
   useEffect(() => {
     const connected = search.get("connected");
     const declined = search.get("declined");
+    const connectionError = search.get("connection_error");
     if (connected === "github") {
       toast.success("GitHub connected.");
       replace(pathname);
     } else if (declined === "github") {
       toast.error("You didn't authorize GitHub, so nothing was connected.");
+      replace(pathname);
+    } else if (connectionError) {
+      toast.error(connectionError);
       replace(pathname);
     }
   }, [search, pathname, replace]);
@@ -167,7 +175,6 @@ export function ConnectionCard() {
 
       {connections.isPending && <ConnectionsListSkeleton />}
       {connections.isError && <p className="text-sm text-destructive">{apiErrorMessage(connections.error)}</p>}
-      {disconnect.isError && <p className="text-sm text-destructive">{apiErrorMessage(disconnect.error)}</p>}
 
       {connections.isSuccess && connectable.length === 0 && (
         <Panel className="bg-transparent">
@@ -185,7 +192,13 @@ export function ConnectionCard() {
               entry={entry}
               connection={byIntegrationId.get(entry.id)}
               isPending={disconnect.isPending && disconnect.variables === entry.provider}
-              onDisconnect={() => disconnect.mutate(entry.provider)}
+              onDisconnect={() =>
+                disconnect.mutate(entry.provider, {
+                  onSuccess: () => toast.success(`${entry.display_name} disconnected.`),
+                  onError: (error) =>
+                    toast.error(`Couldn't disconnect ${entry.display_name}: ${apiErrorMessage(error)}`),
+                })
+              }
             />
           ))}
         </Panel>

@@ -304,12 +304,17 @@ describe("Connections (ADR-0024)", () => {
   });
 
   describe("the callback's state, which is the CSRF surface", () => {
+    /** The state-invalid message every CSRF-surface test below lands on settings with. */
+    const STATE_INVALID_MESSAGE = "That connection attempt could not be verified. Start again from settings.";
+
     it("refuses a missing state", async () => {
       await seedIntegration();
       const res = await callback(writerCookie, "code=abc");
 
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as ApiError).error.code).toBe("invalid_state");
+      expect(res.status).toBe(302);
+      const location = new URL(res.headers.get("location") ?? "");
+      expect(location.pathname).toBe("/settings/connected-accounts");
+      expect(location.searchParams.get("connection_error")).toBe(STATE_INVALID_MESSAGE);
       expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
@@ -324,7 +329,10 @@ describe("Connections (ADR-0024)", () => {
         `code=abc&state=${encodeURIComponent(tampered)}`,
       );
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").searchParams.get("connection_error")).toBe(
+        STATE_INVALID_MESSAGE,
+      );
       expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
@@ -340,7 +348,10 @@ describe("Connections (ADR-0024)", () => {
         `code=abc&state=${encodeURIComponent(state)}`,
       );
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").searchParams.get("connection_error")).toBe(
+        STATE_INVALID_MESSAGE,
+      );
       expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
@@ -351,7 +362,10 @@ describe("Connections (ADR-0024)", () => {
 
       const res = await callback(writerCookie, `code=abc&state=${encodeURIComponent(state)}`);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").searchParams.get("connection_error")).toBe(
+        STATE_INVALID_MESSAGE,
+      );
       expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
@@ -365,7 +379,10 @@ describe("Connections (ADR-0024)", () => {
         `code=abc&state=${encodeURIComponent(state)}`,
       );
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").searchParams.get("connection_error")).toBe(
+        STATE_INVALID_MESSAGE,
+      );
       expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
 
