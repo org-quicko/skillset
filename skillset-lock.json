@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "registry": "https://expire-gothic-delouse.ngrok-free.dev",
+  "registry": "https://dev-skillset.quicko.company",
   "skills": {
     "diagnosing-bugs": {
       "id": null,
@@ -17,6 +17,14 @@
       "namespace": "vercel-labs/skills",
       "content_hash": "sha256:7bc223e2aafbdbf6e50ea243ba6ef67fe432bb069ab439fea0390795dac0bf7f",
       "installed_at": "2026-09-23T11:28:04.859Z"
+    },
+    "frontend-design": {
+      "id": null,
+      "registry_updated_at": null,
+      "source": "https://github.com/anthropics/skills",
+      "namespace": "anthropics/skills",
+      "content_hash": "sha256:83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c",
+      "installed_at": "2026-09-24T11:36:59.525Z"
     },
     "mcp-builder": {
       "id": null,
