@@ -174,9 +174,11 @@ type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>
  * 516×640 is the house size, sized for a handful of labeled fields — wide
  * enough that two side-by-side inputs (e.g. Client ID / Client secret) don't
  * feel cramped, capped in height so a long field list scrolls inside
- * `FormDialogBody` rather than pushing the footer off-screen. Pass
- * `className` to override it for a dialog whose content genuinely needs more
- * room (more, denser fields).
+ * `FormDialogBody` rather than pushing the footer off-screen. The width is a
+ * cap, not a fixed size (`max-w-[516px]`, not `w-[516px]`) — below the `sm`
+ * breakpoint it shrinks with the viewport instead of overflowing a narrow
+ * screen. Pass `className` to override it for a dialog whose content
+ * genuinely needs more room (more, denser fields).
  *
  * @example
  * ```tsx
@@ -195,14 +197,14 @@ function FormDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Overrides the default `w-[516px] max-h-[640px]` sizing. */
+  /** Overrides the default `max-w-[516px] max-h-[640px]` sizing. */
   className?: string
   children: ReactNode
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={cn("flex max-h-[640px] w-[516px] max-w-[516px] flex-col gap-4 sm:max-w-[516px]", className)}
+        className={cn("flex max-h-[640px] w-full max-w-[calc(100%-2rem)] flex-col gap-4 sm:max-w-[516px]", className)}
       >
         {children}
       </DialogContent>
@@ -256,12 +258,14 @@ function FormDialogHeader({
  * `overflow-y-auto` alone makes the browser compute `overflow-x` as `auto`
  * too (the CSS spec forces a non-`visible` pair when only one axis is set),
  * which clips a focused field's ring box-shadow against this element's own
- * edge. `px-1 -mx-1` gives the ring room to render without shifting the
- * fields' visual alignment with the header above.
+ * edge. `px-1 -mx-1` gives the ring room on the sides without shifting the
+ * fields' visual alignment with the header above; `pb-1 -mb-1` does the same
+ * at the bottom, where the last field sits flush against this element's own
+ * bottom edge (the top edge already has `mt-4` to spare).
  */
 function FormDialogBody({ children }: { children: ReactNode }) {
   return (
-    <div className="scrollbar-hidden -mx-1 mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1">
+    <div className="scrollbar-hidden -mx-1 -mb-1 mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 pb-1">
       {children}
     </div>
   )
@@ -379,7 +383,7 @@ function FormField({
   children: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       {trailing ? (
         <div className="flex items-center justify-between">
           <Label htmlFor={htmlFor}>{label}</Label>

@@ -14,9 +14,9 @@ export function ChangePasswordRequired() {
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-4">
       <h1 className="text-lg font-semibold tracking-tight">Choose a password</h1>
-      <PasswordCard description="An Admin created your account with a generated password. Replace it to continue." />
+      <PasswordCard description="Reset the password to continue." />
       <Button variant="ghost" size="sm" onClick={() => logout.mutate()} disabled={logout.isPending}>
-        {logout.isPending ? "Signing out…" : "Sign out instead"}
+        {logout.isPending ? "Signing out…" : "Sign out"}
       </Button>
     </div>
   );

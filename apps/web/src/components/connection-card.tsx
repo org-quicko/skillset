@@ -1,5 +1,7 @@
 import type { ConnectableProvider, Connection } from "@in-org-quicko/skillset-shared";
 import { EllipsisIcon, ExternalLinkIcon, Link2OffIcon } from "lucide-react";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
@@ -13,11 +15,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { connectHref, useConnections, useDisconnect } from "@/hooks/use-connections";
 import { apiErrorMessage } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+import { useRouter } from "@/lib/use-router";
 
 /** Placeholder rows, shaped like `ConnectedAccountRow`, while `useConnections` is in flight. */
 function ConnectionsListSkeleton() {
   return (
-    <Panel title="Apps" contentClassName="p-0">
+    <Panel title="Apps" contentClassName="p-0" className="bg-transparent">
       {Array.from({ length: 3 }).map((_, index) => (
         <div key={index} className="flex items-center justify-between gap-4 border-b px-5 py-3 last:border-b-0">
           <div className="flex min-w-0 items-center gap-3">
@@ -129,6 +132,32 @@ function ConnectedAccountRow({
 export function ConnectionCard() {
   const connections = useConnections();
   const disconnect = useDisconnect();
+  const { pathname, search, replace } = useRouter();
+
+  // The OAuth callback (`connections.routes.ts`) bounces the browser back here
+  // with `?connected=<provider>` on success, `?declined=<provider>` when the
+  // writer cancelled at the provider, or `?connection_error=<message>` for
+  // every other way completing it can fail (a tampered or expired state, an
+  // Integration removed mid-flow, an exchange the provider refused) — the
+  // message is the API's own, carried in the query string rather than kept in
+  // a JSON body a top-level navigation can never read. `replace`, not
+  // `navigate` — this is cleanup of a one-time signal, not a step the back
+  // button should revisit.
+  useEffect(() => {
+    const connected = search.get("connected");
+    const declined = search.get("declined");
+    const connectionError = search.get("connection_error");
+    if (connected === "github") {
+      toast.success("GitHub connected.");
+      replace(pathname);
+    } else if (declined === "github") {
+      toast.error("You didn't authorize GitHub, so nothing was connected.");
+      replace(pathname);
+    } else if (connectionError) {
+      toast.error(connectionError);
+      replace(pathname);
+    }
+  }, [search, pathname, replace]);
 
   // One Connection per provider (ADR-0025) — which of a provider's several
   // Integrations it runs through is `integration_id`.
@@ -146,10 +175,9 @@ export function ConnectionCard() {
 
       {connections.isPending && <ConnectionsListSkeleton />}
       {connections.isError && <p className="text-sm text-destructive">{apiErrorMessage(connections.error)}</p>}
-      {disconnect.isError && <p className="text-sm text-destructive">{apiErrorMessage(disconnect.error)}</p>}
 
       {connections.isSuccess && connectable.length === 0 && (
-        <Panel>
+        <Panel className="bg-transparent">
           <p className="text-sm text-muted-foreground">
             No Git Provider is set up for importing yet. An administrator sets one up under Integrations.
           </p>
@@ -157,14 +185,20 @@ export function ConnectionCard() {
       )}
 
       {connectable.length > 0 && (
-        <Panel title="Apps" contentClassName="p-0">
+        <Panel title="Apps" contentClassName="p-0" className="bg-transparent">
           {connectable.map((entry) => (
             <ConnectedAccountRow
               key={entry.id}
               entry={entry}
               connection={byIntegrationId.get(entry.id)}
               isPending={disconnect.isPending && disconnect.variables === entry.provider}
-              onDisconnect={() => disconnect.mutate(entry.provider)}
+              onDisconnect={() =>
+                disconnect.mutate(entry.provider, {
+                  onSuccess: () => toast.success(`${entry.display_name} disconnected.`),
+                  onError: (error) =>
+                    toast.error(`Couldn't disconnect ${entry.display_name}: ${apiErrorMessage(error)}`),
+                })
+              }
             />
           ))}
         </Panel>

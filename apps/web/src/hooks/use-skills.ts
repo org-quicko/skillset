@@ -19,6 +19,7 @@ import {
   resourceArtifactFilesQueryKey,
   resourceDirectoryQueryKey,
   resourceInstallTrendQueryKey,
+  resourceDetailPrefixKey,
   resourceQueryKey,
   resourcesListQueryKey,
   resourceStatsQueryKey,
@@ -108,14 +109,23 @@ export function useSkillStats() {
  * off this query's result) — see `useDeleteSkill` and
  * `useDownloadSkillArtifact`.
  *
+ * A Namespace narrows that lookup when the URL carries one (ADR-0042).
+ * Without it the Registry resolves a bare name — the only Skill of that name,
+ * or the one published here — and answers 409 `ambiguous_name` only when two
+ * outside parties have published it and neither is this Registry.
+ *
  * @param name - The Skill's name, from the `/skills/<name>` URL.
+ * @param namespace - Which party named it, from that URL's `?namespace=`.
  * @returns The TanStack Query result for that Skill.
- * @throws ApiError with code `"not_found"` if no Skill exists by that name.
+ * @throws ApiError with code `"not_found"` if no Skill exists by that name,
+ * or `"ambiguous_name"` when the bare name matches more than one and none of
+ * them is this Registry's own.
  */
-export function useSkill(name: string) {
+export function useSkill(name: string, namespace?: string) {
+  const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
   return useQuery({
-    queryKey: resourceQueryKey(name),
-    queryFn: () => apiFetch(`/resources/skill/by-name/${encodeURIComponent(name)}`, SkillSchema),
+    queryKey: resourceQueryKey(name, namespace),
+    queryFn: () => apiFetch(`/resources/skill/by-name/${encodeURIComponent(name)}${query}`, SkillSchema),
     // A publish already writes this exact response into the cache
     // (usePublishSkill's onSuccess) — avoid an immediate, redundant refetch
     // of what was just returned when the reader lands straight on it.
@@ -154,6 +164,18 @@ export function useSkillInstallTrend(id: string | undefined) {
  * it has the same fix: publish again. `path` names the file that failed, so
  * the message can say which one rather than only that one did.
  */
+/**
+ * What publishing takes: the files, and where they came from.
+ *
+ * `source` is the caller's to supply because only the caller knows — an Import
+ * has a repository URL, and files dropped onto the page have nothing to say.
+ * Omitted, the Registry records itself (ADR-0041).
+ */
+export interface PublishSkillInput {
+  files: SkillFile[];
+  source?: string;
+}
+
 export class SkillUploadError extends Error {
   readonly path: string;
 
@@ -174,8 +196,8 @@ export class SkillUploadError extends Error {
 export function usePublishSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (files: SkillFile[]): Promise<Skill> => {
-      const bundle = buildSkillBundle(files);
+    mutationFn: async ({ files, source }: PublishSkillInput): Promise<Skill> => {
+      const bundle = buildSkillBundle(files, { source });
 
       const published = await apiFetch(`/resources/skill/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
         method: "PUT",
@@ -206,7 +228,7 @@ export function usePublishSkill() {
     onSuccess: (skill) => {
       queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
       queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
-      queryClient.setQueryData(resourceQueryKey(skill.name), skill);
+      queryClient.setQueryData(resourceQueryKey(skill.name, skill.namespace), skill);
     },
   });
 }
@@ -231,7 +253,7 @@ export function useDeleteSkill() {
     onSuccess: (_data, { name }) => {
       queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
       queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
-      queryClient.removeQueries({ queryKey: resourceQueryKey(name) });
+      queryClient.removeQueries({ queryKey: resourceDetailPrefixKey(name) });
     },
   });
 }
@@ -334,7 +356,7 @@ export function useDownloadSkillArtifact() {
 
   return (id: string, name: string) => {
     window.location.href = apiUrl(`/resources/${encodeURIComponent(id)}/artifact`);
-    queryClient.invalidateQueries({ queryKey: resourceQueryKey(name) });
+    queryClient.invalidateQueries({ queryKey: resourceDetailPrefixKey(name) });
     queryClient.invalidateQueries({ queryKey: resourceInstallTrendQueryKey(id) });
   };
 }

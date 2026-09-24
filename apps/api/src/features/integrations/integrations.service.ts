@@ -4,11 +4,9 @@ import {
   type IntegrationCreate,
   type IntegrationUpdate,
 } from "@in-org-quicko/skillset-shared";
-import { asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
 import { isInvalidIdSyntax, isRestrictViolation } from "../../db/pg-errors.js";
-import { connections, integrations, type IntegrationRow } from "../../db/schemas/index.js";
+import type { IntegrationRow } from "../../db/tables.js";
 import { ValidationError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logger.js";
 import { sealSecret, type DerivedKeys } from "../../lib/secrets.js";
@@ -84,7 +82,7 @@ export class IntegrationsService {
    * `IntegrationSchema`, which has no such field.
    */
   async list(): Promise<IntegrationRow[]> {
-    return this.db.select().from(integrations).orderBy(asc(integrations.created_at));
+    return this.db.selectFrom("integrations").selectAll().orderBy("created_at").execute();
   }
 
   /**
@@ -106,8 +104,7 @@ export class IntegrationsService {
    */
   async findById(id: string): Promise<IntegrationRow | undefined> {
     try {
-      const [row] = await this.db.select().from(integrations).where(eq(integrations.id, id)).limit(1);
-      return row;
+      return await this.db.selectFrom("integrations").selectAll().where("id", "=", id).executeTakeFirst();
     } catch (error) {
       if (isInvalidIdSyntax(error)) return undefined;
       throw error;
@@ -133,10 +130,11 @@ export class IntegrationsService {
    */
   async listByProvider(provider: string): Promise<IntegrationRow[]> {
     return this.db
-      .select()
-      .from(integrations)
-      .where(eq(integrations.provider, provider))
-      .orderBy(asc(integrations.created_at));
+      .selectFrom("integrations")
+      .selectAll()
+      .where("provider", "=", provider)
+      .orderBy("created_at")
+      .execute();
   }
 
   /**
@@ -170,8 +168,8 @@ export class IntegrationsService {
   async create(input: IntegrationCreate): Promise<IntegrationRow> {
     assertAppSlugPresent(input.provider, input.app_slug ?? null);
 
-    const inserted = await this.db
-      .insert(integrations)
+    const created = await this.db
+      .insertInto("integrations")
       .values({
         provider: input.provider,
         display_name: input.display_name,
@@ -180,8 +178,8 @@ export class IntegrationsService {
         client_secret: await sealSecret(this.keys.clientSecrets, input.client_secret),
         app_slug: input.app_slug ?? null,
       })
-      .returning();
-    const created = firstRow(inserted, "Integration insert");
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     this.logger.info(
       { integration_id: created.id, provider: created.provider },
@@ -231,23 +229,23 @@ export class IntegrationsService {
    * ```
    */
   async update(id: string, input: IntegrationUpdate): Promise<IntegrationRow> {
-    return this.db.transaction(async (tx) => {
+    return this.db.transaction().execute(async (tx) => {
       // Read before writing, and inside the transaction: `RETURNING` reports
       // the row as it now is, and telling a repoint from a no-op re-save of
       // the same value needs the `client_id` as it was. `provider` is read too
       // — the row's identity is `id`, but `assertAppSlugPresent` still needs to
       // know which provider's rules apply.
-      const [existing] = await tx
-        .select({ provider: integrations.provider, client_id: integrations.client_id })
-        .from(integrations)
-        .where(eq(integrations.id, id))
-        .limit(1);
+      const existing = await tx
+        .selectFrom("integrations")
+        .select(["provider", "client_id"])
+        .where("id", "=", id)
+        .executeTakeFirst();
       if (!existing) throw new IntegrationNotFoundError();
 
       if (input.app_slug === null) assertAppSlugPresent(existing.provider, null);
 
-      const [updated] = await tx
-        .update(integrations)
+      const updated = await tx
+        .updateTable("integrations")
         .set({
           ...(input.display_name !== undefined ? { display_name: input.display_name } : {}),
           ...(input.description !== undefined ? { description: input.description } : {}),
@@ -258,21 +256,22 @@ export class IntegrationsService {
           ...(input.app_slug !== undefined ? { app_slug: input.app_slug } : {}),
           updated_at: new Date(),
         })
-        .where(eq(integrations.id, id))
-        .returning();
+        .where("id", "=", id)
+        .returningAll()
+        .executeTakeFirst();
       if (!updated) throw new IntegrationNotFoundError();
 
       this.logger.info({ integration_id: id, provider: updated.provider }, "integration updated");
 
       if (input.client_id !== undefined && input.client_id !== existing.client_id) {
-        const cleared = await tx
-          .delete(connections)
-          .where(eq(connections.integration_id, id))
-          .returning({ id: connections.id });
+        const { numDeletedRows } = await tx
+          .deleteFrom("connections")
+          .where("integration_id", "=", id)
+          .executeTakeFirst();
 
-        if (cleared.length > 0) {
+        if (numDeletedRows > 0n) {
           this.logger.warn(
-            { integration_id: id, cleared: cleared.length },
+            { integration_id: id, cleared: Number(numDeletedRows) },
             "integration repointed at another app, so its connections were cleared and writers must reconnect",
           );
         }
@@ -304,14 +303,14 @@ export class IntegrationsService {
    * ```
    */
   async delete(id: string): Promise<void> {
-    let deleted: { id: string }[];
+    let deleted: bigint;
     try {
-      deleted = await this.db.delete(integrations).where(eq(integrations.id, id)).returning({ id: integrations.id });
+      ({ numDeletedRows: deleted } = await this.db.deleteFrom("integrations").where("id", "=", id).executeTakeFirst());
     } catch (error) {
       if (isRestrictViolation(error)) throw new IntegrationInUseError();
       throw error;
     }
-    if (deleted.length === 0) throw new IntegrationNotFoundError();
+    if (deleted === 0n) throw new IntegrationNotFoundError();
 
     this.logger.info({ integration_id: id }, "integration deleted");
   }

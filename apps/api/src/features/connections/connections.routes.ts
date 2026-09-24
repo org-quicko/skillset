@@ -1,9 +1,11 @@
 import { ConnectionListSchema } from "@in-org-quicko/skillset-shared";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
+import { AppError } from "../../lib/errors.js";
 import { createRouter } from "../../lib/factory.js";
 import { validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
+import { ConnectionDeclinedError } from "./connections.errors.js";
 
 /**
  * The cookie carrying the connect flow's nonce.
@@ -87,7 +89,28 @@ export const connectionsRoutes = createRouter()
       return c.redirect(new URL(`${SETTINGS_PATH}?repositories=${provider}`, c.var.publicUrl).href, 302);
     }
 
-    await c.var.services.connections.complete(c.var.user, provider, { code, state, nonce, error });
+    try {
+      await c.var.services.connections.complete(c.var.user, provider, { code, state, nonce, error });
+    } catch (err) {
+      // A writer who clicks "Cancel" at the provider made a decision, not a
+      // failed or forged attempt — its own outcome, told apart from every
+      // other failure below.
+      if (err instanceof ConnectionDeclinedError) {
+        return c.redirect(new URL(`${SETTINGS_PATH}?declined=${provider}`, c.var.publicUrl).href, 302);
+      }
+      // Everything else `complete` throws (a tampered or missing state, an
+      // Integration that has gone away, an exchange the provider refused) is
+      // still a top-level navigation, not an API caller that can read a JSON
+      // body — the generic error response answers with is unreachable here.
+      // The message travels in the query string rather than being duplicated
+      // as a second, separately-maintained copy on the frontend.
+      if (err instanceof AppError) {
+        const url = new URL(SETTINGS_PATH, c.var.publicUrl);
+        url.searchParams.set("connection_error", err.message);
+        return c.redirect(url.href, 302);
+      }
+      throw err;
+    }
 
     return c.redirect(new URL(`${SETTINGS_PATH}?connected=${provider}`, c.var.publicUrl).href, 302);
   })

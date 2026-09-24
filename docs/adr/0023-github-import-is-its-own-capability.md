@@ -86,7 +86,7 @@ A writer grants repository access separately, through a second authorization rec
 application. That row **is** the consent: it exists only because someone completed the connect flow,
 so there is no consent column to keep in sync with it and no state that can disagree with the
 credential it sits beside. A User therefore has up to two `accounts` rows for GitHub — the sign-in
-and the Connection — which the existing unique index on `(provider_id, issuer, account_id)` already
+and the Connection — which the existing unique index on `(provider_id, account_id)` already
 allows.
 
 Only a `writer` may create one. A reader cannot import, so a reader handing over a `repo` token

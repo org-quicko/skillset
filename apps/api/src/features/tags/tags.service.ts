@@ -1,8 +1,5 @@
-import { asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
 import { isUniqueViolation } from "../../db/pg-errors.js";
-import { resourceTags, resources, tags } from "../../db/schemas/index.js";
 import type { Logger } from "../../lib/logger.js";
 import { ResourceNotFoundError } from "../resources/resources.errors.js";
 import { TagNameConflictError, TagNotFoundError } from "./tags.errors.js";
@@ -42,11 +39,12 @@ export class TagsService {
     if (skillIds.length === 0) return new Map();
 
     const rows = await this.db
-      .select({ resource_id: resourceTags.resource_id, id: tags.id, name: tags.name })
-      .from(resourceTags)
-      .innerJoin(tags, eq(resourceTags.tag_id, tags.id))
-      .where(inArray(resourceTags.resource_id, skillIds))
-      .orderBy(asc(tags.name));
+      .selectFrom("resource_tags")
+      .innerJoin("tags", "tags.id", "resource_tags.tag_id")
+      .select(["resource_tags.resource_id", "tags.id", "tags.name"])
+      .where("resource_tags.resource_id", "in", skillIds)
+      .orderBy("tags.name")
+      .execute();
 
     const bySkill = new Map<string, TagSummary[]>();
     for (const row of rows) {
@@ -84,7 +82,7 @@ export class TagsService {
    * writer sees what exists before typing a near-duplicate (ADR-0011).
    */
   async list(): Promise<TagSummary[]> {
-    return this.db.select({ id: tags.id, name: tags.name }).from(tags).orderBy(asc(tags.name));
+    return this.db.selectFrom("tags").select(["id", "name"]).orderBy("name").execute();
   }
 
   /**
@@ -112,23 +110,27 @@ export class TagsService {
    * ```
    */
   async setSkillTags(skillId: string, names: readonly string[]): Promise<TagSummary[]> {
-    const [skill] = await this.db.select({ id: resources.id }).from(resources).where(eq(resources.id, skillId)).limit(1);
+    const skill = await this.db.selectFrom("resources").select("id").where("id", "=", skillId).executeTakeFirst();
     if (!skill) throw new ResourceNotFoundError();
 
-    const resolved = await this.db.transaction(async (tx) => {
+    const resolved = await this.db.transaction().execute(async (tx) => {
       const resolvedTags: TagSummary[] = [];
       for (const name of names) {
         const upserted = await tx
-          .insert(tags)
+          .insertInto("tags")
           .values({ name })
-          .onConflictDoUpdate({ target: tags.name, set: { name, updated_at: new Date() } })
-          .returning({ id: tags.id, name: tags.name });
-        resolvedTags.push(firstRow(upserted, "Tag upsert"));
+          .onConflict((oc) => oc.column("name").doUpdateSet({ name, updated_at: new Date() }))
+          .returning(["id", "name"])
+          .executeTakeFirstOrThrow();
+        resolvedTags.push(upserted);
       }
 
-      await tx.delete(resourceTags).where(eq(resourceTags.resource_id, skillId));
+      await tx.deleteFrom("resource_tags").where("resource_id", "=", skillId).execute();
       if (resolvedTags.length > 0) {
-        await tx.insert(resourceTags).values(resolvedTags.map((tag) => ({ resource_id: skillId, tag_id: tag.id })));
+        await tx
+          .insertInto("resource_tags")
+          .values(resolvedTags.map((tag) => ({ resource_id: skillId, tag_id: tag.id })))
+          .execute();
       }
 
       return resolvedTags;
@@ -162,11 +164,12 @@ export class TagsService {
   async rename(id: string, name: string): Promise<TagSummary> {
     let row: TagSummary | undefined;
     try {
-      [row] = await this.db
-        .update(tags)
+      row = await this.db
+        .updateTable("tags")
         .set({ name, updated_at: new Date() })
-        .where(eq(tags.id, id))
-        .returning({ id: tags.id, name: tags.name });
+        .where("id", "=", id)
+        .returning(["id", "name"])
+        .executeTakeFirst();
     } catch (cause) {
       if (isUniqueViolation(cause)) throw new TagNameConflictError();
       throw cause;

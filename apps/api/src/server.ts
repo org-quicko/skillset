@@ -19,10 +19,10 @@ const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 
 async function main() {
   const config = loadConfig();
-  const { sql, db } = createDatabase(config.databaseUrl);
+  const { db } = createDatabase(config.databaseUrl, config.dbSchema);
 
-  await waitForDatabase(sql);
-  await runMigrations(sql, db);
+  await waitForDatabase(db);
+  await runMigrations(db, config.dbSchema);
 
   const storage = new S3StorageAdapter({
     bucket: config.storage.bucket,
@@ -43,11 +43,14 @@ async function main() {
   const webDist = join(import.meta.dir, "../../web/dist");
   const webRoot = (await Bun.file(join(webDist, "index.html")).exists()) ? webDist : undefined;
 
+  const mcpbFile = join(import.meta.dir, "../../mcp/skillset-mcp.mcpb");
+  const mcpbPath = (await Bun.file(mcpbFile).exists()) ? mcpbFile : undefined;
+
   const app = createApp({
-    sql,
     db,
     storage,
     webRoot,
+    mcpbPath,
     betterAuthSecret: config.betterAuthSecret,
     publicUrl: config.publicUrl,
     trustedProxies: config.trustedProxies,

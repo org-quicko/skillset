@@ -1,18 +1,18 @@
-import { count, sql } from "drizzle-orm";
+import { sql } from "kysely";
 import type { SetupInit } from "@in-org-quicko/skillset-shared";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
 import { advisoryLockKey } from "../../db/advisory-lock.js";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
-import { users, type UserRow } from "../../db/schemas/index.js";
+import type { UserRow } from "../../db/tables.js";
 import { AlreadyInitializedError } from "./setup.errors.js";
 import type { Logger } from "../../lib/logger.js";
 
 // Serialises against concurrent initialisation attempts — see setup.test.ts.
-// Transaction-scoped (pg_advisory_xact_lock) rather than session-scoped:
-// postgres.js pools connections per statement, so a session-level
-// lock/unlock pair isn't guaranteed to run on the same backend session.
+// Transaction-scoped (pg_advisory_xact_lock) rather than session-scoped: the
+// pool hands each statement outside a transaction whatever connection is
+// free, so a session-level lock/unlock pair isn't guaranteed to run on the
+// same backend session.
 const INIT_LOCK_KEY = advisoryLockKey("skillset:setup-init");
 
 /** First-run initialisation: whether the instance has a superadmin, and creating one. */
@@ -26,10 +26,17 @@ export class SetupService {
    * Whether the instance already has its first User.
    *
    * @returns `{ initialized: boolean }`
+   * @example
+   * ```ts
+   * const { initialized } = await setupService.getState();
+   * ```
    */
   async getState(): Promise<{ initialized: boolean }> {
-    const [row] = await this.db.select({ count: count() }).from(users);
-    return { initialized: (row?.count ?? 0) > 0 };
+    const row = await this.db
+      .selectFrom("users")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirstOrThrow();
+    return { initialized: row.count > 0 };
   }
 
   /**
@@ -46,20 +53,32 @@ export class SetupService {
    * @param input - The first superadmin's name, email, and password.
    * @returns The created superadmin's row.
    * @throws AlreadyInitializedError if a User already exists.
+   * @example
+   * ```ts
+   * const superadmin = await setupService.initializeSuperadmin({
+   *   first_name: "Ada",
+   *   last_name: "Lovelace",
+   *   email: "ada@example.com",
+   *   password: "correct-horse-battery",
+   * });
+   * ```
    */
   async initializeSuperadmin(input: SetupInit): Promise<UserRow> {
     const passwordHash = await hashPassword(input.password);
 
-    const superadmin: UserRow | null = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(${INIT_LOCK_KEY})`);
+    const superadmin: UserRow | null = await this.db.transaction().execute(async (tx) => {
+      await sql`select pg_advisory_xact_lock(${INIT_LOCK_KEY})`.execute(tx);
 
-      const [row] = await tx.select({ count: count() }).from(users);
-      if ((row?.count ?? 0) > 0) {
+      const row = await tx
+        .selectFrom("users")
+        .select((eb) => eb.fn.countAll<number>().as("count"))
+        .executeTakeFirstOrThrow();
+      if (row.count > 0) {
         return null;
       }
 
-      const inserted = await tx
-        .insert(users)
+      const created = await tx
+        .insertInto("users")
         .values({
           first_name: input.first_name,
           last_name: input.last_name,
@@ -70,8 +89,8 @@ export class SetupService {
           email_verified: true,
           role: "superadmin",
         })
-        .returning();
-      const created = firstRow(inserted, "Superadmin insert");
+        .returningAll()
+        .executeTakeFirstOrThrow();
 
       // Inside the transaction: a superadmin with no credential is an instance
       // nobody can log into and no route can repair.

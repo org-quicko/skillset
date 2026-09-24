@@ -1,6 +1,6 @@
 # The MCP Server Detects the Agent Rather Than Being Told It
 
-`add_skills` installs a Skill into the directory the User's coding Agent actually reads from. Which
+`install_skills` installs a Skill into the directory the User's coding Agent actually reads from. Which
 Agent that is used to be a required `--agent` flag, checked at startup — a placeholder from
 ADR-0033's "Agent detection is future work". It is now **detected**: `--agent` is an optional
 override that stays out of the ordinary setup snippet, and with it omitted the server works out the
@@ -9,7 +9,7 @@ for the non-technical User this feature exists for is now naming the Registry an
 
 The detector lives in `@in-org-quicko/skillset-shared` (`src/agents/detect.ts`) and is driven by the existing
 Agent table — extended with an `envMarkers` field — not a second table. `@in-org-quicko/skillset-cli`'s
-`skillset add` uses the same function for its non-interactive path, so the CLI and the MCP server
+`skillset install` uses the same function for its non-interactive path, so the CLI and the MCP server
 cannot drift into disagreeing about what "detect the Agent" means.
 
 ## The ladder
@@ -56,7 +56,7 @@ verified.
 
 **Resolve detection once at startup.** Rejected: the client's identity is only known after the
 `initialize` handshake, and `createServer` returns before `connect`. Detection is resolved lazily on
-the first `add_skills` call — the one tool that needs an Agent — and cached.
+the first `install_skills` call — the one tool that needs an Agent — and cached.
 
 ## Consequences
 
@@ -66,13 +66,13 @@ the first `add_skills` call — the one tool that needs an Agent — and cached.
 **The installer accepts `agentId: null`.** `resolveInstallTarget` and `installSkill` widen their
 `agentId` parameter, and `WriteReport.agent` widens to `AgentId | null`. A `null` Agent resolves the
 Agent directory to the canonical directory, so the existing "reads `.agents/skills` directly" branch
-produces the link-nothing install with no new code path. `skillset add` with an explicit `--agent`
+produces the link-nothing install with no new code path. `skillset install` with an explicit `--agent`
 is unaffected.
 
-**`add_skills` returns `{ detection, outcomes }`.** The batch result carries the governing detection
+**`install_skills` returns `{ detection, outcomes }`.** The batch result carries the governing detection
 alongside the per-Skill outcomes, so the caller can report which Agent was chosen and how.
 
-**`skillset add` no longer requires `--agent` outside a terminal.** With no flag and no TTY it
+**`skillset install` no longer requires `--agent` outside a terminal.** With no flag and no TTY it
 detects instead of erroring; `--scope` is still required there (a Scope cannot be detected). The
 interactive prompt is unchanged.
 

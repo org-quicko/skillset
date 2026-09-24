@@ -1,6 +1,6 @@
 # The Agent Table Is Hand-Curated, Not Vendored
 
-> **Amends ADR-0022** and restores ADR-0006's "verify what we offer" principle. `add`'s
+> **Amends ADR-0022** and restores ADR-0006's "verify what we offer" principle. `install`'s
 > canonical-directory-plus-symlink install model (ADR-0022) is unaffected — only the *source*
 > of the Agent table changes.
 
@@ -25,7 +25,7 @@ maintenance as vendoring did — it only trades away the license file, not the t
 
 **Return to ADR-0006's exact five-Agent table.** Rejected as too narrow for today's Agent
 landscape: ADR-0006 predates most of the Agents Users now actually reach for (`cursor`,
-`windsurf`, `cline`, among others), and a table that omits them defeats the point of `add`
+`windsurf`, `cline`, among others), and a table that omits them defeats the point of `install`
 offering a searchable choice.
 
 ## Consequences

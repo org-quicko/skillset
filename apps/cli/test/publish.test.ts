@@ -1,9 +1,10 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runPublish, type PublishDeps, type PublishOutcome, type PublishResult } from "../src/commands/publish.js";
 import { writeConfig } from "../src/config.js";
+import { createSkillsRepository, gitEnv, REPO_URL } from "./git-fixture.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
 
 async function makeSkillDir(extra?: (dir: string) => Promise<void>): Promise<string> {
@@ -50,10 +51,13 @@ function fakePublished() {
       body: "How to do the thing.\n",
       published_by: { user_id: "u1", email: "writer@example.com", first_name: "A", last_name: "B" },
       published_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       license: null,
       compatibility: null,
       metadata: null,
       allowed_tools: null,
+      namespace: "registry.example",
+      source: "com.example.registry",
       tags: [],
       installs: 0,
     },
@@ -613,5 +617,110 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
         await rm(configDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// Publishing from a repository URL clones it with the User's own git, the
+// same way `install <url>` does (ADR-0044).
+describe("runPublish from a repository URL", () => {
+  let remotes: string;
+
+  beforeAll(async () => {
+    remotes = await createSkillsRepository();
+  });
+
+  afterAll(async () => {
+    await rm(remotes, { recursive: true, force: true });
+  });
+
+  function stubRegistry() {
+    return stubFetch((url, init) => {
+      if (url === "https://registry.example/api/resources/skill/docx") {
+        return jsonResponse(200, { ...fakePublished(), upload: uploadFor(init?.body) });
+      }
+      if (isStorageUrl(url)) return new Response(null, { status: 200 });
+      throw new Error(`Unexpected request to ${url}`);
+    });
+  }
+
+  async function withConfig<T>(run: (configPath: string, cwd: string) => Promise<T>): Promise<T> {
+    const cwd = await mkdtemp(join(tmpdir(), "skillset-publish-url-"));
+    const configPath = join(cwd, "config.json");
+    await writeConfig(configPath, { registry: "https://registry.example", token: "tok_test" });
+    try {
+      return await run(configPath, cwd);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  }
+
+  it("publishes the Skill --name picks, recording the repository as its Source", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubRegistry();
+
+      asResult(
+        await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd, env: gitEnv(remotes) }), {
+          target: REPO_URL,
+          skillName: "docx",
+        }),
+      );
+
+      const put = calls.find((call) => call.url === "https://registry.example/api/resources/skill/docx");
+      const body = JSON.parse(String(put?.init?.body)) as { source?: string };
+      expect(body.source).toBe(REPO_URL);
+    });
+  });
+
+  it("requires --name with a URL, before authenticating or cloning", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubRegistry();
+
+      await expect(
+        runPublish(testDeps({ fetch: fetchImpl, configPath, cwd, env: gitEnv(remotes) }), { target: REPO_URL }),
+      ).rejects.toThrow("Pass --name with a URL to say which Skill to publish");
+      expect(calls).toEqual([]);
+    });
+  });
+
+  it("names every Skill it found when --name matches none", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl } = stubRegistry();
+
+      await expect(
+        runPublish(testDeps({ fetch: fetchImpl, configPath, cwd, env: gitEnv(remotes) }), {
+          target: REPO_URL,
+          skillName: "xlsx",
+        }),
+      ).rejects.toThrow("found: docx, pdf.");
+    });
+  });
+
+  it("refuses --name with a path", async () => {
+    await withConfig(async (configPath, cwd) => {
+      const { fetch: fetchImpl, calls } = stubRegistry();
+
+      await expect(
+        runPublish(testDeps({ fetch: fetchImpl, configPath, cwd }), { target: ".", skillName: "pdf" }),
+      ).rejects.toThrow(/--name picks a Skill out of a repository URL/);
+      expect(calls).toEqual([]);
+    });
+  });
+
+  it("asks for a login before cloning anything", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "skillset-publish-url-"));
+    try {
+      const events: string[] = [];
+      const progress = { start: (m: string) => events.push(m), stop: (m: string) => events.push(m), fail: (m: string) => events.push(m) };
+
+      await expect(
+        runPublish(
+          testDeps({ fetch: stubRegistry().fetch, configPath: join(cwd, "none.json"), cwd, env: gitEnv(remotes), progress }),
+          { target: REPO_URL, skillName: "pdf" },
+        ),
+      ).rejects.toThrow(/Not logged in/);
+      expect(events).toEqual([]);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

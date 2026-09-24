@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { Role } from "@in-org-quicko/skillset-shared";
 import { SearchIcon, XIcon } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { Reveal } from "@/components/reveal";
@@ -73,10 +74,13 @@ export function SkillsHome({
   filters,
   onFiltersChange,
   onSelect,
+  role,
 }: {
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
-  onSelect: (name: string) => void;
+  /** `namespace` travels with the name so a row that two parties share stays linkable (ADR-0042). */
+  onSelect: (name: string, namespace: string) => void;
+  role: Role | null;
 }) {
   const tags = useTags();
   const statsQuery = useSkillStats();
@@ -221,7 +225,7 @@ export function SkillsHome({
         </div>
 
         <div className="overflow-hidden rounded-xl border">
-          <SkillList filters={filters} onFiltersChange={onFiltersChange} onSelect={onSelect} />
+          <SkillList filters={filters} onFiltersChange={onFiltersChange} onSelect={onSelect} role={role} />
         </div>
       </Reveal>
     </div>

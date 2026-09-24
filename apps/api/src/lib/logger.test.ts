@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { DrizzleQueryError } from "drizzle-orm/errors";
 import { createLogger } from "./logger.js";
 
 /**
@@ -45,13 +44,16 @@ describe("credential redaction (ISSUE-19)", () => {
 
 describe("a failed query's parameters (ISSUE-19)", () => {
   it("keeps the SQL but not the values it was run with", () => {
-    // Drizzle puts both in the error's *message*, where field redaction
-    // cannot reach: a failed `accounts` insert would otherwise log a password
-    // hash, and a failed Provider update a live OAuth secret.
-    const error = new DrizzleQueryError(
-      'insert into "accounts" ("password") values ($1)',
-      ["$argon2id$v=19$m=65536,t=3,p=4$a-real-hash"],
-      new Error("duplicate key value violates unique constraint"),
+    // A query wrapper that puts both in the error's *message*, where field
+    // redaction cannot reach: a failed `accounts` insert would otherwise log a
+    // password hash, and a failed Provider update a live OAuth secret.
+    const params = ["$argon2id$v=19$m=65536,t=3,p=4$a-real-hash"];
+    const error = Object.assign(
+      new Error(`Failed query: insert into "accounts" ("password") values ($1)
+params: ${params.join(",")}`, {
+        cause: new Error("duplicate key value violates unique constraint"),
+      }),
+      { params },
     );
 
     const line = captureLine((logger) => logger.error({ err: error }, "Unhandled error"));

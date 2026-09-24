@@ -26,19 +26,24 @@ const RELATIVE_UNITS: { unit: Intl.RelativeTimeFormatUnit; seconds: number }[] =
   { unit: "minute", seconds: 60 },
 ]
 
+/** Sentence-cases a string by upper-casing its first character alone, leaving the rest — including any other capitals — untouched. */
+function sentenceCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
 /**
  * A moment as a short "3d ago" style string, in the viewer's locale — what the
- * Skill list's Updated column shows. Falls back to "just now" under a minute
- * and "never" for a null value.
+ * Skill list's Updated column shows. Falls back to "Just now" under a minute
+ * and "Never" for a null value.
  */
 export function formatRelativeTime(value: string | null): string {
-  if (value === null) return "never"
+  if (value === null) return "Never"
   const deltaSeconds = (Date.now() - new Date(value).getTime()) / 1000
   const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" })
   for (const { unit, seconds } of RELATIVE_UNITS) {
-    if (deltaSeconds >= seconds) return formatter.format(-Math.floor(deltaSeconds / seconds), unit)
+    if (deltaSeconds >= seconds) return sentenceCase(formatter.format(-Math.floor(deltaSeconds / seconds), unit))
   }
-  return "just now"
+  return "Just now"
 }
 
 const BYTE_UNITS = ["B", "KB", "MB"]
@@ -54,3 +59,31 @@ export function formatBytes(bytes: number): string {
   // Whole bytes read oddly with a decimal place; anything scaled reads oddly without one.
   return `${unit === 0 ? value : value.toFixed(1)} ${BYTE_UNITS[unit]}`
 }
+
+/**
+ * Splits a Skill's `allowed-tools` frontmatter into the tool names it lists.
+ *
+ * @param value - The raw frontmatter string, or null when it set none.
+ * @returns One entry per named tool, trimmed and with blanks dropped — empty
+ * when `value` is null or names nothing.
+ *
+ * @remarks
+ * The Agent Skills spec fixes no separator beyond the comma convention every
+ * published Skill follows, and the Registry stores the string verbatim
+ * (ADR-0009 validates that it *is* a string, nothing more). So this parses
+ * leniently and the stored string stays the source of truth.
+ *
+ * @example
+ * ```ts
+ * splitAllowedTools("Read, Grep , ") // -> ["Read", "Grep"]
+ * splitAllowedTools(null)            // -> []
+ * ```
+ */
+export function splitAllowedTools(value: string | null): string[] {
+  if (!value) return []
+  return value
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter((tool) => tool.length > 0)
+}
+

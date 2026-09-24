@@ -4,11 +4,11 @@ import { deriveKeys } from "../../lib/secrets.js";
 import { createAuth } from "./instance.js";
 
 // Exists only so `@better-auth/cli generate` has an `auth` export to read the
-// models off — see src/db/schemas/README.md. Nothing in the running app imports
+// models off — see src/db/migrations/README.md. Nothing in the running app imports
 // this. The CLI never issues a query and never verifies a token, so the
 // connection string and secret below only have to satisfy validation.
 
-const { db } = createDatabase("postgres://postgres:postgres@localhost:5432/skill_registry");
+const { db } = createDatabase("postgres://postgres:postgres@localhost:5432/skill_registry", "public");
 
 export const auth = createAuth(
   {

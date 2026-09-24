@@ -2,17 +2,6 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { ApiError } from "./http.js";
 
-const RESET = "\x1b[0m";
-/** 256-colour greys, light-to-dark — legible on both light and dark terminals. */
-const SHADES = [
-  "\x1b[38;5;250m",
-  "\x1b[38;5;248m",
-  "\x1b[38;5;245m",
-  "\x1b[38;5;243m",
-  "\x1b[38;5;240m",
-  "\x1b[38;5;238m",
-];
-
 const LOGO = [
   "███████╗██╗  ██╗██╗██╗     ██╗     ███████╗███████╗████████╗",
   "██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝██╔════╝╚══██╔══╝",
@@ -22,11 +11,28 @@ const LOGO = [
   "╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝╚══════╝   ╚═╝   ",
 ];
 
+// Grouped the way the commands divide: signing in, then the Registry's
+// catalog, then this project's installed copies. `search` and `list` read
+// alike and answer different questions, so they are described against each
+// other rather than in isolation.
+//
+// Each row carries the flags a reader would not think to look for — a
+// Namespace on `install`, and installing or publishing from a URL at all.
+// Each URL form gets a row of its own rather than a bracket on the one above:
+// `--name` belongs to the URL and `--namespace` or a path to the other, so
+// showing both in one line would suggest they combine.
 const COMMANDS: readonly (readonly [string, string])[] = [
   ["skillset login --registry <url> --token <token>", "Authenticate this machine against a Registry"],
   ["skillset whoami", "Show which Registry and identity are active"],
+  ["skillset search [query] [--tag <name>]", "Search the Registry's catalog, or list all of it"],
+  ["skillset info <name> [--files]", "Read a Skill without installing it"],
+  ["skillset install <name> [--namespace <ns>] [--agent <id>]", "Install a Skill from the Registry for a coding Agent"],
+  ["skillset install <url> --name <skill> [--agent <id>]", "Install a Skill from a GitHub or GitLab repo with your git, and submit it"],
+  ["skillset list [--scope <scope>]", "Show what this project has installed, and whether it is current"],
+  ["skillset update [names...] [--force]", "Re-download Skills the Registry has moved on from"],
+  ["skillset remove <name>", "Uninstall a Skill from this project"],
   ["skillset publish [path]", "Publish a Skill, or every Skill under a directory"],
-  ["skillset add <name> [--agent <id>] [--scope <scope>]", "Install a Skill for a coding Agent"],
+  ["skillset publish <url> --name <skill>", "Publish a Skill from a GitHub or GitLab repo with your git"],
 ];
 
 /**
@@ -47,9 +53,7 @@ export function bannerText(): string {
   const lines: string[] = [""];
 
   if (wide) {
-    const shade = (i: number) => (pc.isColorSupported ? `${SHADES[i] ?? ""}` : "");
-    const reset = pc.isColorSupported ? RESET : "";
-    LOGO.forEach((line, i) => lines.push(`${shade(i)}${line}${reset}`));
+    LOGO.forEach((line) => lines.push(pc.bold(line)));
     lines.push("");
   }
 
@@ -59,6 +63,11 @@ export function bannerText(): string {
   for (const [cmd, desc] of COMMANDS) {
     lines.push(`  ${pc.dim("$")} ${pc.cyan(cmd.padEnd(pad))}  ${pc.dim(desc)}`);
   }
+
+  // Noted once rather than appended to all nine lines above, which would
+  // double the width of the widest of them for a flag that reads the same on
+  // every command.
+  lines.push("", `  ${pc.dim("Add --json to any command for machine-readable output.")}`);
 
   return lines.join("\n");
 }
@@ -134,7 +143,7 @@ export function fail(error: unknown): void {
  * @returns The chosen entry of `choices`.
  *
  * @remarks
- * Injected into `runAdd` as `deps.promptChoice`, which only calls it when a terminal is
+ * Injected into `runInstall` as `deps.promptChoice`, which only calls it when a terminal is
  * attached and the matching flag was omitted. On Ctrl-C (clack reports a cancel) the
  * process exits 1 rather than returning a bogus value.
  *
@@ -187,7 +196,7 @@ export async function promptConfirm(question: string): Promise<boolean> {
  * @returns The chosen Agent's id.
  *
  * @remarks
- * Injected into `runAdd` as `deps.promptAgent`, called only with a terminal attached and
+ * Injected into `runInstall` as `deps.promptAgent`, called only with a terminal attached and
  * `--agent` omitted. On Ctrl-C (clack reports a cancel) the process exits 1.
  *
  * @example

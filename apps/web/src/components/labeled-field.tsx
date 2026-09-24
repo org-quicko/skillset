@@ -14,7 +14,7 @@ export function LabeledField({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={htmlFor} className="text-xs tracking-[0.1em] text-muted-foreground uppercase">
+      <label htmlFor={htmlFor} className="text-xs tracking-[0.1em] text-foreground uppercase">
         {label}
       </label>
       {children}

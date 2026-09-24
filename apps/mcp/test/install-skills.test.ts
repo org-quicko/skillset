@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
@@ -9,6 +9,11 @@ import { jsonResponse, stubFetch, type RecordedCall } from "./helpers.js";
 
 const encoder = new TextEncoder();
 const REGISTRY = "https://registry.example";
+// Pinned, not `new Date()`: two `stubRegistry()` calls in one test stand for
+// the same Registry, so they have to report the same `updated_at`. Generating
+// it per call made every second install read as `outdated` — which is exactly
+// what the refusal tests below are trying to tell apart.
+const UPDATED_AT = "2026-09-20T00:00:00.000Z";
 
 function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -18,11 +23,14 @@ function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
     description: "Reviews code.",
     body: "Body.\n",
     published_by: { user_id: "u1", email: "writer@example.com", first_name: "A", last_name: "B" },
-    published_at: new Date().toISOString(),
+    published_at: UPDATED_AT,
+    updated_at: UPDATED_AT,
     license: null,
     compatibility: null,
     metadata: null,
     allowed_tools: null,
+    namespace: "registry.example",
+    source: "com.example.registry",
     tags: [],
     installs: 3,
     ...overrides,
@@ -201,9 +209,58 @@ describe("installSkills — an already-installed Skill", () => {
       const { fetch: secondFetch, calls } = stubRegistry();
       const outcomes = await installSkillsOutcomes(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
 
-      expect(outcomes[0]).toEqual({ name: "code-review", status: "refused", existing: "code-review" });
+      // `current`: the copy on disk is the one this same stub just installed,
+      // so nothing would be lost by overwriting and nothing gained either.
+      expect(outcomes[0]).toEqual({ name: "code-review", status: "refused", existing: "code-review", installed: "current" });
       // Refused before any download: only the by-name lookup was made.
       expect(calls.some((call) => call.url.includes("/artifact"))).toBe(false);
+    });
+  });
+
+  // The three refusals below are the same `status` and three different next
+  // steps, which is the whole reason `installed` is reported: a caller that
+  // cannot tell them apart either gives up or passes overwrite blindly.
+  it("reports the existing copy as modified when it has been edited since it was installed", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const { fetch: fetchImpl } = stubRegistry();
+      await installSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+      await writeFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "locally edited\n");
+
+      const { fetch: secondFetch } = stubRegistry();
+      const outcomes = await installSkillsOutcomes(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), [
+        "code-review",
+      ]);
+
+      expect(outcomes[0]).toMatchObject({ status: "refused", installed: "modified" });
+    });
+  });
+
+  it("reports the existing copy as outdated when the Registry has moved on", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      const { fetch: fetchImpl } = stubRegistry();
+      await installSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+
+      const republished = fakeSkill({ updated_at: "2026-09-21T00:00:00.000Z" });
+      const { fetch: secondFetch } = stubRegistry({ skill: republished });
+      const outcomes = await installSkillsOutcomes(baseDeps({ fetchImpl: secondFetch, ctx: { cwd, env: {}, homeDir } }), [
+        "code-review",
+      ]);
+
+      expect(outcomes[0]).toMatchObject({ status: "refused", installed: "outdated" });
+    });
+  });
+
+  it("reports a directory no lockfile records as untracked, rather than guessing it is safe", async () => {
+    await withTempRoots(async ({ cwd, homeDir }) => {
+      // Written by hand, the way a Skill copied in by some other means would
+      // be: the files are there and nothing recorded what they were.
+      await mkdir(join(cwd, ".agents", "skills", "code-review"), { recursive: true });
+      await writeFile(join(cwd, ".agents", "skills", "code-review", "SKILL.md"), "hand-placed\n");
+
+      const { fetch: fetchImpl } = stubRegistry();
+      const outcomes = await installSkillsOutcomes(baseDeps({ fetchImpl, ctx: { cwd, env: {}, homeDir } }), ["code-review"]);
+
+      expect(outcomes[0]).toMatchObject({ status: "refused", installed: "untracked" });
     });
   });
 

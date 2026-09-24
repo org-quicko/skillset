@@ -14,6 +14,10 @@
     { "name": "resources", "description": "Publishing, reading, searching, and retrieving Resources — Skills today (ADR-0026)" },
     { "name": "tags", "description": "The Tag catalog: listing it, and renaming a Tag" },
     {
+      "name": "submissions",
+      "description": "Resources installed straight from a repository and put forward for the Registry, until an Admin approves or rejects them (ADR-0044)"
+    },
+    {
       "name": "identity-providers",
       "description": "Configuring the Identity Providers a Registry offers on its login page (ADR-0015)"
     },
@@ -482,7 +486,7 @@
       "get": {
         "tags": ["resources"],
         "summary": "List, search, filter, and sort Resources",
-        "description": "Reads from the `resource_directory` view (ticket 23, ADR-0026, docs/data-model.md), not `resources` directly. Defaults to sorted by last-updated, descending (ADR-0028 — installs are not comparable across Kinds). With `q`, results are additionally full-text matched over name, description, and publisher — `sort_by`/`sort_order` still govern the order even then; there is no separate relevance ranking. Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. Unauthenticated (ADR-0013).",
+        "description": "Reads from the `resource_directory` view (ticket 23, ADR-0026, docs/data-model.md), not `resources` directly. With `q`, results are full-text matched over name, description, SKILL.md body, and publisher, weighted in that order, and sorted by relevance unless `sort_by` says otherwise (ADR-0039). Without `q`, sorted by last-updated, descending (ADR-0028 — installs are not comparable across Kinds). Stemming does not substring-match, and hyphenated names tokenise per word — both expected, not defects. A term that matches nothing is retried against trigrams, so a typo still finds its Skill (ADR-0040); a term that matches something is never widened this way. Unauthenticated (ADR-0013).",
         "security": [],
         "parameters": [
           {
@@ -510,8 +514,8 @@
             "name": "sort_by",
             "in": "query",
             "required": false,
-            "description": "Governs ordering unconditionally, even with `q` set. Invalid values are rejected with a field-named validation error.",
-            "schema": { "type": "string", "enum": ["installs", "updated_at"], "default": "updated_at" }
+            "description": "Governs ordering. Omitted, it is `relevance` when `q` is set and `updated_at` when it is not; `relevance` with no `q` falls back to `updated_at` rather than being refused (ADR-0039). Invalid values are rejected with a field-named validation error.",
+            "schema": { "type": "string", "enum": ["installs", "updated_at", "relevance"] }
           },
           {
             "name": "sort_order",
@@ -593,6 +597,12 @@
                   "allowed_tools": {
                     "type": "string",
                     "description": "From the SKILL.md frontmatter. Optional; internal grammar unvalidated (experimental in the specification)."
+                  },
+                  "source": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "example": "https://github.com/org-quicko/skillset",
+                    "description": "Where these files came from, when that is somewhere nameable — the repository URL, for an Import. Not from the frontmatter: only the publisher knows whether the files were fetched or picked off a disk. Must be an absolute http(s) URL. Omitted, the Registry records itself as the source, which is what a direct upload means; a republish that omits it clears whatever an earlier Import recorded (ADR-0002, ADR-0041)."
                   },
                   "files": {
                     "type": "array",
@@ -880,6 +890,125 @@
           "404": { "$ref": "#/components/responses/TagNotFound" },
           "409": {
             "description": "A different Tag already holds this name",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions": {
+      "get": {
+        "tags": ["submissions"],
+        "summary": "List pending Submissions",
+        "description": "Every pending Resource Submission, newest first. Requires at least the admin role — the same bar as deleting a Resource, since approving puts something in front of the whole team (ADR-0044).",
+        "responses": {
+          "200": {
+            "description": "The pending Submissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/ResourceSubmission" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may review Submissions",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions/{kind}/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Kind" }, { "$ref": "#/components/parameters/SkillName" }],
+      "put": {
+        "tags": ["submissions"],
+        "summary": "Submit a Resource for approval",
+        "description": "Puts a Resource installed straight from a repository forward for an Admin to approve (ADR-0044). Open to every signed-in role, reader included: submitting publishes nothing. Takes the same body as `PUT /resources/{kind}/{name}`, except that `source` is required — the Namespace is derived from it exactly as a publish derives it, so an approved Submission lands where a publish of the same Source would have.\n\nIdempotent by `(kind, namespace, name)`: submitting the same Resource again replaces the pending Submission and deletes its files before new upload targets are issued. Upload targets are one per declared file, in manifest order, as for publishing (ADR-0032). The Submission is never readable through `/resources`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "The same body `PUT /resources/{kind}/{name}` takes, with `source` required.",
+                "type": "object",
+                "required": ["description", "body", "source", "files"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Submission was recorded. Write its files to `upload` next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["submission", "upload"],
+                  "properties": {
+                    "submission": { "$ref": "#/components/schemas/ResourceSubmission" },
+                    "upload": { "$ref": "#/components/schemas/ArtifactUpload" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed validation, or `source` is missing (`source_required`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "409": {
+            "description": "The Resource is already in the Registry (`already_published`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions/{id}/approve": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "post": {
+        "tags": ["submissions"],
+        "summary": "Approve a Submission into the Registry",
+        "description": "Creates the Resource from the Submission, crediting whoever submitted it as the publisher, copies its files into the Resource's Artifact, and deletes the Submission. Requires at least the admin role (ADR-0044).",
+        "responses": {
+          "200": {
+            "description": "The Resource as it now reads",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Skill" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may approve a Submission",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": {
+            "description": "No Submission by that id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "409": {
+            "description": "The Resource was published since (`already_published`), or none of its files were uploaded (`submission_incomplete`)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/submissions/{id}": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "delete": {
+        "tags": ["submissions"],
+        "summary": "Reject a Submission",
+        "description": "Discards the Submission and its files. Requires at least the admin role (ADR-0044).",
+        "responses": {
+          "204": { "description": "Rejected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may reject a Submission",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": {
+            "description": "No Submission by that id",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
@@ -1442,7 +1571,7 @@
       "SkillDirectoryEntry": {
         "type": "object",
         "description": "One row of `GET /resources` (ticket 23, ADR-0026), sourced from the `resource_directory` view — deliberately not SkillSummary: `published_by_name` in place of the full Publisher object, and `updated_at` in place of `published_at`. `GET /resources/{id}` and `{kind}/by-name/{name}` are unaffected and still return SkillSummary/Skill.",
-        "required": ["id", "kind", "name", "description", "published_by_name", "updated_at", "installs", "tags"],
+        "required": ["id", "kind", "name", "description", "published_by_name", "updated_at", "source", "allowed_tools", "installs", "tags"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "kind": {
@@ -1464,6 +1593,17 @@
             "type": "string",
             "format": "date-time",
             "description": "When this Skill was last published, republished, or otherwise changed — not when it was first published (`published_at`, only on the detail read)."
+          },
+          "source": {
+            "type": "string",
+            "example": "https://github.com/org-quicko/skillset",
+            "description": "Where the Resource came from. A repository URL when it was Imported from a Git Provider, and this Registry's own domain in reverse-DNS notation (e.g. `com.quicko.skills`) when it was published straight to it. Always present — the null the column stores for the second case is resolved on the way out (ADR-0041)."
+          },
+          "allowed_tools": {
+            "type": "string",
+            "nullable": true,
+            "example": "Read, Grep, Bash",
+            "description": "The Skill's `allowed-tools` frontmatter — what it claims the right to reach once loaded. On the list as well as the detail because it is a permission grant, and the decision it informs is made while browsing. Null when the frontmatter never set it."
           },
           "installs": {
             "type": "integer",
@@ -1505,9 +1645,11 @@
           "compatibility",
           "metadata",
           "allowed_tools",
+          "source",
           "tags",
           "published_by",
           "published_at",
+          "updated_at",
           "installs"
         ],
         "properties": {
@@ -1545,6 +1687,11 @@
             "type": ["string", "null"],
             "description": "From the SKILL.md frontmatter. Null when the Skill never set it."
           },
+          "source": {
+            "type": "string",
+            "example": "https://github.com/org-quicko/skillset",
+            "description": "Where the Resource came from. A repository URL when it was Imported from a Git Provider, and this Registry's own domain in reverse-DNS notation (e.g. `com.quicko.skills`) when it was published straight to it. Never null: the second case is stored as null and resolved on the way out (ADR-0041)."
+          },
           "tags": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/Tag" },
@@ -1552,6 +1699,11 @@
           },
           "published_by": { "$ref": "#/components/schemas/Publisher" },
           "published_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Moves on every republish, unlike `published_at`. A client stores this at install time and compares it later to tell whether its copy has gone stale — without versioning (ADR-0002) it is the only revision signal there is (ADR-0038)."
+          },
           "installs": {
             "type": "integer",
             "minimum": 0,
@@ -1764,6 +1916,36 @@
           },
           "created_at": { "type": "string", "format": "date-time", "description": "When the grant was given — the consent's own timestamp." },
           "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ResourceSubmission": {
+        "type": "object",
+        "description": "A Resource installed straight from a repository, waiting on an Admin (ADR-0044). Not a Resource: nothing in `/resources` reads it.",
+        "required": [
+          "id",
+          "kind",
+          "namespace",
+          "name",
+          "description",
+          "body",
+          "source",
+          "allowed_tools",
+          "submitted_by_email",
+          "submitted_by_name",
+          "submitted_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "kind": { "type": "string", "example": "skill" },
+          "namespace": { "type": "string", "example": "anthropics/skills" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "body": { "type": "string" },
+          "source": { "type": "string", "example": "https://github.com/anthropics/skills" },
+          "allowed_tools": { "type": ["string", "null"] },
+          "submitted_by_email": { "type": "string", "format": "email" },
+          "submitted_by_name": { "type": "string" },
+          "submitted_at": { "type": "string", "format": "date-time" }
         }
       },
       "Error": {

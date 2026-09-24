@@ -154,6 +154,34 @@ describe("ResourceDirectoryQuerySchema — sorting", () => {
     expect(await parsed("?sort_by=installs")).toMatchObject({ sortBy: "installs" });
   });
 
+  it("defaults to relevance when there is a search term", async () => {
+    expect(await parsed("?q=adapter")).toMatchObject({ sortBy: "relevance" });
+  });
+
+  it("defaults to updated_at when there is no search term (ADR-0028)", async () => {
+    expect(await parsed("")).toMatchObject({ sortBy: "updated_at" });
+  });
+
+  // A blank term is no term at all, so it takes the no-term default too —
+  // otherwise clearing the search box would rank against nothing.
+  it("defaults to updated_at when the search term is blank", async () => {
+    expect(await parsed("?q=%20%20")).toMatchObject({ sortBy: "updated_at" });
+  });
+
+  it("keeps an explicit sort_by over the search-term default", async () => {
+    expect(await parsed("?q=adapter&sort_by=installs")).toMatchObject({ sortBy: "installs" });
+  });
+
+  it("takes sort_by=relevance when there is a term to rank against", async () => {
+    expect(await parsed("?q=adapter&sort_by=relevance")).toMatchObject({ sortBy: "relevance" });
+  });
+
+  // Downgraded rather than refused: there is nothing to rank against, and a
+  // reader who clears the search box should keep their list.
+  it("falls back to updated_at for sort_by=relevance with no term", async () => {
+    expect(await parsed("?sort_by=relevance")).toMatchObject({ sortBy: "updated_at" });
+  });
+
   // Refused rather than defaulted, and that split from `page` is deliberate:
   // a bad page has an obvious right answer, a bad sort does not, and quietly
   // sorting by something else is worse than saying so.
@@ -164,7 +192,7 @@ describe("ResourceDirectoryQuerySchema — sorting", () => {
     expect(res.status).toBe(400);
     expect(body.error.code).toBe("validation_failed");
     expect(body.error.field).toBe("sort_by");
-    expect(body.error.message).toBe("sort_by must be one of: installs, updated_at.");
+    expect(body.error.message).toBe("sort_by must be one of: installs, updated_at, relevance.");
   });
 
   it("refuses an unrecognised sort_order, naming the field and the options", async () => {

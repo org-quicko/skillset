@@ -176,10 +176,15 @@ function ViewToggle({ view, onChange }: { view: MarkdownView; onChange: (view: M
 }
 
 /**
- * A markdown file, rendered: its frontmatter as YAML in the editor, then the
- * prose below it.
+ * A text file in the viewer, in whichever reading is selected: a markdown
+ * file's preview is its frontmatter above its rendered prose, and every other
+ * file — including that same markdown file's Code reading — is its source.
  *
  * @remarks
+ * Both readings put their editor at the same place in this tree, keyed by the
+ * file rather than by the fragment, so toggling between them hands the one
+ * editor new text instead of tearing it down and building a second.
+ *
  * The frontmatter is configuration rather than prose — a markdown renderer
  * turns it into a paragraph of `name: … description: …` — but for a
  * `SKILL.md` it is also the Skill's declaration of itself, so it is shown as
@@ -191,31 +196,47 @@ function ViewToggle({ view, onChange }: { view: MarkdownView; onChange: (view: M
  * The prose is sanitised by `renderSkillBody` — the markup is whoever
  * published the Skill's, not the reader's.
  */
-function MarkdownView({ path, source }: { path: string; source: string }) {
+function TextFileViewer({ path, source, view }: { path: string; source: string; view: MarkdownView }) {
+  const isPreview = isMarkdownPath(path) && view === "preview";
   const { frontmatter, body } = useMemo(() => splitFrontmatter(source), [source]);
-  const html = useMemo(() => renderSkillBody(body), [body]);
+  const html = useMemo(() => (isPreview ? renderSkillBody(body) : ""), [isPreview, body]);
+
+  const hasFrontmatter = frontmatter !== null && frontmatter.trim() !== "";
+  // Preview shows only the frontmatter in the editor — the body is below it,
+  // rendered — and a file without any has nothing for the editor to hold.
+  const showEditor = !isPreview || hasFrontmatter;
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      {frontmatter !== null && frontmatter.trim() !== "" && (
-        <div className="border-b bg-muted/20">
-          <span className="block px-4 pt-2.5 text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
-            Frontmatter
-          </span>
+    <div className={cn("flex min-h-0 flex-1 flex-col", isPreview && "overflow-y-auto")}>
+      {showEditor && (
+        <div className={cn("flex flex-col", isPreview ? "shrink-0 border-b bg-muted/20" : "min-h-0 flex-1")}>
+          {isPreview && (
+            <span className="px-4 pt-2.5 text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
+              Frontmatter
+            </span>
+          )}
           <Suspense
             fallback={
-              <div className="flex h-16 items-center justify-center">
-                <Spinner className="size-4" />
+              <div className="flex flex-1 items-center justify-center py-5">
+                <Spinner className="size-5" />
               </div>
             }
           >
-            <CodeViewer path={`${path}#frontmatter`} value={frontmatter} language="yaml" fitContent />
+            <CodeViewer
+              path={path}
+              value={isPreview ? (frontmatter ?? "") : source}
+              language={isPreview ? "yaml" : undefined}
+              fitContent={isPreview}
+            />
           </Suspense>
         </div>
       )}
-      <div
-        className="px-6 py-5 text-sm leading-relaxed text-pretty [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:first:mt-0 [&_h2]:mt-5 [&_h2]:mb-1.5 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1 [&_h3]:font-semibold [&_hr]:my-5 [&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_li]:my-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-2.5 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:my-3 [&_table]:w-full [&_table]:text-left [&_td]:border-t [&_td]:py-1.5 [&_td]:pr-3 [&_th]:py-1.5 [&_th]:pr-3 [&_th]:font-medium [&_ul]:list-disc [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      {isPreview && (
+        <div
+          className="px-6 py-5 text-sm leading-relaxed text-pretty [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:first:mt-0 [&_h2]:mt-5 [&_h2]:mb-1.5 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1 [&_h3]:font-semibold [&_hr]:my-5 [&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_li]:my-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-2.5 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:my-3 [&_table]:w-full [&_table]:text-left [&_td]:border-t [&_td]:py-1.5 [&_td]:pr-3 [&_th]:py-1.5 [&_th]:pr-3 [&_th]:font-medium [&_ul]:list-disc [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      )}
     </div>
   );
 }
@@ -282,21 +303,7 @@ function FileViewer({ id, file, view }: { id: string; file: ArtifactFile; view: 
     );
   }
 
-  if (isMarkdownPath(file.path) && view === "preview") return <MarkdownView path={file.path} source={content.data} />;
-
-  return (
-    <div className="min-h-0 flex-1">
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center">
-            <Spinner className="size-5" />
-          </div>
-        }
-      >
-        <CodeViewer path={file.path} value={content.data} />
-      </Suspense>
-    </div>
-  );
+  return <TextFileViewer path={file.path} source={content.data} view={view} />;
 }
 
 /** Whether a file has a rendered reading as well as a source one. */
@@ -349,7 +356,7 @@ export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
     return (
       <Panel title={SKILL_FILE_NAME} className="min-h-0 flex-1" contentClassName="p-0">
         <div className={cn("flex flex-col", PANEL_HEIGHT)}>
-          <MarkdownView path={SKILL_FILE_NAME} source={body} />
+          <TextFileViewer path={SKILL_FILE_NAME} source={body} view="preview" />
         </div>
       </Panel>
     );

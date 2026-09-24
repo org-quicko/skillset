@@ -76,3 +76,23 @@ export const ARTIFACT_ARCHIVE_CONTENT_TYPE = "application/zip";
  * sizes storage reports before reading anything.
  */
 export const ARTIFACT_UPLOAD_EXPIRY_SECONDS = 900;
+
+/**
+ * One object per file of a Resource Submission, under a prefix keyed by the
+ * Submission's `id` (ADR-0044) — apart from `resources/`, so nothing that
+ * reads an Artifact can reach a file no Admin has approved.
+ */
+export function submissionPrefix(submissionId: string): string {
+  return `submissions/${submissionId}/`;
+}
+
+/** The storage key one file of a Submission lives at. `path` must already be validated, as for {@link artifactFileKey}. */
+export function submissionFileKey(submissionId: string, path: string): string {
+  return `${submissionPrefix(submissionId)}${path}`;
+}
+
+/** The path within a Submission that a storage key names, or `null` if the key is not under its prefix. */
+export function submissionPathFromKey(submissionId: string, key: string): string | null {
+  const prefix = submissionPrefix(submissionId);
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}

@@ -1,40 +1,29 @@
-import { describe, expect, it } from "bun:test";
-import { getTableColumns } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import type { ColumnMetadata } from "kysely";
 import { createAuth } from "./instance.js";
-import { createDatabase } from "../../db/client.js";
+import { createDatabase, type Database } from "../../db/client.js";
+import type { IdentityProviderRow } from "../../db/tables.js";
 import { createLogger } from "../../lib/logger.js";
-import {
-  accounts,
-  rateLimits,
-  sessions,
-  users,
-  verifications,
-  type IdentityProviderRow,
-} from "../../db/schemas/index.js";
 import { deriveKeys } from "../../lib/secrets.js";
+import { startTestContext, stopTestContext, type TestContext } from "../../../test/context.js";
 
-/** The Drizzle tables Better Auth is pointed at, by the model name it uses. */
-const TABLES: Record<string, Parameters<typeof getTableColumns>[0]> = {
-  users,
-  sessions,
-  accounts,
-  verifications,
-  // Only a model at all because rate limiting counts in Postgres rather than
-  // in process memory (ISSUE-7) — Better Auth adds it to its own table list
-  // when `rateLimit.storage` is "database", which is exactly the kind of
-  // silently-added model this test exists to catch.
-  rate_limits: rateLimits,
-};
-
-// Never connected to. postgres.js does not dial until a query runs, and
-// resolving Better Auth's context only reads configuration — which is the
-// whole point of this file: it checks the schema without needing a database,
-// so it runs everywhere and fast.
+// Never connected to. pg's pool does not dial until a query runs, and
+// resolving Better Auth's context only reads configuration, so the linking
+// checks below need no database at all.
 const UNUSED_DATABASE_URL = "postgres://unused:unused@127.0.0.1:1/unused";
 const SECRET = "test-only-secret-with-enough-entropy-to-be-quiet";
 
+function authContextFor(db: Database, providers: IdentityProviderRow[] = []) {
+  const auth = createAuth(
+    { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
+    providers,
+  );
+  return auth.$context;
+}
+
 /**
- * Seam 0 — configuration, before any request or query.
+ * Seam 0 — configuration, checked against the schema the migrations build.
  *
  * Better Auth reads and writes its own tables through the field map in
  * `auth/instance.ts`. A field it expects that maps to a column we never
@@ -43,49 +32,105 @@ const SECRET = "test-only-secret-with-enough-entropy-to-be-quiet";
  * refused for a User who plainly exists.
  *
  * That is not hypothetical. `accounts.issuer` was missed exactly this way, and
- * because sign-in matches a password on provider id, issuer, and account id
+ * because sign-in matched a password on provider id, issuer, and account id
  * together, every credential was invisible and every login was refused as
  * "user not found". This test is the check that would have caught it at the
  * schema rather than in a browser.
+ *
+ * Better Auth 1.7.3 then reverted `issuer` — accounts are keyed on provider id
+ * and account id again — and the column outlived it as a `NOT NULL` nothing
+ * wrote, which refused every insert instead. Better Auth notices that one
+ * itself, but only logs it while resolving the context and throws at the
+ * insert, so the first thing to fail is a request in production. The second
+ * test below is what turns it into a failing build.
+ *
+ * The columns are read by introspecting the migrated database, the schema
+ * Better Auth actually runs against.
  */
 describe("Better Auth's model and the schema agree", () => {
-  it("maps every field Better Auth expects onto a column that exists", async () => {
-    const { db } = createDatabase(UNUSED_DATABASE_URL);
-    const auth = createAuth(
-      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
-      [],
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  /** The migrated tables, by name, restricted to `DB_SCHEMA`. */
+  let tables: Map<string, ColumnMetadata[]>;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+    const introspected = await context.db.introspection.getTables();
+    tables = new Map(
+      introspected.filter((table) => table.schema === context.schema).map((table) => [table.name, table.columns]),
     );
-    const context = await auth.$context;
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  /**
+   * Better Auth's context for the migrated database, once its own schema check
+   * has settled. Awaited rather than left running: closing the pool while that
+   * check still holds a connection never resolves.
+   */
+  async function migratedAuthContext() {
+    const auth = await authContextFor(context.db);
+    await auth.checkSchema?.();
+    return auth;
+  }
+
+  it("maps every field Better Auth expects onto a column that exists", async () => {
+    const auth = await migratedAuthContext();
 
     const missing: string[] = [];
-    for (const table of Object.values(context.tables)) {
-      const drizzleTable = TABLES[table.modelName];
-      if (!drizzleTable) {
-        missing.push(`${table.modelName} (no Drizzle table by that name)`);
+    for (const table of Object.values(auth.tables)) {
+      const columns = tables.get(table.modelName);
+      if (!columns) {
+        missing.push(`${table.modelName} (no table by that name)`);
         continue;
       }
 
-      const columns = getTableColumns(drizzleTable);
+      const names = new Set(columns.map((column) => column.name));
       for (const [field, attributes] of Object.entries(table.fields)) {
         const key = attributes.fieldName ?? field;
-        if (!(key in columns)) missing.push(`${table.modelName}.${key} (for field "${field}")`);
+        if (!names.has(key)) missing.push(`${table.modelName}.${key} (for field "${field}")`);
       }
     }
 
     expect(missing).toEqual([]);
   });
 
+  it("declares no required column that Better Auth never writes", async () => {
+    const auth = await migratedAuthContext();
+
+    // The opposite direction to the test above, and the one that broke when
+    // Better Auth 1.7.3 dropped `issuer`: a column Better Auth has no field
+    // for is one it never supplies a value for, so declaring it `NOT NULL`
+    // with no default makes every insert into that table fail. Better Auth
+    // logs this during context resolution rather than throwing, which is why
+    // asserting on it here is worth the lines.
+    const unwritable: string[] = [];
+    for (const table of Object.values(auth.tables)) {
+      const columns = tables.get(table.modelName);
+      if (!columns) continue;
+
+      const written = new Set(
+        Object.entries(table.fields).map(([field, attributes]) => attributes.fieldName ?? field),
+      );
+      for (const column of columns) {
+        if (written.has(column.name) || column.isNullable || column.hasDefaultValue) continue;
+        unwritable.push(`${table.modelName}.${column.name}`);
+      }
+    }
+
+    expect(unwritable).toEqual([]);
+  });
+
   it("points every model at a table this schema actually declares", async () => {
-    const { db } = createDatabase(UNUSED_DATABASE_URL);
-    const auth = createAuth(
-      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
-      [],
-    );
-    const context = await auth.$context;
+    const auth = await migratedAuthContext();
 
     // Guards the other direction: a model renamed in a future upgrade would
     // otherwise silently resolve to nothing.
-    const models = Object.values(context.tables).map((table) => table.modelName).sort();
+    const models = Object.values(auth.tables).map((table) => table.modelName).sort();
     expect(models).toEqual(["accounts", "rate_limits", "sessions", "users", "verifications"]);
   });
 });
@@ -117,13 +162,9 @@ describe("account linking admits an existing User", () => {
     };
   }
 
-  async function contextFor(providers: IdentityProviderRow[] = []) {
-    const { db } = createDatabase(UNUSED_DATABASE_URL);
-    const auth = createAuth(
-      { db, secret: SECRET, publicUrl: "http://localhost", logger: createLogger("silent"), keys: deriveKeys(SECRET) },
-      providers,
-    );
-    return auth.$context;
+  function contextFor(providers: IdentityProviderRow[] = []) {
+    const { db } = createDatabase(UNUSED_DATABASE_URL, "public");
+    return authContextFor(db, providers);
   }
 
   it("does not require a locally-verified address, which this Registry never establishes", async () => {

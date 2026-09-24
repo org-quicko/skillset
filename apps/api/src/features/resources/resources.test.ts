@@ -1,17 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, type Role } from "@in-org-quicko/skillset-shared";
-import { asc, eq } from "drizzle-orm";
-import { setPasswordCredential } from "../auth/credential.js";
-import { hashPassword } from "../auth/password.js";
-import { resourceInstallEvents, resources, users } from "../../db/schemas/index.js";
+import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, registryNamespace, type Role } from "@in-org-quicko/skillset-shared";
 import {
   refreshInstallCounts,
   SIGN_IN_PATH,
+  seedUserWithPassword,
   startTestContext,
   stopTestContext,
   type TestContext,
   SESSION_COOKIE_NAME,
+  TEST_PUBLIC_URL,
 } from "../../../test/context.js";
 
 interface ApiPublisher {
@@ -28,6 +26,7 @@ interface ApiTag {
 
 interface ApiSkill {
   id: string;
+  namespace: string;
   name: string;
   description: string;
   body: string;
@@ -35,6 +34,7 @@ interface ApiSkill {
   compatibility: string | null;
   metadata: Record<string, string> | null;
   allowed_tools: string | null;
+  source: string;
   tags: ApiTag[];
   published_by: ApiPublisher;
   published_at: string;
@@ -60,10 +60,13 @@ interface ApiManifest {
 /** `GET /resources`'s row shape (ticket 23) — distinct from `ApiSkill`: `published_by_name` and `updated_at`, not the full Publisher and `published_at`. */
 interface ApiDirectoryEntry {
   id: string;
+  namespace: string;
   name: string;
   description: string;
   published_by_name: string;
   updated_at: string;
+  source: string;
+  allowed_tools: string | null;
   installs: number;
   tags: ApiTag[];
 }
@@ -88,6 +91,9 @@ interface Session {
 /** A Skill's `payload` (ADR-0026) with none of the four optional fields set — what a raw seed row not going through `publish` needs. */
 const BLANK_SKILL_PAYLOAD = { kind: "skill", license: null, compatibility: null, metadata: null, allowed_tools: null };
 
+/** What a Skill seeded straight into the table is named by — this test Registry itself (ADR-0042). */
+const TEST_NAMESPACE = registryNamespace(TEST_PUBLIC_URL);
+
 function sessionCookie(res: Response): string {
   const setCookie = res.headers.get("set-cookie");
   if (!setCookie) throw new Error("Response did not set a session cookie.");
@@ -106,18 +112,7 @@ async function createUserAndLogIn(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: Role },
 ): Promise<Session> {
-  const [row] = await context.db
-    .insert(users)
-    .values({
-      first_name: body.first_name,
-      last_name: body.last_name,
-      email: body.email,
-      role: body.role,
-    })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
-
-  await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
+  const row = await seedUserWithPassword(context, body);
 
   const res = await context.app.request(SIGN_IN_PATH, {
     method: "POST",
@@ -235,7 +230,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     // (ADR-0026, ADR-0032).
     expect(decodeURIComponent(target?.url ?? "")).toContain(`resources/${published.skill.id}/SKILL.md`);
 
-    const [row] = await context.db.select().from(resources).where(eq(resources.name, "code-review")).limit(1);
+    const [row] = await context.db.selectFrom("resources").selectAll().where("name", "=", "code-review").execute();
     expect(row?.id).toBe(published.skill.id);
     expect(row?.body).toBe("# Review\n\nSteps here.\n");
     expect(row?.published_by_email).toBe(writer.email);
@@ -262,6 +257,75 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(read.status).toBe(200);
 
     expect(published.skill).toEqual((await read.json()) as ApiSkill);
+  });
+
+  // `allowed-tools` is a permission grant, and the decision it informs — adopt
+  // this Skill or not — is made while browsing the list, before any detail read.
+  // So the directory carries it out of `payload`, rather than leaving a caller
+  // to read every row to find out.
+  it("carries allowed-tools on the directory list, null for a Skill that declares none", async () => {
+    await publish(context, writer, "claims-tools", {
+      description: "Declares what it reaches.",
+      body: "Body.\n",
+      allowed_tools: "Read, Grep",
+    });
+    await publish(context, writer, "claims-nothing", {
+      description: "Declares nothing.",
+      body: "Body.\n",
+    });
+
+    const res = await context.app.request("/api/resources?q=claims");
+    expect(res.status).toBe(200);
+
+    const page = (await res.json()) as ApiPage;
+    const byName = new Map(page.items.map((item) => [item.name, item.allowed_tools]));
+    expect(byName.get("claims-tools")).toBe("Read, Grep");
+    expect(byName.get("claims-nothing")).toBeNull();
+  });
+
+  // Where a Resource came from, on both reads. The two cases are stored
+  // differently on purpose (ADR-0041): an Import's origin is data, and the
+  // Registry's own identity is configuration, resolved on the way out.
+  it("records an Import's repository URL as its source, on the detail and the list alike", async () => {
+    const res = await publish(context, writer, "imported-skill", {
+      description: "Came out of a repository.",
+      body: "Body.\n",
+      source: "https://github.com/org-quicko/skillset",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ApiPublished).skill.source).toBe("https://github.com/org-quicko/skillset");
+
+    const read = await context.app.request("/api/resources/skill/by-name/imported-skill");
+    expect(((await read.json()) as ApiSkill).source).toBe("https://github.com/org-quicko/skillset");
+
+    const list = await context.app.request("/api/resources?q=imported-skill");
+    expect(((await list.json()) as ApiPage).items[0]?.source).toBe("https://github.com/org-quicko/skillset");
+  });
+
+  it("reads a Skill published straight to the Registry as the Registry's own domain, reversed", async () => {
+    await publish(context, writer, "uploaded-skill", { description: "Came off a disk.", body: "Body.\n" });
+
+    const read = await context.app.request("/api/resources/skill/by-name/uploaded-skill");
+    // TEST_PUBLIC_URL is http://localhost, whose single label reverses to itself.
+    expect(((await read.json()) as ApiSkill).source).toBe("localhost");
+
+    const list = await context.app.request("/api/resources?q=uploaded-skill");
+    expect(((await list.json()) as ApiPage).items[0]?.source).toBe("localhost");
+  });
+
+  // A republish fully replaces what was recorded (ADR-0002). Re-uploading from
+  // disk a Skill that was first Imported must stop it claiming a repository
+  // these bytes did not come from.
+  it("clears a recorded source when a republish declares none", async () => {
+    await publish(context, writer, "moved-skill", {
+      description: "First from a repository.",
+      body: "Body.\n",
+      source: "https://github.com/org-quicko/skillset",
+    });
+    await publish(context, writer, "moved-skill", { description: "Then from a disk.", body: "Body.\n" });
+
+    const read = await context.app.request("/api/resources/skill/by-name/moved-skill");
+    expect(((await read.json()) as ApiSkill).source).toBe("localhost");
   });
 
   it("refuses publishing to a reader and allows it to writers and Admins", async () => {
@@ -307,7 +371,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     // of the same name (ticket 16).
     expect(secondPublished.skill.id).toBe(firstPublished.skill.id);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "shared-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "shared-skill").execute();
     expect(rows.length).toBe(1);
     expect(rows[0]?.description).toBe("Second version.");
     expect(rows[0]?.body).toBe("Second body.\n");
@@ -377,6 +441,24 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       code: "allowed_tools_invalid",
       field: "allowed_tools",
     },
+    {
+      // The scheme check is what keeps a `javascript:` URL out of a field the
+      // interface renders as a link.
+      label: "a source that is not an absolute http(s) URL",
+      name: "bad-source-scheme",
+      payload: { description: "Reviews code.", body: "Body.\n", source: "javascript:alert(1)" },
+      code: "source_invalid",
+      field: "source",
+    },
+    {
+      // Nobody may *declare* the reverse-DNS form: that case is what omitting
+      // `source` means, and the Registry fills it in itself (ADR-0041).
+      label: "a source that is a reverse-DNS domain rather than a URL",
+      name: "bad-source-domain",
+      payload: { description: "Reviews code.", body: "Body.\n", source: "com.quicko.skills" },
+      code: "source_invalid",
+      field: "source",
+    },
   ];
 
   for (const { label, name, payload, code, field } of rejections) {
@@ -387,7 +469,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       expect(body.error.code).toBe(code);
       expect(body.error.field).toBe(field);
 
-      const rows = await context.db.select().from(resources).where(eq(resources.name, name));
+      const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", name).execute();
       expect(rows.length).toBe(0);
     });
   }
@@ -461,7 +543,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     expect(skill.metadata).toEqual({ author: "quicko", version: "1.0" });
     expect(skill.allowed_tools).toBe("Bash(git:*) Read");
 
-    const [row] = await context.db.select().from(resources).where(eq(resources.name, "full-frontmatter-skill"));
+    const [row] = await context.db.selectFrom("resources").selectAll().where("name", "=", "full-frontmatter-skill").execute();
     const payload = row?.payload as { license: string | null; metadata: Record<string, string> | null } | undefined;
     expect(payload?.license).toBe("Apache-2.0");
     expect(payload?.metadata).toEqual({ author: "quicko", version: "1.0" });
@@ -565,7 +647,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
       description: "Read without a session.",
       body: "Body.\n",
     });
-    // The path `skillset add` takes with no Token configured (ADR-0013).
+    // The path `skillset install` takes with no Token configured (ADR-0013).
     const anonymous = await context.app.request("/api/resources/skill/by-name/by-name-anonymous-attempt");
     expect(anonymous.status).toBe(200);
     expect(((await anonymous.json()) as ApiSkill).name).toBe("by-name-anonymous-attempt");
@@ -585,7 +667,7 @@ describe("Publishing and reading Skills (ticket 03)", () => {
     });
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
 
-    await context.db.delete(users).where(eq(users.id, departing.id));
+    await context.db.deleteFrom("users").where("id", "=", departing.id).execute();
 
     const res = await context.app.request(`/api/resources/${publishedSkill.id}`, {
       headers: { cookie: reader.cookie },
@@ -633,9 +715,10 @@ describe("Listing Skills (ticket 03)", () => {
     // explicitly instead of relying on the installs-first default, so ties
     // don't make the test's own expectations flaky.
     const base = Date.UTC(2026, 0, 1);
-    await context.db.insert(resources).values(
+    await context.db.insertInto("resources").values(
       Array.from({ length: 51 }, (_, index) => ({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: `skill-${String(index).padStart(3, "0")}`,
         description: `Skill number ${index}.`,
         body: "Body.\n",
@@ -646,7 +729,7 @@ describe("Listing Skills (ticket 03)", () => {
         published_at: new Date(base + index * 60_000),
         updated_at: new Date(base + index * 60_000),
       })),
-    );
+    ).execute();
   }, 60_000);
 
   afterAll(async () => {
@@ -755,9 +838,10 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
 
   it("counts Skills, distinct Publishers by their email snapshot, and total Installs", async () => {
     const [one] = await context.db
-      .insert(resources)
+      .insertInto("resources")
       .values({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "stats-skill-one",
         description: "First.",
         body: "Body.\n",
@@ -766,11 +850,13 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
         published_by_email: "grace@example.com",
         published_by_name: "Grace Hopper",
       })
-      .returning();
+      .returningAll()
+      .execute();
     const [two] = await context.db
-      .insert(resources)
+      .insertInto("resources")
       .values({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "stats-skill-two",
         description: "Second, same Publisher as the first.",
         body: "Body.\n",
@@ -779,16 +865,17 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
         published_by_email: "grace@example.com",
         published_by_name: "Grace Hopper",
       })
-      .returning();
+      .returningAll()
+      .execute();
     if (!one || !two) throw new Error("Insert did not return the created Skills.");
 
     await context.db
-      .insert(resourceInstallEvents)
+      .insertInto("resource_install_events")
       .values([
         { resource_id: one.id, source: "web" },
         { resource_id: one.id, source: "cli" },
         { resource_id: two.id, source: "web" },
-      ]);
+      ]).execute();
     await refreshInstallCounts(context);
 
     const res = await context.app.request("/api/resources/stats");
@@ -951,9 +1038,10 @@ describe("Searching Skills (ticket 10)", () => {
     // share one publisher except "solo-effort", searched for by publisher
     // name alone (ticket 23).
     const base = Date.UTC(2026, 1, 1);
-    await context.db.insert(resources).values([
+    await context.db.insertInto("resources").values([
       ...Array.from({ length: 51 }, (_, index) => ({
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: `widget-${String(index).padStart(3, "0")}`,
         description: "A generic widget Skill for demoing pagination.",
         body: "Body.\n",
@@ -966,6 +1054,7 @@ describe("Searching Skills (ticket 10)", () => {
       })),
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "postgresql-migrations",
         description: "Runs schema migrations against a Postgresql database.",
         body: "Body.\n",
@@ -978,6 +1067,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "code-review-bot",
         description: "Comments on pull requests during code review.",
         body: "Body.\n",
@@ -990,6 +1080,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "quality-metrics-tracker",
         description: "Tracks code quality and review turnaround over time.",
         body: "Body.\n",
@@ -1002,6 +1093,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "changelog-writer",
         description: "Drafts a changelog entry from recent commits.",
         body: "Body.\n",
@@ -1014,6 +1106,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "async-await",
         description: "A minimal concurrency helper.",
         body: "Body.\n",
@@ -1026,6 +1119,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "async-await-helper",
         description: "Handles retries for workflows that need to pause on network calls.",
         body: "Body.\n",
@@ -1038,6 +1132,7 @@ describe("Searching Skills (ticket 10)", () => {
       },
       {
         kind: "skill",
+        namespace: TEST_NAMESPACE,
         name: "solo-effort",
         description: "Nothing in this description names its own author.",
         body: "Body.\n",
@@ -1048,7 +1143,7 @@ describe("Searching Skills (ticket 10)", () => {
         published_at: new Date(base + 57 * 60_000),
         updated_at: new Date(base + 57 * 60_000),
       },
-    ]);
+    ]).execute();
   }, 60_000);
 
   afterAll(async () => {
@@ -1140,12 +1235,197 @@ describe("Searching Skills (ticket 10)", () => {
   });
 
   it("reads a Skill by id without going through search", async () => {
-    const [row] = await context.db.select({ id: resources.id }).from(resources).where(eq(resources.name, "postgresql-migrations"));
+    const [row] = await context.db.selectFrom("resources").select("id").where("name", "=", "postgresql-migrations").execute();
     if (!row) throw new Error("Seed Skill was not inserted.");
 
     const res = await context.app.request(`/api/resources/${row.id}`, { headers: { cookie: reader.cookie } });
     expect(res.status).toBe(200);
     expect(((await res.json()) as ApiSkill).name).toBe("postgresql-migrations");
+  });
+});
+
+describe("Ranking search results by relevance", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  // One term, planted in a different field of each Skill, with `updated_at`
+  // running the opposite way to the weighting. Ordering by date alone gives
+  // the exact reverse of the expected answer, so these assertions cannot
+  // pass by accident on the old behaviour.
+  const TERM = "orchestration";
+  const base = Date.UTC(2026, 3, 1);
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.db.insertInto("resources").values([
+      {
+        kind: "skill",
+        namespace: TEST_NAMESPACE,
+        name: "orchestration-toolkit",
+        description: "Coordinates long-running jobs.",
+        body: "Body.\n",
+        payload: BLANK_SKILL_PAYLOAD,
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
+        published_at: new Date(base),
+        updated_at: new Date(base),
+      },
+      {
+        kind: "skill",
+        namespace: TEST_NAMESPACE,
+        name: "pipeline-runner",
+        description: "Handles orchestration across a build pipeline.",
+        body: "Body.\n",
+        payload: BLANK_SKILL_PAYLOAD,
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
+        published_at: new Date(base + 60_000),
+        updated_at: new Date(base + 60_000),
+      },
+      {
+        kind: "skill",
+        namespace: TEST_NAMESPACE,
+        name: "deploy-helper",
+        description: "Ships a build to an environment.",
+        body: "## Notes\n\nStep four hands off to the orchestration layer.\n",
+        payload: BLANK_SKILL_PAYLOAD,
+        published_by: null,
+        published_by_email: "ada@example.com",
+        published_by_name: "Ada Lovelace",
+        published_at: new Date(base + 120_000),
+        updated_at: new Date(base + 120_000),
+      },
+    ]).execute();
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function search(params: Record<string, string>): Promise<ApiPage> {
+    const res = await context.app.request(`/api/resources?${new URLSearchParams(params).toString()}`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as ApiPage;
+  }
+
+  // The gap this closes: a Skill used to be searchable only by how it was
+  // summarised, never by what it actually says.
+  it("finds a Skill on a term that appears only in its body", async () => {
+    const page = await search({ q: TERM, sort_by: "updated_at" });
+    expect(page.items.map((s) => s.name)).toContain("deploy-helper");
+  });
+
+  it("ranks a name match above a description match above a body match", async () => {
+    const page = await search({ q: TERM });
+    expect(page.items.map((s) => s.name)).toEqual([
+      "orchestration-toolkit",
+      "pipeline-runner",
+      "deploy-helper",
+    ]);
+  });
+
+  // Same three rows, same request but for the sort: proves the ordering
+  // above comes from the ranking and not from the seed order.
+  it("gives the reverse order when asked for updated_at instead", async () => {
+    const page = await search({ q: TERM, sort_by: "updated_at" });
+    expect(page.items.map((s) => s.name)).toEqual([
+      "deploy-helper",
+      "pipeline-runner",
+      "orchestration-toolkit",
+    ]);
+  });
+
+  it("ranks without being asked to, because a search term makes relevance the default", async () => {
+    const withoutSort = await search({ q: TERM });
+    const explicit = await search({ q: TERM, sort_by: "relevance" });
+    expect(withoutSort.items.map((s) => s.name)).toEqual(explicit.items.map((s) => s.name));
+  });
+});
+
+describe("Falling back to fuzzy matching (ADR-0040)", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  const base = Date.UTC(2026, 4, 1);
+
+  function seed(name: string, description: string, offsetMinutes: number) {
+    return {
+      kind: "skill",
+      namespace: TEST_NAMESPACE,
+      name,
+      description,
+      body: "Body.\n",
+      payload: BLANK_SKILL_PAYLOAD,
+      published_by: null,
+      published_by_email: "ada@example.com",
+      published_by_name: "Ada Lovelace",
+      published_at: new Date(base + offsetMinutes * 60_000),
+      updated_at: new Date(base + offsetMinutes * 60_000),
+    };
+  }
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.db.insertInto("resources").values([
+      seed("building-angular-applications", "Builds Angular applications.", 0),
+      seed("kubernetes-operator", "Writes a Kubernetes operator.", 1),
+      seed("changelog-writer", "Drafts a changelog entry.", 2),
+    ]).execute();
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function search(params: Record<string, string>): Promise<ApiPage> {
+    const res = await context.app.request(`/api/resources?${new URLSearchParams(params).toString()}`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as ApiPage;
+  }
+
+  // The case this exists for: one dropped letter used to return nothing,
+  // because full-text search stems but does not forgive.
+  it.each([
+    ["a dropped letter", "angulr", "building-angular-applications"],
+    ["a transposition", "kubernets", "kubernetes-operator"],
+    ["a doubled letter", "changellog", "changelog-writer"],
+  ])("finds the Skill despite %s", async (_case, typo, expected) => {
+    const page = await search({ q: typo });
+    expect(page.items.map((s) => s.name)).toContain(expected);
+  });
+
+  it("still finds nothing for a term that resembles nothing", async () => {
+    expect(await search({ q: "zzzzqqqqxxxx" })).toMatchObject({ total: 0 });
+  });
+
+  // All-or-nothing: a term that matched exactly must keep its exact answer,
+  // never padded with near-misses.
+  it("does not widen a search that already matched", async () => {
+    const page = await search({ q: "changelog" });
+    expect(page.items.map((s) => s.name)).toEqual(["changelog-writer"]);
+  });
+
+  it("ranks fuzzy matches by how close they are", async () => {
+    const page = await search({ q: "kubernets" });
+    expect(page.items[0]?.name).toBe("kubernetes-operator");
+  });
+
+  // The fallback needs a term; an unfiltered listing must not run it.
+  it("lists everything, not nothing, when there is no term at all", async () => {
+    expect((await search({})).total).toBe(3);
+  });
+
+  it("honours an explicit sort over the fuzzy ranking", async () => {
+    const page = await search({ q: "angulr", sort_by: "updated_at" });
+    expect(page.items.map((s) => s.name)).toContain("building-angular-applications");
   });
 });
 
@@ -1221,7 +1501,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     // The whole point of the new storage model is that the zip is derived,
     // not stored — so what matters is that it round-trips every file. Read
     // back through the shared extractor rather than a raw unzip, which also
-    // asserts the archive is one `skillset add` accepts.
+    // asserts the archive is one `skillset install` accepts.
     const files = extractSkillFiles(new Uint8Array(await res.arrayBuffer()));
     expect(files.map((file) => file.path).sort()).toEqual(["SKILL.md", "references/style.md"]);
     const style = files.find((file) => file.path === "references/style.md");
@@ -1244,9 +1524,10 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     }
 
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, publishedSkill.id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", publishedSkill.id)
+      .execute();
     expect(events.length).toBe(2);
   });
 
@@ -1274,12 +1555,13 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     }
 
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, publishedSkill.id))
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", publishedSkill.id)
       // uuidv7 ids sort in insertion order, unlike `created_at`, which can
       // tie at this resolution for requests issued back-to-back.
-      .orderBy(asc(resourceInstallEvents.id));
+      .orderBy("id", "asc")
+      .execute();
     expect(events.map((event) => event.source)).toEqual(cases.map((c) => c.expected));
   });
 
@@ -1291,7 +1573,7 @@ describe("Downloading a Skill's Artifact (ticket 08)", () => {
     const { skill: publishedSkill } = (await published.json()) as ApiPublished;
     await putArtifact(context, publishedSkill.id, { "SKILL.md": "Body.\n" });
 
-    // What `skillset add` does against a Registry the User never logged in to (ADR-0013).
+    // What `skillset install` does against a Registry the User never logged in to (ADR-0013).
     const res = await context.app.request(`/api/resources/${publishedSkill.id}/artifact`);
     expect(res.status).toBe(200);
   });
@@ -1522,7 +1804,7 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
 
       // A failing manifest rejects the publish exactly like a failing
       // required field does (ADR-0009) — nothing about the Skill changes.
-      const rows = await context.db.select().from(resources).where(eq(resources.name, name));
+      const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", name).execute();
       expect(rows.length).toBe(0);
     });
   }
@@ -1604,9 +1886,10 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
 
     // Refused before a byte was read, so nothing counted as an Install.
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", id)
+      .execute();
     expect(events.length).toBe(0);
   });
 
@@ -1618,9 +1901,10 @@ describe("Browsing an Artifact's files (ADR-0032)", () => {
 
     // Previewing is not obtaining (ADR-0028) — only the zip download counts.
     const events = await context.db
-      .select()
-      .from(resourceInstallEvents)
-      .where(eq(resourceInstallEvents.resource_id, id));
+      .selectFrom("resource_install_events")
+      .selectAll()
+      .where("resource_id", "=", id)
+      .execute();
     expect(events.length).toBe(0);
   });
 });
@@ -1686,7 +1970,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     });
     expect(res.status).toBe(204);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "doomed-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "doomed-skill").execute();
     expect(rows.length).toBe(0);
     // Every file, not just the one at the root — an Artifact is a prefix now
     // (ADR-0032).
@@ -1718,7 +2002,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     });
     expect(res.status).toBe(204);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "never-uploaded-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "never-uploaded-skill").execute();
     expect(rows.length).toBe(0);
   });
 
@@ -1744,7 +2028,7 @@ describe("Deleting a Skill (ticket 12)", () => {
     const anonymous = await context.app.request(`/api/resources/${publishedSkill.id}`, { method: "DELETE" });
     expect(anonymous.status).toBe(401);
 
-    const rows = await context.db.select().from(resources).where(eq(resources.name, "protected-skill"));
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "protected-skill").execute();
     expect(rows.length).toBe(1);
   });
 
@@ -1756,5 +2040,109 @@ describe("Deleting a Skill (ticket 12)", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as ApiError;
     expect(body.error.code).toBe("not_found");
+  });
+});
+
+// Two parties may publish the same name; one project may install only one of
+// them (ADR-0042). These cover the reading half — the half that has to keep
+// working unqualified, because Namespaces exist to let a second `pdf` in, not
+// to make the first one harder to find.
+describe("Namespaces (ADR-0042)", () => {
+  let context: TestContext;
+  let container: StartedPostgreSqlContainer;
+  let writer: Session;
+
+  const ANTHROPIC = "https://github.com/anthropics/skills";
+  const OBRA = "https://github.com/obra/superpowers";
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("names a Skill published here after this Registry, on the detail and the list alike", async () => {
+    await publish(context, writer, "house-style", { description: "Ours.", body: "Body." });
+
+    const read = await context.app.request("/api/resources/skill/by-name/house-style");
+    expect(((await read.json()) as ApiSkill).namespace).toBe(TEST_NAMESPACE);
+
+    const list = await context.app.request("/api/resources?q=house-style");
+    expect(((await list.json()) as ApiPage).items[0]?.namespace).toBe(TEST_NAMESPACE);
+  });
+
+  it("names an Imported Skill after the repository it was copied out of", async () => {
+    const res = await publish(context, writer, "imported-one", {
+      description: "Theirs.",
+      body: "Body.",
+      source: ANTHROPIC,
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ApiPublished).skill.namespace).toBe("anthropics/skills");
+  });
+
+  it("reads an Imported Skill by its bare name while nothing else shares it", async () => {
+    await publish(context, writer, "solo", { description: "Theirs.", body: "Body.", source: ANTHROPIC });
+
+    const read = await context.app.request("/api/resources/skill/by-name/solo");
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as ApiSkill).namespace).toBe("anthropics/skills");
+  });
+
+  it("lets two parties publish one name, and tells them apart when asked", async () => {
+    await publish(context, writer, "pdf", { description: "A.", body: "Body.", source: ANTHROPIC });
+    await publish(context, writer, "pdf", { description: "B.", body: "Body.", source: OBRA });
+
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "pdf").execute();
+    expect(rows.length).toBe(2);
+
+    const theirs = await context.app.request("/api/resources/skill/by-name/pdf?namespace=obra/superpowers");
+    expect(theirs.status).toBe(200);
+    expect(((await theirs.json()) as ApiSkill).description).toBe("B.");
+  });
+
+  it("prefers the Skill published here when a bare name matches more than one", async () => {
+    await publish(context, writer, "review", { description: "Ours.", body: "Body." });
+    await publish(context, writer, "review", { description: "Theirs.", body: "Body.", source: ANTHROPIC });
+
+    const read = await context.app.request("/api/resources/skill/by-name/review");
+    expect(read.status).toBe(200);
+    const skill = (await read.json()) as ApiSkill;
+    expect(skill.namespace).toBe(TEST_NAMESPACE);
+    expect(skill.description).toBe("Ours.");
+  });
+
+  it("refuses a bare name that ties between outside parties, naming both", async () => {
+    await publish(context, writer, "tied", { description: "A.", body: "Body.", source: ANTHROPIC });
+    await publish(context, writer, "tied", { description: "B.", body: "Body.", source: OBRA });
+
+    const read = await context.app.request("/api/resources/skill/by-name/tied");
+    expect(read.status).toBe(409);
+    const body = (await read.json()) as ApiError;
+    expect(body.error.code).toBe("ambiguous_name");
+    expect(body.error.message).toContain("anthropics/skills");
+    expect(body.error.message).toContain("obra/superpowers");
+  });
+
+  it("moves a Skill into this Registry's Namespace when a republish clears its Source", async () => {
+    await publish(context, writer, "moved", { description: "Imported.", body: "Body.", source: ANTHROPIC });
+    await publish(context, writer, "moved", { description: "From disk.", body: "Body." });
+
+    // An insert, not an update: the Imported row keeps its own Namespace and
+    // stays where it is, which is why a bare read now prefers ours.
+    const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "moved").execute();
+    expect(rows.map((row) => row.namespace).sort()).toEqual(["anthropics/skills", TEST_NAMESPACE].sort());
   });
 });

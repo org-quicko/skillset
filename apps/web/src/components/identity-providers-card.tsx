@@ -29,7 +29,7 @@ const ACTIONS_COL = `${TABLE_HEAD_LABEL_CLASS} w-[190px]`;
 /** Placeholder provider table while `useIdentityProviders` is in flight. */
 function ProvidersTableSkeleton() {
   return (
-    <Panel contentClassName="p-0">
+    <Panel contentClassName="p-0" className="bg-transparent">
       <Table className="table-fixed">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -109,7 +109,7 @@ export function IdentityProvidersCard() {
       {providers.isPending && <ProvidersTableSkeleton />}
 
       {providers.isSuccess && providers.data.items.length === 0 && (
-        <Panel>
+        <Panel className="bg-transparent">
           <p className="text-sm text-muted-foreground">
             No Identity Providers configured. The login page asks for a password only.
           </p>
@@ -117,7 +117,7 @@ export function IdentityProvidersCard() {
       )}
 
       {providers.isSuccess && providers.data.items.length > 0 && (
-        <Panel contentClassName="p-0">
+        <Panel contentClassName="p-0" className="bg-transparent">
           <Table className="table-fixed">
             <TableHeader>
               <TableRow className="hover:bg-transparent">

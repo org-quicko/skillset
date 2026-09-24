@@ -1,14 +1,24 @@
-import type { SkillDirectorySortField, SkillDirectorySortOrder } from "@in-org-quicko/skillset-shared";
-import { ArrowDownIcon, ArrowUpIcon, SearchXIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import {
+  importedSource,
+  roleMeets,
+  type Role,
+  type SkillDirectorySortField,
+  type SkillDirectorySortOrder,
+} from "@in-org-quicko/skillset-shared";
+import { ArrowDownIcon, ArrowUpIcon, SearchXIcon, UploadIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { PublishSkillForm } from "@/components/publish-skill-form";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSkillDirectory, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { skillPath } from "@/lib/routes";
+import { LOGIN_PATH, skillPath } from "@/lib/routes";
+import { useRouter } from "@/lib/use-router";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /** How many of a Skill's Tags show as their own chip before the rest collapse into a "+N" one. */
@@ -38,8 +48,8 @@ function SkillListSkeletonRow({ index }: { index: number }) {
       <TableCell>
         <Skeleton className="h-3 w-12" />
       </TableCell>
-      <TableCell>
-        <Skeleton className="ml-auto h-3 w-10" />
+      <TableCell className="text-center">
+        <Skeleton className="mx-auto h-3 w-10" />
       </TableCell>
     </TableRow>
   );
@@ -118,19 +128,29 @@ function SortHeader({
  *
  * @param filters - The active search term, Tag ids, and sort choice.
  * @param onFiltersChange - Called with the full new filter set when a sort header or Tag chip is clicked.
- * @param onSelect - Called with a Skill's name when its row is clicked.
+ * @param onSelect - Called with a Skill's name and Namespace when its row is clicked, or when a Skill is published from the empty state.
+ * @param role - The signed-in visitor's Role, or `null` when signed out — gates the empty state's Publish action the same way `Header` does.
  */
 export function SkillList({
   filters,
   onFiltersChange,
   onSelect,
+  role,
 }: {
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
-  onSelect: (name: string) => void;
+  onSelect: (name: string, namespace: string) => void;
+  role: Role | null;
 }) {
   const skills = useSkillDirectory(filters);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const { navigate } = useRouter();
+
+  // Signed out visitors can see the Publish action too, same as `Header`'s —
+  // clicking it while signed out asks for a login instead of hiding the
+  // option outright.
+  const canPublish = role === null || roleMeets(role, "writer");
 
   const rows = skills.data?.pages.flatMap((page) => page.items) ?? [];
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = skills;
@@ -160,9 +180,42 @@ export function SkillList({
       <div className="fill-mode-both flex animate-in flex-col items-center gap-2 px-5 py-14 text-center fade-in-0 duration-300 motion-reduce:animate-none">
         <SearchXIcon className="size-6 text-ring" />
         <p className="text-sm text-muted-foreground">
-          {hasFilters ? `No skills match “${filters.q || "that filter"}”` : "No skills published yet"}
+          {hasFilters ? `No skills match “${filters.q || "that filter"}”` : "Publish your first skill"}
         </p>
-        {hasFilters && <p className="text-sm text-muted-foreground">Try a skill name, tag or publisher.</p>}
+        {hasFilters ? (
+          <p className="text-sm text-muted-foreground">Try a skill name, tag or publisher.</p>
+        ) : (
+          canPublish && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1"
+              onClick={() => (role ? setPublishOpen(true) : navigate(LOGIN_PATH))}
+            >
+              <UploadIcon />
+              Publish a Skill
+            </Button>
+          )
+        )}
+
+        <FormDialog
+          open={publishOpen}
+          onOpenChange={setPublishOpen}
+          className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl"
+        >
+          <FormDialogHeader
+            title="Publish a Skill"
+            description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
+          />
+          <FormDialogBody>
+            <PublishSkillForm
+              onPublished={(name, namespace) => {
+                setPublishOpen(false);
+                onSelect(name, namespace);
+              }}
+            />
+          </FormDialogBody>
+        </FormDialog>
       </div>
     );
   }
@@ -174,13 +227,13 @@ export function SkillList({
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground">#</TableHead>
           <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Skill</TableHead>
-          <TableHead className="w-44 text-center text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground">
             Publisher
           </TableHead>
-          <TableHead className="w-28 text-center text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground">
             <SortHeader field="updated_at" label="Updated" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
-          <TableHead className="w-24 text-center text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground">
             <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
         </TableRow>
@@ -194,7 +247,7 @@ export function SkillList({
               key={skill.id}
               style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
               className="fill-mode-both animate-in cursor-pointer fade-in-0 slide-in-from-bottom-1 duration-300 [animation-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:animate-none"
-              onClick={() => onSelect(skill.name)}
+              onClick={() => onSelect(skill.name, skill.namespace)}
             >
               <TableCell className="text-xs text-muted-foreground">{index + 1}</TableCell>
               <TableCell>
@@ -203,17 +256,24 @@ export function SkillList({
                       and honours modifier-clicks; the row's own onClick stays for
                       pointer users clicking anywhere else in it. */}
                   <a
-                    href={skillPath(skill.name)}
+                    href={skillPath(skill.name, skill.namespace)}
                     onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                       event.preventDefault();
                       event.stopPropagation();
-                      onSelect(skill.name);
+                      onSelect(skill.name, skill.namespace);
                     }}
                     className="rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     {skill.name}
                   </a>
+                  {/* Only for a Skill that came from elsewhere. One published
+                      here is named by this Registry, and repeating that on
+                      every row is noise — the same rule that hides the Source
+                      (ADR-0041, ADR-0042). */}
+                  {importedSource(skill.source) && (
+                    <span className="font-mono text-xs text-muted-foreground">{skill.namespace}</span>
+                  )}
                   {visibleTags.map((tag) => (
                     <Badge key={tag.id} asChild variant="outline">
                       <button
@@ -232,7 +292,7 @@ export function SkillList({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Badge asChild variant="secondary">
-                          <button type="button" onClick={(event) => event.stopPropagation()}>
+                          <button type="button" className="cursor-pointer" onClick={(event) => event.stopPropagation()}>
                             +{hiddenTags.length}
                           </button>
                         </Badge>
@@ -243,17 +303,17 @@ export function SkillList({
                 </div>
               </TableCell>
               <TableCell>
-                <div className="flex min-w-0 items-center justify-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <Avatar className="size-[26px] shrink-0">
                     <AvatarFallback className="text-[11px]">{initials(skill.published_by_name)}</AvatarFallback>
                   </Avatar>
                   <span className="truncate text-sm text-muted-foreground">{skill.published_by_name}</span>
                 </div>
               </TableCell>
-              <TableCell className="text-center text-xs text-muted-foreground">
-                {formatRelativeTime(skill.updated_at)}
+              <TableCell className="text-sm text-muted-foreground">{formatRelativeTime(skill.updated_at)}</TableCell>
+              <TableCell className="text-center text-sm text-muted-foreground tabular-nums">
+                {skill.installs.toLocaleString()}
               </TableCell>
-              <TableCell className="text-center tabular-nums">{skill.installs.toLocaleString()}</TableCell>
             </TableRow>
           );
         })}

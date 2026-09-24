@@ -1,6 +1,6 @@
 import { roleMeets, type Role } from "@in-org-quicko/skillset-shared";
 import { createMiddleware } from "hono/factory";
-import type { UserRow } from "../db/schemas/index.js";
+import type { UserRow } from "../db/tables.js";
 import type { Credential } from "../features/auth/authenticator.js";
 import { ForbiddenError, PasswordChangeRequiredError, UnauthenticatedError } from "../lib/errors.js";
 import type { AppEnv } from "../lib/factory.js";

@@ -21,7 +21,7 @@ function IntegrationTilesSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: 3 }).map((_, index) => (
-        <Panel key={index}>
+        <Panel key={index} className="bg-transparent">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="mt-1.5 h-3 w-40" />
         </Panel>
@@ -54,7 +54,7 @@ function IntegrationTile({
   const ProviderIcon = GIT_PROVIDER_ICONS[integration.provider];
 
   return (
-    <Panel>
+    <Panel className="bg-transparent">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <span className="truncate text-sm font-medium">{integration.display_name}</span>
@@ -138,7 +138,7 @@ export function IntegrationsCard() {
       {integrations.isPending && <IntegrationTilesSkeleton />}
 
       {integrations.isSuccess && configured.length === 0 && (
-        <Panel>
+        <Panel className="bg-transparent">
           <p className="text-sm text-muted-foreground">
             No Integrations configured. Importing is not available until you add one.
           </p>

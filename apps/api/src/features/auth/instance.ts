@@ -1,17 +1,7 @@
 import { ORGANISATION_CLAIM, isUngated, type IdentityProviderKind } from "@in-org-quicko/skillset-shared";
 import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { count, eq, max } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import {
-  accounts,
-  identityProviders,
-  rateLimits,
-  sessions,
-  users,
-  verifications,
-  type IdentityProviderRow,
-} from "../../db/schemas/index.js";
+import type { IdentityProviderRow } from "../../db/tables.js";
 import type { Logger } from "../../lib/logger.js";
 import { trustedOrigins } from "../../lib/origins.js";
 import { openClientSecret, type DerivedKeys } from "../../lib/secrets.js";
@@ -19,6 +9,7 @@ import { GITHUB_SCOPES, fetchGitHubIdentity } from "./github.js";
 import { hashPassword, verifyPassword } from "./password.js";
 
 export interface BetterAuthDependencies {
+  /** Better Auth reads and writes its own tables through this, already scoped to `DB_SCHEMA`. */
   db: Database;
   /** Signing secret. The app refuses to boot without one (ADR-0005, ADR-0016). */
   secret: string;
@@ -271,11 +262,11 @@ export function organisationGate(db: Database, logger: Logger) {
       return { error: code };
     };
 
-    const [provider] = await db
-      .select()
-      .from(identityProviders)
-      .where(eq(identityProviders.kind, kind))
-      .limit(1);
+    const provider = await db
+      .selectFrom("identity_providers")
+      .selectAll()
+      .where("kind", "=", kind)
+      .executeTakeFirst();
 
     if (!provider) {
       return refuse(REFUSED.providerNotConfigured, "no provider configured for this kind");
@@ -386,10 +377,7 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
     secret: deps.secret,
     baseURL: deps.publicUrl,
     basePath: AUTH_BASE_PATH,
-    database: drizzleAdapter(deps.db, {
-      provider: "pg",
-      schema: { users, sessions, accounts, verifications, rate_limits: rateLimits },
-    }),
+    database: { db: deps.db, type: "postgres" },
     // On in every environment, not just production as Better Auth defaults
     // to, and counted in Postgres rather than in process memory (ISSUE-7).
     // The memory store gave one bucket per replica and forgot everything on
@@ -542,12 +530,14 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
           before: async (user) => {
             const claims = user as unknown as Record<string, unknown>;
             const [first, last] = namesFrom(claims, String(user.email ?? ""));
-            // `name` is dropped rather than written: the column is generated
-            // from these two halves, so Postgres refuses an insert into it.
-            const { name: _name, ...rest } = user;
+            // `name` is generated from these two halves, so Postgres refuses an
+            // insert into it. Set to `undefined` rather than omitted: Better Auth
+            // merges this result over its own data (see `withoutGitHubTokens`),
+            // so an omitted key is restored, while the adapter skips undefined.
             return {
               data: {
-                ...rest,
+                ...user,
+                name: undefined,
                 first_name: first,
                 last_name: last,
                 role: "reader",
@@ -659,17 +649,15 @@ export function createAuthRegistry(deps: BetterAuthDependencies): AuthRegistry {
   // adding a Provider moves the count, editing or disabling one moves the
   // timestamp. There is no delete route (ADR-0015).
   async function version(): Promise<string> {
-    const [row] = await deps.db
-      .select({ total: count(), latest: max(identityProviders.updated_at) })
-      .from(identityProviders);
-    return `${row?.total ?? 0}:${row?.latest?.getTime() ?? 0}`;
+    const row = await deps.db
+      .selectFrom("identity_providers")
+      .select((eb) => [eb.fn.countAll<number>().as("total"), eb.fn.max("updated_at").as("latest")])
+      .executeTakeFirstOrThrow();
+    return `${row.total}:${row.latest?.getTime() ?? 0}`;
   }
 
   async function build(key: string): Promise<Auth> {
-    const rows = await deps.db
-      .select()
-      .from(identityProviders)
-      .where(eq(identityProviders.enabled, true));
+    const rows = await deps.db.selectFrom("identity_providers").selectAll().where("enabled", "=", true).execute();
     // The column holds ciphertext (ISSUE-9), and what Better Auth needs is
     // the credential itself. Decrypted here rather than in `createAuth`
     // because that one is synchronous — and here is also where the rebuild

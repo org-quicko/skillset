@@ -1,10 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@in-org-quicko/skillset-shared";
-import { eq } from "drizzle-orm";
 import { setPasswordCredential } from "../auth/credential.js";
 import { hashPassword } from "../auth/password.js";
-import { users } from "../../db/schemas/index.js";
 import { SIGN_IN_PATH, SIGN_OUT_PATH, startTestContext, stopTestContext, type TestContext, SESSION_COOKIE_NAME } from "../../../test/context.js";
 
 interface ApiUser {
@@ -55,16 +53,16 @@ async function createUserAndLogIn(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: Role },
 ): Promise<Session> {
-  const [row] = await context.db
-    .insert(users)
+  const row = await context.db
+    .insertInto("users")
     .values({
       first_name: body.first_name,
       last_name: body.last_name,
       email: body.email,
       role: body.role,
     })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
+    .returningAll()
+    .executeTakeFirstOrThrow();
 
   await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
 
@@ -145,7 +143,7 @@ describe("Managing Users (ticket 11)", () => {
     // it fails with `account_not_linked`. ADR-0015 requires that a login whose
     // verified email matches an existing User signs in as that User, whether
     // or not they have a password, and this flag is what allows it.
-    const [row] = await context.db.select().from(users).where(eq(users.email, "grace@example.com")).limit(1);
+    const row = await context.db.selectFrom("users").selectAll().where("email", "=", "grace@example.com").executeTakeFirst();
     expect(row?.email_verified).toBe(true);
   });
 
@@ -419,7 +417,7 @@ describe("Managing Users (ticket 11)", () => {
     });
     expect(del.status).toBe(400);
 
-    const [row] = await context.db.select().from(users).where(eq(users.id, otherAdmin.id)).limit(1);
+    const row = await context.db.selectFrom("users").selectAll().where("id", "=", otherAdmin.id).executeTakeFirst();
     expect(row?.role).toBe("admin");
   });
 
@@ -438,7 +436,7 @@ describe("Managing Users (ticket 11)", () => {
     });
     expect(del.status).toBe(204);
 
-    const [row] = await context.db.select().from(users).where(eq(users.id, target.id)).limit(1);
+    const row = await context.db.selectFrom("users").selectAll().where("id", "=", target.id).executeTakeFirst();
     expect(row).toBeUndefined();
 
     const stillLoggedIn = await context.app.request("/api/users/me", { headers: { cookie: target.cookie } });
@@ -469,7 +467,7 @@ describe("Managing Users (ticket 11)", () => {
     expect(remove.status).toBe(409);
     expect(((await remove.json()) as ApiError).error.code).toBe("superadmin_protected");
 
-    const [row] = await context.db.select().from(users).where(eq(users.id, admin.id)).limit(1);
+    const row = await context.db.selectFrom("users").selectAll().where("id", "=", admin.id).executeTakeFirst();
     expect(row?.role).toBe("superadmin");
   });
 

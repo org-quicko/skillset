@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@in-org-quicko/skillset-shared";
-import { eq } from "drizzle-orm";
 import { organisationGate } from "../auth/instance.js";
-import { identityProviders, users, type IdentityProviderRow } from "../../db/schemas/index.js";
+import type { IdentityProviderRow, NewIdentityProviderRow } from "../../db/tables.js";
 import { createLogger } from "../../lib/logger.js";
 import {
   seedUserWithPassword,
@@ -59,10 +58,10 @@ function providerBody(overrides: Record<string, unknown> = {}) {
 /** Inserted directly: most cases here don't concern the create route itself. */
 async function seedProvider(
   context: TestContext,
-  overrides: Partial<IdentityProviderRow> = {},
+  overrides: Partial<NewIdentityProviderRow> = {},
 ): Promise<IdentityProviderRow> {
-  const [row] = await context.db
-    .insert(identityProviders)
+  return context.db
+    .insertInto("identity_providers")
     .values({
       kind: "google",
       display_name: "Seeded",
@@ -72,9 +71,8 @@ async function seedProvider(
       enabled: true,
       ...overrides,
     })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created Identity Provider.");
-  return row;
+    .returningAll()
+    .executeTakeFirstOrThrow();
 }
 
 /**
@@ -124,7 +122,7 @@ describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)",
   });
 
   async function clearProviders() {
-    await context.db.delete(identityProviders);
+    await context.db.deleteFrom("identity_providers").execute();
   }
 
   describe("configuration", () => {
@@ -296,11 +294,11 @@ describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)",
         body: JSON.stringify({ display_name: "Renamed" }),
       });
 
-      const [row] = await context.db
-        .select()
-        .from(identityProviders)
-        .where(eq(identityProviders.id, provider.id))
-        .limit(1);
+      const row = await context.db
+        .selectFrom("identity_providers")
+        .selectAll()
+        .where("id", "=", provider.id)
+        .executeTakeFirst();
       expect(row?.client_secret).toBe("the-original-secret");
     });
 
@@ -314,11 +312,11 @@ describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)",
       });
       expect(res.status).toBe(404);
 
-      const [row] = await context.db
-        .select()
-        .from(identityProviders)
-        .where(eq(identityProviders.id, provider.id))
-        .limit(1);
+      const row = await context.db
+        .selectFrom("identity_providers")
+        .selectAll()
+        .where("id", "=", provider.id)
+        .executeTakeFirst();
       expect(row).toBeDefined();
     });
 
@@ -661,9 +659,10 @@ describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)",
       expect(await gate({ method: "oauth", oauth: { providerId: "google", profile } })).toBe(admit);
 
       await context.db
-        .update(identityProviders)
+        .updateTable("identity_providers")
         .set({ permitted_organisations: ["somewhere-else.com"] })
-        .where(eq(identityProviders.id, provider.id));
+        .where("id", "=", provider.id)
+        .execute();
 
       // No instance rebuild in between. The gate reads the row per login, which
       // is what keeps a stale cached instance unable to admit anyone it should
@@ -698,7 +697,7 @@ describe("Identity Providers and external login (ADR-0015, ADR-0017, ADR-0018)",
     it("cannot mint anything above a reader, whatever a Provider says", async () => {
       // Belt and braces, and deliberately so: the create hook pins the role
       // (ADR-0015), and nothing a Provider asserts is consulted when it does.
-      const everyone = await context.db.select().from(users);
+      const everyone = await context.db.selectFrom("users").selectAll().execute();
       const promoted = everyone.filter((user) => user.email.endsWith("@external.example"));
       expect(promoted.every((user) => user.role === "reader")).toBe(true);
     });

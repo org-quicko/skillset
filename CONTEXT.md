@@ -8,18 +8,46 @@ members of a single team.
 ## Language
 
 **Resource**:
-Anything the Registry holds and a coding agent can obtain. Every Resource has a Kind, a `name`
-unique within that Kind, a description, a publisher, optional markdown documentation (`body`),
-and any number of Tags; everything else about it lives in its Kind-specific payload (ADR-0026).
-Not every Resource has an Artifact (ADR-0027).
+Anything the Registry holds and a coding agent can obtain. Every Resource has a Kind, a Namespace,
+a `name` unique within that pair, a description, a publisher, optional markdown documentation
+(`body`), and any number of Tags; everything else about it lives in its Kind-specific payload
+(ADR-0026). Not every Resource has an Artifact (ADR-0027).
 _Avoid_: Package, entry, item, asset, artifact (which is the files, not the thing)
 
 **Kind**:
 Which of the three things a Resource is — `skill`, `mcp-server`, or `plugin`. A Kind fixes the
 shape of the payload, the rules `name` and `description` must satisfy, whether there is an
-Artifact, and what `skillset add` does. Stored as plain text rather than an enum, so a fourth
+Artifact, and what `skillset install` does. Stored as plain text rather than an enum, so a fourth
 Kind is an insert rather than a migration (ADR-0026, following ADR-0024).
 _Avoid_: Type, category, class, resource type
+
+**Namespace**:
+Which party named a Resource, and the other half of its publishing identity: unique is
+`(kind, namespace, name)` rather than `(kind, name)`, so two Skills may both be called
+`frontend-design` so long as different parties named them. Every Resource carries one, always —
+`owner/repo` for an Import, and this Registry's own host for anything published straight here. That
+host is written forward, rather than as the reverse-DNS a Source resolves to (`skills.quicko.com`,
+not `com.quicko.skills`), because a Namespace is read aloud and typed where a Source is only ever
+linked. Never absent and never resolved on read, which is the whole of what separates it from a
+Source: a Source is provenance and may genuinely be missing, a Namespace is identity and cannot be.
+It follows the Source rather than being declared beside it, so the two can never disagree — and a
+republish from disk, which clears an Import's Source, moves the Skill into this Registry's Namespace
+alongside the Imported one rather than replacing it. Naming none still reads: the lookup takes the only Skill of that
+name when there is one, and otherwise the one published here, so every name that resolved before
+still resolves and an Imported Skill nobody competes with keeps the name its author gave it. Only a
+tie between two outside parties refuses, naming both. Qualification is what *installing* needs —
+a directory holds one Skill of a name — not what reading or searching needs. An opaque string throughout: lowercase alphanumerics, dots, hyphens, and at most one slash,
+compared whole and never split. It confers nothing — no ownership, no permission, no claim on the
+name — and it is never renamed, because a rename would re-identify every Resource beneath it.
+
+A Registry concept, and only that: installs stay flat at `.agents/skills/<name>` (ADR-0022), so
+one project holds at most one Skill of a given name however many Namespaces publish it. Two
+same-named Skills are co-publishable, never co-installable — the CLI refuses the second rather
+than overwriting the first, and no Namespace changes that. Reverses ADR-0002, which rejected
+namespacing on the premise of a single team — a premise Import expired by bringing in Skills named
+by parties who were never on it, and the CLI's own import turned from occasional into ordinary
+(ADR-0042).
+_Avoid_: Scope (which is where a Skill is installed), owner, org, vendor, prefix, group
 
 **Skill**:
 The Kind whose payload is a directory bundle: a root `SKILL.md` with YAML frontmatter, alongside
@@ -84,7 +112,7 @@ The files of a Resource of a Kind that has one — Skill and Plugin. Uploaded di
 storage by the client, one object per file, under a prefix keyed by the Resource's `id`
 (ADR-0026, ADR-0032). An MCP Server has no Artifact at all (ADR-0027). A **zip** is one
 *representation* of an Artifact rather than the Artifact itself: the Registry assembles one on
-demand for `skillset add`, the web Download control, and a Marketplace `archive` source, and
+demand for `skillset install`, the web Download control, and a Marketplace `archive` source, and
 stores none.
 _Avoid_: Bundle, package, tarball, blob, zip (which is a representation, not the thing)
 
@@ -95,6 +123,25 @@ the Registry validate every path and enforce the file-count and size limits with
 bytes (ADR-0001, ADR-0032), and reading returns the *actual* one, listed back from storage. The
 two agree once an upload has finished, and the read is the one to trust.
 _Avoid_: File list, index, tree, contents
+
+**Lockfile**:
+A `skillset-lock.json` at a project root, or in a User's home directory for user Scope,
+recording every Skill installed *there*: its Resource id, the Registry's `updated_at` at the
+moment it was installed, a digest of the files that were written, and when. It is what makes
+an installed Skill's state answerable — whether the Registry has moved on, and whether anyone
+has edited the copy on disk — neither of which anything could tell before (ADR-0038). Records
+no Agent: `update`/`remove` re-detect which Agent to link or unlink at call time rather than
+trusting what install once resolved. Advisory rather than authoritative: a missing or corrupt
+one reads as empty rather than failing an install, and nothing signs it.
+_Avoid_: Manifest (which is an Artifact's file list), lock, state file
+
+**Status**:
+How one installed Skill stands, as the Lockfile's two recorded signals answer it. `current` is
+unchanged on both. `outdated` means the Registry's `updated_at` has moved. `modified` means the
+files on disk no longer digest to what was written. `missing` means the Lockfile records a
+Skill whose directory is gone. A Skill that is both edited and stale reports `modified`,
+because that is the one needing a decision (ADR-0038).
+_Avoid_: State, drift, dirty
 
 **Install**:
 A recorded, countable instance of a Resource being obtained — one event per occurrence. What
@@ -121,7 +168,7 @@ _Avoid_: API key, credential, secret
 **Agent**:
 A coding agent that reads Skills from a conventional directory on a developer's machine.
 The offered list is a hand-curated Agent → directory table, each row verified against that
-Agent's own documentation (ADR-0031). `add` writes to the canonical `.agents/skills` and
+Agent's own documentation (ADR-0031). `install` writes to the canonical `.agents/skills` and
 symlinks the chosen Agent's own directory to it (ADR-0022). The table is about **Skills
 only**: an MCP Server is installed by merging a project's `.mcp.json` and names no Agent
 (ADR-0029).
@@ -166,11 +213,40 @@ _Avoid_: Link, linked account, authorisation, integration
 
 **Import**:
 A one-time copy of a Skill's or a Plugin's files out of a Git Provider and into the Registry. It is
-not a link: what was published keeps no reference to where it came from, and nothing is ever
-re-read. A public folder needs no Connection; a private one is read as the writer's own
-Connection. An MCP Server is never Imported — its whole payload is a `server.json` a writer
-pastes.
+not a link: nothing is ever re-read, and nothing syncs. What was published records the repository
+it came from as its Source, a historical note rather than a reference — nothing follows it
+(ADR-0041) — and that Source is what gives it its Namespace (ADR-0042). Either surface Imports, and
+they reach different repositories because they read as different parties: the web reads through the
+writer's Connection, and the CLI clones with the writer's own git — so each reaches whatever that
+party can (ADR-0044). An MCP Server is never Imported — its whole payload is
+a `server.json` a writer pastes.
 _Avoid_: Sync, clone, pull, link
+
+**Submission**:
+A Resource someone installed straight from a repository with `skillset install <url>` and put
+forward for the Registry, waiting for an Admin to approve it into a Resource or reject it. The CLI
+clones it with the User's own git, so a private repository they can reach is in range. Any signed-in
+role may submit, because submitting publishes nothing. A Submission is not a Resource: nothing in
+the catalog reads, searches or installs one. It carries the `(kind, namespace, name)` it would have
+as a Resource, derived from its Source the same way a publish's is, and it lands there on approval,
+credited to whoever submitted it. Until then the User's lockfile records the Skill with its Source
+and no Registry revision. `update` treats it as pending, then moves it onto the Registry's copy
+once it has been approved (ADR-0044).
+_Avoid_: Request, proposal, draft, pending Resource
+
+**Source**:
+Where a Resource came from, as one value every read returns. An Imported Resource's Source is the
+**repository** URL it was copied out of — without the ref or the folder, so a monorepo's Skills
+share one. Anything published straight to the Registry has this Registry itself as its Source,
+written as its domain in reverse-DNS notation (`com.quicko.skills`). One is an address and the
+other an identity, which is why only the first is ever shown: a Source appears — as its Git
+Provider's mark, linking out — only when it points somewhere the reader cannot already see, and a
+Resource published here shows none at all. Declared by the publisher rather than inferred — the
+Registry never opens an Artifact to find out (ADR-0001) — and only the URL form is declarable: the
+reverse-DNS form is what declaring nothing means. Provenance, not a link: a republish from disk
+clears an earlier Import's Source, and a repository that moves leaves the recorded value untouched
+and wrong.
+_Avoid_: Origin, provider, upstream, remote, repository (which is one kind of Source, not the term)
 
 **Permitted Organisation**:
 One value a Provider admits people from: a Workspace domain for Google, a tenant id for

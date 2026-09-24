@@ -1,19 +1,24 @@
-import { access, readdir, readFile } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import {
   buildSkillBundle,
-  isExcludedPath,
   SKILL_DISCOVERY_MAX_DEPTH,
   SKILL_FILE_NAME,
   SkillPublishedSchema,
   SkillValidationError,
   type SkillBundle,
-  type SkillFile,
 } from "@in-org-quicko/skillset-shared";
 import { rethrowValidationError } from "../errors.js";
-import { ApiError, registryFetch, uploadArtifactFile, type RegistryClient } from "../http.js";
+import { ApiError, registryFetch, uploadArtifactFiles, type RegistryClient } from "../http.js";
 import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 import { describeError } from "../ui.js";
+import {
+  discoverSkillDirectories,
+  holdsSkillFile,
+  isRepositoryUrl,
+  readRepositorySkill,
+  walkSkillDirectory,
+  type Progress,
+} from "@in-org-quicko/skillset-installer";
 
 export interface PublishDeps extends SessionDeps {
   cwd: string;
@@ -25,11 +30,21 @@ export interface PublishDeps extends SessionDeps {
    * `options.yes` was not passed.
    */
   confirm(names: readonly string[]): Promise<boolean>;
+  /** Reports the clone a URL publish starts with. Absent under `--json`. */
+  progress?: Progress;
 }
 
 export interface PublishOptions {
-  /** Defaults to `deps.cwd` — "the directory I am working in" (story 15). */
-  path?: string;
+  /**
+   * A path — defaulting to `deps.cwd`, "the directory I am working in" (story
+   * 15) — or a GitHub or GitLab URL to clone the Skill out of (ADR-0044).
+   */
+  target?: string;
+  /**
+   * `--name`: which Skill to publish out of a URL, by the name its `SKILL.md`
+   * declares. Required with a URL, refused with a path.
+   */
+  skillName?: string;
   /** Skips the multi-Skill confirmation prompt, for automation with no terminal attached. */
   yes?: boolean;
 }
@@ -44,83 +59,6 @@ export interface PublishResult {
 export type PublishOutcome =
   | ({ name: string; status: "published" } & PublishResult)
   | { name: string; status: "failed"; error: string };
-
-/**
- * Reads every file under `root`, skipping whatever `isExcludedPath` (shared)
- * would exclude anyway — pruning descent into `node_modules`/`.git`/etc.
- * rather than reading them and discarding the bytes.
- */
-async function walkSkillDirectory(root: string, dir: string = root): Promise<SkillFile[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: SkillFile[] = [];
-
-  for (const entry of entries) {
-    const absolutePath = join(dir, entry.name);
-    const relativePath = relative(root, absolutePath).split(sep).join("/");
-    if (isExcludedPath(relativePath)) continue;
-
-    if (entry.isDirectory()) {
-      files.push(...(await walkSkillDirectory(root, absolutePath)));
-    } else if (entry.isFile()) {
-      files.push({ path: relativePath, bytes: await readFile(absolutePath) });
-    }
-  }
-
-  return files;
-}
-
-/**
- * Whether `dir` itself holds a `SKILL.md` — the mark of a Skill's own root.
- *
- * @remarks
- * Only a missing file reads as `false`. Anything else `access` throws — a
- * permission error, a broken symlink — is a real problem with `dir` and is
- * rethrown rather than silently rerouting into the discovery walk, which
- * would misreport it as "no Skill found" instead of naming the actual fault.
- */
-async function holdsSkillFile(dir: string): Promise<boolean> {
-  try {
-    await access(join(dir, SKILL_FILE_NAME));
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-/**
- * Finds every Skill directory under `root`: one holding a `SKILL.md`, found by walking up
- * to `SKILL_DISCOVERY_MAX_DEPTH` levels below it. A directory is never descended into once
- * it is found to hold one, so a Skill's own supporting directories are never mistaken for
- * Skills of their own. Version-control metadata, dependency directories, and dotfile
- * directories are skipped, via the same rule `isExcludedPath` applies to a Skill's own files.
- *
- * @param root - Where to start looking.
- * @returns Absolute paths of every directory found to hold a `SKILL.md`, sorted for
- * deterministic reporting. If `root` itself holds one, that is the only entry and the walk
- * does not run any further.
- */
-async function discoverSkillDirectories(root: string): Promise<string[]> {
-  if (await holdsSkillFile(root)) return [root];
-
-  const found: string[] = [];
-
-  const walk = async (dir: string, depth: number): Promise<void> => {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory() || isExcludedPath(entry.name)) continue;
-      const absolutePath = join(dir, entry.name);
-      if (await holdsSkillFile(absolutePath)) {
-        found.push(absolutePath);
-      } else if (depth < SKILL_DISCOVERY_MAX_DEPTH) {
-        await walk(absolutePath, depth + 1);
-      }
-    }
-  };
-
-  await walk(root, 1);
-  return found.sort();
-}
 
 /**
  * PUTs a Skill's metadata, then uploads its Artifact straight to storage (ADR-0001).
@@ -147,17 +85,7 @@ async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bu
     throw error;
   }
 
-  // One presigned destination per declared file, in the order the manifest
-  // declared them (ADR-0032), so the two lists line up index for index.
-  await Promise.all(
-    published.upload.files.map((target, index) => {
-      const file = bundle.files[index];
-      if (!file || file.path !== target.path) {
-        throw new Error("The Registry returned upload targets that do not match the files it was told about.");
-      }
-      return uploadArtifactFile(fetchImpl, target, file.bytes);
-    }),
-  );
+  await uploadArtifactFiles(fetchImpl, published.upload.files, bundle.files);
 
   return { name: published.skill.name, id: published.skill.id, published_at: published.skill.published_at };
 }
@@ -184,65 +112,14 @@ async function buildBundles(root: string, directories: readonly string[]): Promi
 }
 
 /**
- * Publishes the Skill at a directory, or every Skill beneath it.
+ * Authenticates, confirms a batch when there is one to confirm, and publishes
+ * every bundle — reporting each outcome rather than aborting on the first
+ * failure.
  *
- * @param deps - The fetch implementation, config-file path, environment, the directory a
- * relative `options.path` is resolved against, whether a terminal is attached, and how to
- * confirm publishing more than one Skill.
- * @param options - Where to look; defaults to `deps.cwd`. `yes` skips the confirmation
- * before publishing more than one Skill, for automation with no terminal attached.
- * @returns The published Skill's name, id, and publish timestamp, when `options.path` (or
- * `deps.cwd`) itself holds a `SKILL.md` — publishing that one Skill exactly as before. When
- * it does not, every Skill found beneath it up to `SKILL_DISCOVERY_MAX_DEPTH` levels deep is
- * published instead, and the outcome of each is returned individually rather than thrown: a
- * publish failure part-way through does not stop the rest from being attempted or reported.
- * @throws Error naming the rule and the offending directory when a Skill fails the local
- * check — thrown before the Registry is contacted at all — or when no Skill is found at all.
- * @throws Error explaining how to authenticate when no Registry and Token are configured.
- * @throws Error when publishing more than one Skill needs confirmation and none can be
- * given — no terminal is attached and `--yes` was not passed — or when the User declines.
- * @throws Error about permissions when the Registry answers 403 for the single-Skill case,
- * so a reader's Token is refused with a reason rather than a generic failure; and about the
- * Token itself on 401. A multi-Skill publish reports the same wording per Skill instead of
- * throwing it.
- * @throws ApiError for any other refusal, and `RegistryUnreachableError` when neither the
- * Registry nor storage can be reached — again, only for the single-Skill case.
- *
- * @remarks
- * Every Skill is validated locally with the same shared rules the API applies before the
- * Registry is contacted for any of them (ADR-0001's upload comes after).
- *
- * @example
- * ```ts
- * const { name, id } = await runPublish(deps, { path: "./skills/code-review" }) as PublishResult;
- * ```
- * @example
- * ```ts
- * const outcomes = await runPublish(deps, { path: "./skills", yes: true }) as PublishOutcome[];
- * ```
+ * @throws Error when publishing more than one Skill needs confirmation and none
+ * can be given, or when the User declines.
  */
-export async function runPublish(deps: PublishDeps, options: PublishOptions): Promise<PublishResult | PublishOutcome[]> {
-  const targetPath = options.path ? resolve(deps.cwd, options.path) : deps.cwd;
-
-  if (await holdsSkillFile(targetPath)) {
-    let bundle;
-    try {
-      bundle = buildSkillBundle(await walkSkillDirectory(targetPath));
-    } catch (error) {
-      rethrowValidationError(error);
-    }
-    return publishBundle(await openAuthenticatedClient(deps), deps.fetch, bundle);
-  }
-
-  const directories = await discoverSkillDirectories(targetPath);
-  if (directories.length === 0) {
-    throw new Error(
-      `No Skill found under "${targetPath}" — looked up to ${SKILL_DISCOVERY_MAX_DEPTH} levels deep for a directory holding ${SKILL_FILE_NAME}.`,
-    );
-  }
-
-  const bundles = await buildBundles(targetPath, directories);
-
+async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], options: PublishOptions): Promise<PublishOutcome[]> {
   // Authenticate before confirming, not after: a writer who isn't logged in
   // should be told that up front, rather than answering a confirmation
   // prompt for a batch that was never going to reach the Registry anyway.
@@ -265,4 +142,87 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
     }
   }
   return outcomes;
+}
+
+/**
+ * Publishes the Skill at a directory, or every Skill beneath it — or one named
+ * Skill out of a GitHub or GitLab repository.
+ *
+ * @param deps - The fetch implementation, config-file path, environment, the directory a
+ * relative path is resolved against, whether a terminal is attached, how to confirm
+ * publishing more than one Skill, and how to report the clone a URL starts with.
+ * @param options - `target`, a path (default `deps.cwd`) or a repository URL; `skillName`
+ * (`--name`), which Skill to publish out of a URL; and `yes`, which skips the confirmation
+ * before publishing more than one Skill, for automation with no terminal attached.
+ * @returns The published Skill's name, id, and publish timestamp for a URL, or for a path
+ * that itself holds a `SKILL.md`. For any other path, every Skill found beneath it up to
+ * `SKILL_DISCOVERY_MAX_DEPTH` levels deep is published, and the outcome of each is returned
+ * individually rather than thrown: a failure part-way through does not stop the rest.
+ * @throws Error when a URL is given without `--name`, or `--name` with a path.
+ * @throws Error naming the rule and the offending directory when a Skill fails the local
+ * check — thrown before the Registry is contacted — or when no Skill is found at all.
+ * @throws Error with git's own message when a URL cannot be cloned, or naming every Skill
+ * found when none there declares `--name`.
+ * @throws Error explaining how to authenticate when no Registry and Token are configured.
+ * @throws Error when publishing more than one Skill needs confirmation and none can be
+ * given — no terminal is attached and `--yes` was not passed — or when the User declines.
+ * @throws Error about permissions when the Registry answers 403 for a single-Skill publish,
+ * so a reader's Token is refused with a reason rather than a generic failure; and about the
+ * Token itself on 401. A multi-Skill publish reports the same wording per Skill instead.
+ * @throws ApiError for any other refusal, and `RegistryUnreachableError` when neither the
+ * Registry nor storage can be reached — again, only for a single-Skill publish.
+ *
+ * @remarks
+ * Every Skill is validated locally with the same shared rules the API applies before the
+ * Registry is contacted for any of them (ADR-0001's upload comes after).
+ *
+ * A URL is cloned with the User's own git, the same way `install` clones one, so any
+ * repository they can clone publishes — private ones included — and the repository is
+ * recorded as the Skill's Source and, through it, its Namespace (ADR-0041, ADR-0042,
+ * ADR-0044). A path records no Source: the Skill reads as published straight here.
+ *
+ * @example
+ * ```ts
+ * const { name, id } = await runPublish(deps, { target: "./skills/code-review" }) as PublishResult;
+ * const outcomes = await runPublish(deps, { target: "./skills", yes: true }) as PublishOutcome[];
+ * await runPublish(deps, { target: "https://github.com/acme/skills", skillName: "pdf" });
+ * ```
+ */
+export async function runPublish(deps: PublishDeps, options: PublishOptions): Promise<PublishResult | PublishOutcome[]> {
+  const url = options.target !== undefined && isRepositoryUrl(options.target) ? options.target : null;
+  if (url && !options.skillName) {
+    throw new Error("Pass --name with a URL to say which Skill to publish — the name in its SKILL.md.");
+  }
+  if (!url && options.skillName) {
+    throw new Error("--name picks a Skill out of a repository URL; a path already says which Skill to publish.");
+  }
+
+  if (url && options.skillName) {
+    // Authenticated before cloning: a writer who is not logged in should hear
+    // that before waiting on a clone that was never going to be published.
+    const client = await openAuthenticatedClient(deps);
+    const { bundle } = await readRepositorySkill(url, options.skillName, deps.env, deps.progress);
+    return publishBundle(client, deps.fetch, bundle);
+  }
+
+  const targetPath = options.target ? resolve(deps.cwd, options.target) : deps.cwd;
+
+  if (await holdsSkillFile(targetPath)) {
+    let bundle;
+    try {
+      bundle = buildSkillBundle(await walkSkillDirectory(targetPath));
+    } catch (error) {
+      rethrowValidationError(error);
+    }
+    return publishBundle(await openAuthenticatedClient(deps), deps.fetch, bundle);
+  }
+
+  const directories = await discoverSkillDirectories(targetPath);
+  if (directories.length === 0) {
+    throw new Error(
+      `No Skill found under "${targetPath}" — looked up to ${SKILL_DISCOVERY_MAX_DEPTH} levels deep for a directory holding ${SKILL_FILE_NAME}.`,
+    );
+  }
+
+  return publishAll(deps, await buildBundles(targetPath, directories), options);
 }

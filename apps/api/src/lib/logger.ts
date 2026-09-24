@@ -44,21 +44,21 @@ const REDACT_PATHS = [
 ];
 
 /**
- * `Failed query: … params: …` — how Drizzle's `DrizzleQueryError` opens both
- * its message and its stack.
+ * `Failed query: … params: …` — how a wrapped query error opens both its
+ * message and its stack.
  *
  * Unanchored on purpose: the message begins with it, the stack begins
  * `Error: Failed query: …`, and a caused-by chain can carry it more than once.
  */
-const DRIZZLE_QUERY_PARAMS = /(Failed query:[\s\S]*?\nparams:)[^\n]*/g;
+const QUERY_PARAMS = /(Failed query:[\s\S]*?\nparams:)[^\n]*/g;
 
 /**
  * Serializes a caught error for logging, with any bound query parameters
  * taken out.
  *
  * @remarks
- * Drizzle wraps every failed query in an error whose *message* carries the
- * SQL and the parameters it was run with. Those parameters are rows: a
+ * A query error of that shape carries, in its *message*, the SQL and the
+ * parameters it was run with. Those parameters are rows: a
  * password hash on a failed `accounts` insert, a client secret on a failed
  * `identity_providers` update. Pino's redaction works on fields, so it cannot
  * reach inside a message string — the only place to take them out is here,
@@ -69,7 +69,7 @@ const DRIZZLE_QUERY_PARAMS = /(Failed query:[\s\S]*?\nparams:)[^\n]*/g;
  */
 function serializeError(error: unknown): ReturnType<typeof pino.stdSerializers.err> {
   // Pino copies an error's own enumerable properties onto the line, and
-  // `DrizzleQueryError` keeps `params` as one of them — so the values have to
+  // such an error keeps `params` as one of them — so the values have to
   // be dropped as a field as well as scrubbed out of the text.
   const { params: _params, ...serialized } = pino.stdSerializers.err(error as Error) as ReturnType<
     typeof pino.stdSerializers.err
@@ -77,8 +77,8 @@ function serializeError(error: unknown): ReturnType<typeof pino.stdSerializers.e
 
   return {
     ...serialized,
-    message: serialized.message?.replace(DRIZZLE_QUERY_PARAMS, "$1 [REDACTED]"),
-    stack: serialized.stack?.replace(DRIZZLE_QUERY_PARAMS, "$1 [REDACTED]"),
+    message: serialized.message?.replace(QUERY_PARAMS, "$1 [REDACTED]"),
+    stack: serialized.stack?.replace(QUERY_PARAMS, "$1 [REDACTED]"),
   };
 }
 

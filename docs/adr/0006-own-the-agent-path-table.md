@@ -2,7 +2,7 @@
 
 > **Amended by ADR-0022.** The table is no longer a five-Agent verified subset — it is the full
 > `vercel-labs/skills` list, vendored wholesale and re-synced by diff. The install model also
-> changed: `add` writes one canonical copy under `.agents/skills` and symlinks the chosen
+> changed: `install` writes one canonical copy under `.agents/skills` and symlinks the chosen
 > Agent's directory to it, rather than writing into exactly one Agent's directory. The reasons
 > to *own* the table rather than depend on the package at runtime are unchanged.
 
@@ -10,7 +10,7 @@
 > is installed by merging a project's `.mcp.json` — and this ADR's "offer only paths we have
 > verified" principle is precisely what refuses an invented Agent → MCP-config table.
 
-`skillreg add` writes a Skill into the directory a coding agent reads from, which means it
+`skillset install` writes a Skill into the directory a coding agent reads from, which means it
 needs the per-agent conventions. We keep that mapping ourselves as plain data rather than
 depending on `skills` at runtime, and we offer **only agents whose paths we have verified** —
 an unverified path is worse than an absent one, because it writes to a real directory that
@@ -23,7 +23,7 @@ upstream commit in a header comment so re-syncing is a diff rather than archaeol
 
 ## Considered Options
 
-Depending on the `skills` package at runtime was rejected — `add`'s flags and behaviour are
+Depending on the `skills` package at runtime was rejected — `install`'s flags and behaviour are
 shaped around this table, and we do not want install semantics changing under us on a
 transitive upgrade.
 
@@ -33,7 +33,7 @@ Lifting the full ~74-agent table was rejected as scope we cannot verify. Upstrea
 The transform machinery originally planned for this table is therefore not built.
 
 `@vercel/detect-agent` (published, Apache-2.0, from `vercel/vercel`) was considered for
-agent detection and rejected: `add` prompts for the agent and the scope, so detection is
+agent detection and rejected: `install` prompts for the agent and the scope, so detection is
 not needed at all.
 
 ## Consequences
@@ -43,7 +43,7 @@ another means verifying its paths, not just copying a row.
 
 Two properties of the table are easy to get wrong and are the reason it is data:
 `codex`, `github-copilot`, and `opencode` all share `.agents/skills` at project scope, so one
-project install serves three agents — `add` echoes the resolved path and names them. And `pi`
+project install serves three agents — `install` echoes the resolved path and names them. And `pi`
 is asymmetric: `.pi/skills` for project, `~/.pi/agent/skills` for global.
 
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME` are load-bearing overrides. Ignoring

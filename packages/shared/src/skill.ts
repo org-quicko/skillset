@@ -8,8 +8,17 @@ export const SKILL_DIRECTORY_DEFAULT_PAGE_SIZE = 10;
 export const SKILL_DIRECTORY_MIN_PAGE_SIZE = 1;
 export const SKILL_DIRECTORY_MAX_PAGE_SIZE = 100;
 
-/** `GET /resources`'s `sort_by` — governs ordering unconditionally, even with `q` set (ticket 23). */
-export const SKILL_DIRECTORY_SORT_FIELDS = ["installs", "updated_at"] as const;
+/**
+ * `GET /resources`'s `sort_by`.
+ *
+ * @remarks
+ * `relevance` orders by how well a Resource matches `q`, and means nothing
+ * without one — asking for it with no search term sorts by `updated_at`
+ * instead of refusing, since a reader who clears the search box should keep
+ * seeing a list. It is also the default whenever `q` is set; `updated_at`
+ * remains the default when it is not (ADR-0028).
+ */
+export const SKILL_DIRECTORY_SORT_FIELDS = ["installs", "updated_at", "relevance"] as const;
 export type SkillDirectorySortField = (typeof SKILL_DIRECTORY_SORT_FIELDS)[number];
 
 /** `GET /resources`'s `sort_order`. */
@@ -34,6 +43,59 @@ export type SkillDirectorySortOrder = (typeof SKILL_DIRECTORY_SORT_ORDERS)[numbe
  */
 export function isSkillDirectorySortField(value: string | null | undefined): value is SkillDirectorySortField {
   return (SKILL_DIRECTORY_SORT_FIELDS as readonly string[]).includes(value ?? "");
+}
+
+/**
+ * The `sort_by` that applies when a caller named none.
+ *
+ * @param q - The search term, if any. Blank or whitespace-only counts as
+ * none, the same way `GET /resources` treats it.
+ * @returns `relevance` when there is a term to rank against, `updated_at`
+ * otherwise (ADR-0028).
+ * @example
+ * ```ts
+ * defaultSkillDirectorySortField("adapter"); // -> "relevance"
+ * defaultSkillDirectorySortField("");        // -> "updated_at"
+ * ```
+ */
+export function defaultSkillDirectorySortField(q: string | null | undefined): SkillDirectorySortField {
+  return q && q.trim() ? "relevance" : "updated_at";
+}
+
+/**
+ * Settles a `sort_by` against whether there is a search term to rank on.
+ *
+ * @remarks
+ * Two rules, inverses of each other: an omitted `sort_by` takes the default
+ * for the term, and an explicit `relevance` with no term falls back to
+ * `updated_at` rather than refusing — a reader who clears the search box
+ * should keep their list, not receive an error for a parameter they never
+ * typed.
+ *
+ * Shared because both surfaces need the identical rule and would otherwise
+ * disagree: the API resolves it out of the query string, and the web
+ * resolves it out of its own URL state and then sends the result back. A web
+ * default that differed from the API's would make a shared link render
+ * differently from the page it was copied from.
+ *
+ * @param sortBy - The caller's choice, or `undefined` when absent or
+ * unrecognised.
+ * @param q - The search term, if any.
+ * @returns The `sort_by` to actually order by.
+ * @example
+ * ```ts
+ * resolveSkillDirectorySortField(undefined, "adapter");  // -> "relevance"
+ * resolveSkillDirectorySortField("relevance", "");       // -> "updated_at"
+ * resolveSkillDirectorySortField("installs", "adapter"); // -> "installs"
+ * ```
+ */
+export function resolveSkillDirectorySortField(
+  sortBy: SkillDirectorySortField | undefined,
+  q: string | null | undefined,
+): SkillDirectorySortField {
+  if (sortBy === undefined) return defaultSkillDirectorySortField(q);
+  if (sortBy === "relevance") return defaultSkillDirectorySortField(q);
+  return sortBy;
 }
 
 /**
@@ -83,6 +145,15 @@ export const SkillFrontmatterExtrasSchema = z.object({
   compatibility: z.string().nullable(),
   metadata: z.record(z.string(), z.string()).nullable(),
   allowed_tools: z.string().nullable(),
+  // Which party named this Skill: `owner/repo` for an Import, and this
+  // Registry's own host for anything published straight to it. Stored rather
+  // than resolved, unlike `source` below — a Namespace is half of a Skill's
+  // identity and is never absent (ADR-0042).
+  namespace: z.string(),
+  // Always a value, never null: a Resource nothing was imported from reads as
+  // this Registry's own domain in reverse-DNS notation, resolved on the way
+  // out rather than written into every row (ADR-0041).
+  source: z.string(),
   tags: z.array(TagSchema),
 });
 
@@ -113,6 +184,11 @@ export const SkillSummarySchema = z
     description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
     published_by: PublisherSchema,
     published_at: timestamp,
+    // Moves on every republish, which `published_at` does not — so this is
+    // the field a client stores at install time and compares against later
+    // to tell whether its copy has gone stale. Without versioning (ADR-0002)
+    // it is the only revision signal there is.
+    updated_at: timestamp,
     // Never negative, never absent: 0 until this Skill's first recorded
     // Install. Reflects the last periodic refresh of resource_analytics, not
     // necessarily every Install recorded so far (ADR-0012).
@@ -143,10 +219,22 @@ export type Skill = z.infer<typeof SkillSchema>;
 export const SkillDirectoryEntrySchema = z.object({
   id: z.string(),
   kind: z.string(),
+  // Carried on the list as well as the detail, because it is half of what
+  // identifies the row: two entries may share a `name` and are told apart only
+  // by this (ADR-0042).
+  namespace: z.string(),
   name: SkillNameSchema,
   description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
   published_by_name: z.string(),
   updated_at: timestamp,
+  // Carried on the list, not just the detail, because it is a permission
+  // grant: it is what a Skill claims the right to reach once loaded, and the
+  // decision it informs — adopt this Skill or not — is made while browsing,
+  // before any read or install. Null when the frontmatter never set it.
+  allowed_tools: z.string().nullable(),
+  // Resolved, like the detail read's — a repository URL for an Import, and
+  // this Registry's reverse-DNS domain for anything published straight to it.
+  source: z.string(),
   // Same lag caveat as SkillSummarySchema's `installs` (ADR-0012).
   installs: z.number().int().nonnegative(),
   tags: z.array(TagSchema),
@@ -253,6 +341,10 @@ export const SkillPublishSchema = z.object({
   compatibility: z.string().optional(),
   metadata: z.record(z.string(), z.string()).optional(),
   allowed_tools: z.string().optional(),
+  // Declared by the publisher, not read out of the frontmatter: only the
+  // publisher knows whether these files came out of a repository or off
+  // somebody's disk. Omitted, the Registry records itself (ADR-0041).
+  source: z.string().optional(),
   files: z.array(ArtifactFileSchema),
 });
 export type SkillPublish = z.infer<typeof SkillPublishSchema>;

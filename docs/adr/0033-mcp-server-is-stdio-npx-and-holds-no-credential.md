@@ -5,15 +5,15 @@ Agent can search for a Skill without its User running `skillset` or a terminal a
 **stdio**, on the User's own machine, fetched fresh by `npx` on every cold start rather than
 installed — and it carries **no credential of any kind**: no `--token` flag, no `SKILLSET_TOKEN`, no
 read of the CLI's stored config, and no `authorization` header on any request it sends. This ticket
-builds only `search_skills`; `add_skills` and Agent detection are future work the shape already
+builds only `search_skills`; `install_skills` and Agent detection are future work the shape already
 anticipates (`.scratch/mcp-server/spec.md`).
 
 ## Considered Options
 
 **A remote HTTP server**, run once by a maintainer and pointed at by every Agent. Rejected for this
 feature even though `search_skills` alone would work fine over it: `discourse-mcp` — the shape this
-follows — offers stdio for exactly this reason, and the spec's `add_skills` needs a process running
-on the User's own filesystem to install into. Building `search_skills` on a transport `add_skills`
+follows — offers stdio for exactly this reason, and the spec's `install_skills` needs a process running
+on the User's own filesystem to install into. Building `search_skills` on a transport `install_skills`
 cannot reuse would mean rewriting the transport under it the moment the next ticket lands. stdio
 costs nothing today and is the only choice that still works once installing exists.
 
@@ -32,7 +32,7 @@ one.** Considered and rejected outright rather than deferred. Reads are open (AD
 would buy nothing today, and holding one is not free: it would make this the first component in the
 Registry capable of acting *as* a User, and it would do so unattended, inside a process a person
 configured once in their Agent's settings and then forgot about. A Registry that gates reads simply
-cannot be used with this server — `skillset add` remains the path for that deployment. Introducing a
+cannot be used with this server — `skillset install` remains the path for that deployment. Introducing a
 credential later is a decision about how it is obtained, stored, and scoped, and is its own spec.
 
 ## Consequences

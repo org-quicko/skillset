@@ -1,9 +1,11 @@
 import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
 import { ArrowLeftIcon } from "lucide-react";
+import { AiAssistantsCard } from "@/components/ai-assistants-card";
 import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { IntegrationsCard } from "@/components/integrations-card";
 import { ProfileCard } from "@/components/profile-card";
+import { SubmissionsCard } from "@/components/submissions-card";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -21,12 +23,14 @@ import { useRouter } from "@/lib/use-router";
 
 const PROFILE_PATH = "/settings";
 const USERS_PATH = "/settings/users";
+const SUBMISSIONS_PATH = "/settings/submissions";
 const TOKENS_PATH = "/settings/tokens";
 const LOGIN_PATH = "/settings/login";
 const INTEGRATIONS_PATH = "/settings/integrations";
 const CONNECTIONS_PATH = "/settings/connected-accounts";
+const ASSISTANTS_PATH = "/settings/ai-assistants";
 
-type Section = "profile" | "users" | "login" | "integrations" | "connections" | "tokens";
+type Section = "profile" | "users" | "submissions" | "login" | "integrations" | "connections" | "tokens" | "assistants";
 
 // `canManageUsers` gates the Integrations section too: it decides something
 // about the Registry rather than about you — which apps it holds repository
@@ -47,10 +51,12 @@ function sectionFor(
   canImport: boolean,
 ): Section {
   if (pathname === USERS_PATH && canManageUsers) return "users";
+  if (pathname === SUBMISSIONS_PATH && canManageUsers) return "submissions";
   if (pathname === LOGIN_PATH && canManageLogin) return "login";
   if (pathname === INTEGRATIONS_PATH && canManageUsers) return "integrations";
   if (pathname === CONNECTIONS_PATH && canImport) return "connections";
   if (pathname === TOKENS_PATH) return "tokens";
+  if (pathname === ASSISTANTS_PATH) return "assistants";
   return "profile";
 }
 
@@ -64,6 +70,7 @@ export function SettingsPage({ user }: { user: User }) {
   const tabs: { label: string; section: Section; path: string }[] = [
     { label: "Personal Info", section: "profile", path: PROFILE_PATH },
     ...(canManageUsers ? [{ label: "Team", section: "users" as const, path: USERS_PATH }] : []),
+    ...(canManageUsers ? [{ label: "Submissions", section: "submissions" as const, path: SUBMISSIONS_PATH }] : []),
     ...(canManageLogin ? [{ label: "OIDC", section: "login" as const, path: LOGIN_PATH }] : []),
     ...(canManageUsers
       ? [{ label: "Integrations", section: "integrations" as const, path: INTEGRATIONS_PATH }]
@@ -72,6 +79,7 @@ export function SettingsPage({ user }: { user: User }) {
       ? [{ label: "Connected Accounts", section: "connections" as const, path: CONNECTIONS_PATH }]
       : []),
     { label: "Tokens", section: "tokens", path: TOKENS_PATH },
+    { label: "AI Assistants", section: "assistants", path: ASSISTANTS_PATH },
   ];
 
   return (
@@ -120,10 +128,12 @@ export function SettingsPage({ user }: { user: User }) {
         >
           {section === "profile" && <ProfileCard user={user} />}
           {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
+          {section === "submissions" && canManageUsers && <SubmissionsCard />}
           {section === "login" && canManageLogin && <IdentityProvidersCard />}
           {section === "integrations" && canManageUsers && <IntegrationsCard />}
           {section === "connections" && canImport && <ConnectionCard />}
           {section === "tokens" && <TokensCard />}
+          {section === "assistants" && <AiAssistantsCard />}
         </div>
       </SidebarProvider>
     </div>

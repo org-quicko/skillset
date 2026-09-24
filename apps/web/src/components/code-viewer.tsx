@@ -1,6 +1,6 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useState } from "react";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/hooks/use-theme";
 import { Spinner } from "@/components/ui/spinner";
 import {
   defineMonacoThemes,
@@ -40,18 +40,21 @@ function prefersDark(): boolean {
  * it.
  *
  * @param path - The file's path, which decides the language to highlight as
- * and keys the remount between files.
- * @param value - The file's text.
+ * and keys the remount between files. Two readings of the same file share a
+ * path, and so share the editor.
+ * @param value - The text to show: the file's own, or a fragment of it.
  * @param language - A Monaco language id to highlight as instead of the one
  * the path implies, for a fragment whose language its file's does not name —
  * a `SKILL.md`'s YAML frontmatter, say.
  * @param fitContent - Sizes the editor to its full text height rather than to
  * its container — never scrolling on its own — for an editor shown inline
- * among other content instead of filling a pane.
+ * among other content instead of filling a pane. Never give such an editor a
+ * height below the one it reports: Monaco renders the text it was sized for
+ * and will not wheel-scroll to the rest, so the overflow is simply lost.
  * @example
  * ```tsx
  * <CodeViewer path="references/java.md" value={source} />
- * <CodeViewer path="SKILL.md:frontmatter" value={frontmatter} language="yaml" fitContent />
+ * <CodeViewer path="SKILL.md" value={frontmatter} language="yaml" fitContent />
  * ```
  */
 export default function CodeViewer({
@@ -67,13 +70,19 @@ export default function CodeViewer({
 }) {
   const { theme } = useTheme();
   const isDark = theme === "dark" || (theme === "system" && prefersDark());
-  const [contentHeight, setContentHeight] = useState<number>();
+  // The height is kept beside the text it was measured for: one editor is
+  // handed a whole file in one reading and a fragment of it in the next, and
+  // Monaco reports the new height only once it has laid the new text out.
+  // Pairing the two means a stale measurement is ignored rather than briefly
+  // sizing a short fragment to the file it replaced.
+  const [measured, setMeasured] = useState<{ value: string; height: number }>();
+  const contentHeight = measured?.value === value ? measured.height : undefined;
 
   // Monaco fills the height it is given and never reports one, so an editor
   // that should be as tall as its text has to be told — and told again when
-  // wrapping changes at a new width.
+  // its text changes, or when wrapping changes at a new width.
   const trackContentHeight: OnMount = (editor) => {
-    const sync = () => setContentHeight(editor.getContentHeight());
+    const sync = () => setMeasured({ value: editor.getValue(), height: editor.getContentHeight() });
     sync();
     editor.onDidContentSizeChange(sync);
   };
@@ -81,12 +90,14 @@ export default function CodeViewer({
   return (
     <Editor
       // Remounting per file rather than swapping the model keeps the scroll
-      // position, folding state, and undo stack of one file from bleeding
-      // into the next.
+      // position and folding state of one file from bleeding into the next.
+      // Within a file the key holds, so a caller that swaps between two
+      // readings of it reuses this editor instead of building a second one.
       key={path}
       language={language ?? monacoLanguageForPath(path)}
       value={value}
-      {...(fitContent ? { height: contentHeight ?? 0, onMount: trackContentHeight } : {})}
+      height={fitContent ? (contentHeight ?? 0) : "100%"}
+      onMount={trackContentHeight}
       theme={isDark ? MONACO_DARK_THEME : MONACO_LIGHT_THEME}
       loading={<Spinner className="size-5" />}
       options={{
@@ -113,6 +124,10 @@ export default function CodeViewer({
           // The gradient Monaco fades in at a scrolled edge is a second
           // border against the panel's own.
           useShadows: false,
+          // Monaco consumes the wheel by default even with nothing of its own
+          // left to scroll, which strands a reader whose pointer happens to
+          // be over the editor when the scrolling to be done is the panel's.
+          alwaysConsumeMouseWheel: false,
         },
         wordWrap: "on",
         // Prose wraps; code does not, and a Skill's folder holds both. Wrapping

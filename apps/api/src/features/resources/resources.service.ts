@@ -4,17 +4,20 @@ import {
   buildArtifact,
   validateArtifactPath,
   normalizeSkillPath,
+  registryNamespace,
+  reverseDomain,
   type ArtifactFile,
   type ArtifactFileUpload,
   type Page,
   type SkillFile,
   type SkillPayload,
 } from "@in-org-quicko/skillset-shared";
-import { and, asc, count, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from "kysely";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
-import { resourceDirectory, resourceTags, resources, users, type UserRow } from "../../db/schemas/index.js";
+import type { DB } from "../../db/database.js";
+import type { UserRow } from "../../db/tables.js";
 import {
+  AmbiguousResourceNameError,
   ArtifactFileNotFoundError,
   ArtifactMissingError,
   ArtifactTooLargeError,
@@ -36,32 +39,70 @@ import {
 import type { StorageAdapter } from "../../storage/types.js";
 
 /**
+ * The Namespace a Resource is named by, from the `source` it declared.
+ *
+ * @param source - The declared repository URL, or null for a publish
+ * straight to this Registry.
+ * @param publicUrl - This Registry's `PUBLIC_URL`, whose host names anything
+ * published straight here.
+ * @returns `owner/repo` for a repository URL, and this deployment's own host
+ * otherwise.
+ * @throws Error if `publicUrl` has no host usable as a Namespace.
+ *
+ * @remarks
+ * Derived from `source` rather than declared on its own, so the two cannot
+ * disagree — a Skill copied out of `github.com/a/b` has no way to claim it
+ * was named by `c/d`. A publisher still chooses it, by choosing what to
+ * declare as the Source (ADR-0041, ADR-0042). Shared by publishing and by
+ * Submissions (ADR-0044), so an approved Submission lands in exactly the
+ * Namespace a publish of the same Source would have.
+ *
+ * Unlike a Source, this is written into the row: a Namespace is half of a
+ * Resource's identity and is never resolved on read.
+ *
+ * @example
+ * ```ts
+ * namespaceForSource("https://github.com/anthropics/skills", publicUrl); // -> "anthropics/skills"
+ * namespaceForSource(null, "https://skills.quicko.com");                  // -> "skills.quicko.com"
+ * ```
+ */
+export function namespaceForSource(source: string | null, publicUrl: string): string {
+  if (!source) return registryNamespace(publicUrl);
+  const project = source.replace(/(\.git)?\/*$/, "").match(/([^/]+\/[^/]+)$/)?.[1];
+  return project ? project.toLowerCase() : registryNamespace(publicUrl);
+}
+
+/**
+ * The columns a Skill is read from. `payload` carries the Kind's own fields
+ * (ADR-0026); `readSkill` below unpacks a Skill's into the flat shape the
+ * wire has always had — the only shape assembled today, since `skill` is the
+ * only registered Kind (ticket 3 generalises this once a second one exists).
+ *
  * The wire's `published_by` is the Publisher object, not the column: the
  * email snapshot on the Resource row is always present, while the id and
  * names come from the User row and are null once that User has been removed
- * (docs/data-model.md). Selecting it in this shape is what lets a caller
- * respond with `SkillSchema.parse(row)` and no mapping step.
- *
- * `payload` carries the Kind's own fields (ADR-0026); `readSkill` below
- * unpacks a Skill's into the flat shape the wire has always had — the only
- * shape assembled today, since `skill` is the only registered Kind (ticket 3
- * generalises this once a second one exists).
+ * (docs/data-model.md). `readSkill` assembles it from the `publisher_*`
+ * columns here.
  */
-const skillSelection = {
-  id: resources.id,
-  kind: resources.kind,
-  name: resources.name,
-  description: resources.description,
-  body: resources.body,
-  payload: resources.payload,
-  published_at: resources.published_at,
-  published_by: {
-    user_id: users.id,
-    email: resources.published_by_email,
-    first_name: users.first_name,
-    last_name: users.last_name,
-  },
-};
+const skillSelection = [
+  "resources.id",
+  "resources.kind",
+  "resources.namespace",
+  "resources.name",
+  "resources.description",
+  "resources.body",
+  "resources.payload",
+  "resources.source",
+  "resources.published_at",
+  "resources.updated_at",
+  "resources.published_by_email",
+  "users.id as publisher_user_id",
+  "users.first_name as publisher_first_name",
+  "users.last_name as publisher_last_name",
+] as const;
+
+/** Narrows `resources` (joined to `users`) to the one Resource a read is after. */
+type ResourceIdentity = (eb: ExpressionBuilder<DB, "resources" | "users">) => Expression<SqlBool>;
 
 // The Publisher is null-per-field, not null-as-a-whole: `leftJoin` nulls out
 // only the columns that come from `users`, while `email` — snapshotted onto
@@ -76,21 +117,29 @@ interface SkillPublisher {
 interface SkillSummary {
   id: string;
   kind: "skill";
+  /** Which party named it — stored, never resolved, never absent (ADR-0042). */
+  namespace: string;
   name: string;
   description: string;
   license: string | null;
   compatibility: string | null;
   metadata: Record<string, string> | null;
   allowed_tools: string | null;
+  /** Always resolved — never the column's null (ADR-0041). */
+  source: string;
   tags: TagSummary[];
   published_at: Date;
+  // What a republish moves and `published_at` does not, so it — not
+  // `published_at` — is the signal a client compares its installed copy
+  // against to decide whether that copy is stale.
+  updated_at: Date;
   published_by: SkillPublisher;
   // Never null: 0 until an Install is recorded and a refresh has picked it
   // up (ADR-0012) — `resource_analytics` has no row for a Resource until then.
   installs: number;
 }
 
-interface SkillDetail extends SkillSummary {
+export interface SkillDetail extends SkillSummary {
   body: string;
 }
 
@@ -140,6 +189,10 @@ interface ResourceDirectoryEntry {
   description: string;
   published_by_name: string;
   updated_at: Date;
+  /** Resolved the same way `SkillSummary.source` is — never the column's null (ADR-0041). */
+  source: string;
+  /** The Skill's `allowed-tools`, read out of `payload` by the view; null when it set none. */
+  allowed_tools: string | null;
   installs: number;
   tags: TagSummary[];
 }
@@ -166,7 +219,7 @@ function prefixToken(lastToken: string | undefined): string | undefined {
 }
 
 /**
- * Builds the `search @@ …` condition for a non-blank search term.
+ * Builds the `tsquery` a search term matches and ranks against.
  *
  * @remarks
  * Finished words, `"quoted phrases"`, and `-exclusions` are parsed exactly as
@@ -176,28 +229,103 @@ function prefixToken(lastToken: string | undefined): string | undefined {
  * for (docs/adr/0004-postgres-over-sqlite.md). A term ending in a phrase or
  * exclusion falls back to the unmodified call.
  *
- * `search` is `resource_directory`'s copy of `resources.search`, which also
- * folds in `published_by_name` (docs/data-model.md), so a term matching only
- * a Resource's publisher still matches.
+ * Returned as the query on its own rather than as a finished `search @@ …`
+ * condition, because the same expression is needed twice — once to filter and
+ * once to rank — and building it twice would let the two drift.
  *
  * @param query - A trimmed, non-empty search term.
- * @returns A boolean SQL expression for a `where` clause.
+ * @returns A `tsquery`-valued SQL expression.
  * @example
- * buildSearchCondition("postgre") // matches "postgresql-migrations"
+ * buildTsQuery("postgre") // matches "postgresql-migrations"
  */
-function buildSearchCondition(query: string) {
+function buildTsQuery(query: string): RawBuilder<unknown> {
   const tokens = query.match(/-?"[^"]*"|-?\S+/g) ?? [];
   const prefix = prefixToken(tokens[tokens.length - 1]);
-  if (!prefix) return sql`${resourceDirectory.search} @@ websearch_to_tsquery('english', ${query})`;
+  if (!prefix) return sql`websearch_to_tsquery('english', ${query})`;
 
   const headTerm = tokens.slice(0, -1).join(" ");
-  // Parenthesised explicitly: `@@` and `&&` sit at the same precedence tier
-  // and associate left-to-right, so an unparenthesised
-  // `search @@ a && b` parses as `(search @@ a) && b` — a boolean `&&`
-  // tsquery, which Postgres rejects.
+  // Parenthesised so the `&&` binds as tsquery intersection. `@@` and `&&`
+  // sit at the same precedence tier and associate left-to-right, so an
+  // unparenthesised `search @@ a && b` parses as `(search @@ a) && b` — a
+  // boolean `&&` tsquery, which Postgres rejects.
   return headTerm
-    ? sql`${resourceDirectory.search} @@ (websearch_to_tsquery('english', ${headTerm}) && to_tsquery('english', ${prefix}))`
-    : sql`${resourceDirectory.search} @@ to_tsquery('english', ${prefix})`;
+    ? sql`(websearch_to_tsquery('english', ${headTerm}) && to_tsquery('english', ${prefix}))`
+    : sql`to_tsquery('english', ${prefix})`;
+}
+
+/**
+ * One way of matching a search term: which rows it selects, and how well
+ * each one matches.
+ *
+ * @remarks
+ * Two implementations, tried in that order — `buildExactMatcher` first, and
+ * `buildFuzzyMatcher` only when it found nothing. Both are expressed the
+ * same way so `runDirectoryPage` does not know which it was handed.
+ */
+interface SearchMatcher {
+  /** Narrows to the rows this matcher considers a match. */
+  condition: RawBuilder<SqlBool>;
+  /** How well each row matches, for `sort_by=relevance`. */
+  rank: RawBuilder<number>;
+}
+
+/**
+ * The full-text matcher: the ordinary path, and the only one for a term
+ * that finds anything.
+ *
+ * @remarks
+ * `ts_rank_cd` rather than `ts_rank`: cover density counts how close the
+ * matched lexemes are to each other, which is what separates a Skill about
+ * "code review" from one mentioning code in one paragraph and review in
+ * another.
+ *
+ * No weight array is passed, so Postgres's default `{0.1, 0.2, 0.4, 1.0}`
+ * for `{D, C, B, A}` applies — and `resources.search` is built with exactly
+ * that ordering in mind: name A, description B, body C, publisher D.
+ */
+function buildExactMatcher(query: string): SearchMatcher {
+  const tsQuery = buildTsQuery(query);
+  return {
+    condition: sql<SqlBool>`${sql.ref("resource_directory.search")} @@ ${tsQuery}`,
+    rank: sql<number>`ts_rank_cd(${sql.ref("resource_directory.search")}, ${tsQuery})`,
+  };
+}
+
+/**
+ * How close a trigram match has to be to count. Tuned against real misspellings
+ * rather than derived: `angulr` scores about 0.57 against
+ * `building-angular-applications`, so pg_trgm's own 0.6 default would miss the
+ * single-dropped-letter typo this exists for, while going much below 0.4 starts
+ * matching words that merely share a stem.
+ */
+const FUZZY_MATCH_THRESHOLD = 0.4;
+
+/**
+ * The trigram matcher: the fallback for a term full-text search could not
+ * match at all (ADR-0040).
+ *
+ * @remarks
+ * `word_similarity` rather than plain `similarity`, because the two strings
+ * are never the same length. `similarity('angulr', 'building-angular-applications')`
+ * compares whole strings and scores near zero; `word_similarity` compares the
+ * term against the best-matching extent *within* the target, which is the
+ * question actually being asked.
+ *
+ * Name and description only. The body is in the full-text vector but not here:
+ * trigram-scanning 14 KB of prose per row is expensive, and a typo's nearest
+ * match is overwhelmingly a Skill's name.
+ *
+ * The threshold is compared explicitly rather than through pg_trgm's `<%`
+ * operator, which would need `pg_trgm.word_similarity_threshold` set per
+ * session to be this lenient. The cost is that no trigram index applies and
+ * this is a sequential scan — accepted deliberately: it runs only when the
+ * indexed search already returned nothing, over a catalog one team publishes.
+ * A Registry where this shows up in practice wants the `<%` operator, the GUC,
+ * and a `gin_trgm_ops` index, together.
+ */
+function buildFuzzyMatcher(query: string): SearchMatcher {
+  const best = sql<number>`GREATEST(word_similarity(${query}, ${sql.ref("resource_directory.name")}), word_similarity(${query}, ${sql.ref("resource_directory.description")}))`;
+  return { condition: sql<SqlBool>`${best} >= ${FUZZY_MATCH_THRESHOLD}`, rank: best };
 }
 
 /** The install trend chart's fixed window — see `ResourcesService.getInstallTrend`. */
@@ -221,18 +349,27 @@ export class ResourcesService {
     private readonly logger: Logger,
     private readonly tags: TagsService,
     private readonly analytics: AnalyticsService,
+    /** This Registry's public URL, which a Resource with no Import reads as its source. */
+    private readonly publicUrl: string,
   ) {}
 
   /**
    * Lists Resources from `resource_directory` (ticket 23), one page at a
    * time, optionally narrowed by Kind, a full-text search term, and one or
-   * more Tags, and sorted by install count or last-updated.
+   * more Tags, and sorted by relevance, install count, or last-updated.
    *
    * @remarks
-   * `buildSearchCondition` documents how a term is matched. It stems rather
-   * than substring-matches, so `postgre` finds "postgresql" as a prefix but
-   * `sql` does not, and an unquoted hyphenated term matches any Resource
-   * carrying all of its words. A blank or missing term is no search at all.
+   * A search term is matched twice at most. `buildExactMatcher` runs first:
+   * full-text, which stems rather than substring-matches, so `postgre` finds
+   * "postgresql" as a prefix but `sql` does not, and an unquoted hyphenated
+   * term matches any Resource carrying all of its words. Only when that
+   * matches *nothing* does `buildFuzzyMatcher` run, matching trigrams against
+   * name and description so a typo still finds its Skill (ADR-0040).
+   *
+   * The fallback is all-or-nothing on purpose: it never reorders or pads a
+   * search that already found something, so a precise term keeps a precise
+   * answer and the second query is skipped entirely. A blank or missing term
+   * is no search at all, and takes neither path.
    *
    * `query.kind`, when set, narrows to that one Kind; omitted, every Kind is
    * listed together (ADR-0026) — with `skill` the only one registered, the
@@ -241,8 +378,9 @@ export class ResourcesService {
    * `query.tagIds`, when non-empty, narrows to Resources carrying at least
    * one of those Tags — checked against `resource_tags` directly, not
    * against `resource_directory.tags` (docs/data-model.md). Ordering is
-   * governed by `sortBy`/`sortOrder` even with a search term active; there
-   * is no relevance ranking.
+   * governed by `sortBy`/`sortOrder`, which the query schema defaults to
+   * `relevance` when there is a search term and `updated_at` when there is
+   * not.
    *
    * Every member arrives already coerced, defaulted, and within range —
    * `ResourceDirectoryQuerySchema` is what produces one, validated at the
@@ -259,46 +397,88 @@ export class ResourcesService {
    * ```
    */
   async list(query: ResourceDirectoryQuery): Promise<Page<ResourceDirectoryEntry>> {
+    const exact = await this.runDirectoryPage(query, query.q ? buildExactMatcher(query.q) : null);
+    // The fallback rescues a search that matched nothing at all; it never
+    // reorders or pads one that matched something (ADR-0040).
+    if (!query.q || exact.total > 0) return exact;
+    return this.runDirectoryPage(query, buildFuzzyMatcher(query.q));
+  }
+
+  /**
+   * Reads one page of the directory under a given way of matching.
+   *
+   * @param query - The validated query, for its paging, Kind, Tag and sort
+   * members. Its `q` is not read here — `matcher` already encodes it.
+   * @param matcher - How to match and rank the search term, or `null` when
+   * there is no search term at all.
+   * @returns One page, and how many rows matched in total.
+   */
+  private async runDirectoryPage(
+    query: ResourceDirectoryQuery,
+    matcher: SearchMatcher | null,
+  ): Promise<Page<ResourceDirectoryEntry>> {
     const { page, pageSize, tagIds, sortBy, sortOrder, kind } = query;
 
-    const matches = query.q ? buildSearchCondition(query.q) : undefined;
-    const kindFilter = kind ? eq(resourceDirectory.kind, kind) : undefined;
-    const tagFilter =
-      tagIds.length > 0
-        ? inArray(
-            resourceDirectory.id,
-            this.db.select({ id: resourceTags.resource_id }).from(resourceTags).where(inArray(resourceTags.tag_id, tagIds)),
-          )
-        : undefined;
-    const where = and(kindFilter, matches, tagFilter);
+    const where = (eb: ExpressionBuilder<DB, "resource_directory">): Expression<SqlBool> => {
+      const filters: Expression<SqlBool>[] = [];
+      if (kind) filters.push(eb("kind", "=", kind));
+      if (matcher) filters.push(matcher.condition);
+      if (tagIds.length > 0) {
+        filters.push(
+          eb("id", "in", eb.selectFrom("resource_tags").select("resource_tags.resource_id").where("tag_id", "in", tagIds)),
+        );
+      }
+      return eb.and(filters);
+    };
 
-    const sortColumn = sortBy === "installs" ? resourceDirectory.install_count : resourceDirectory.updated_at;
-    const orderBy = sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
+    // `relevance` without a term never reaches here — the query schema
+    // rewrites it to `updated_at` — but the rank comes from `matcher`, so
+    // requiring one here keeps that guarantee local to this line rather than
+    // an assumption about a module two files away.
+    const sortExpression =
+      sortBy === "relevance" && matcher
+        ? matcher.rank
+        : sortBy === "installs"
+          ? sql.ref<number>("resource_directory.install_count")
+          : sql.ref<Date>("resource_directory.updated_at");
 
     const rows = await this.db
-      .select({
-        id: resourceDirectory.id,
-        kind: resourceDirectory.kind,
-        name: resourceDirectory.name,
-        description: resourceDirectory.description,
-        published_by_name: resourceDirectory.published_by_name,
-        updated_at: resourceDirectory.updated_at,
-        installs: resourceDirectory.install_count,
-        tags: resourceDirectory.tags,
-      })
-      .from(resourceDirectory)
+      .selectFrom("resource_directory")
+      .select([
+        "id",
+        "kind",
+        "namespace",
+        "name",
+        "description",
+        "published_by_name",
+        "updated_at",
+        "source",
+        "allowed_tools",
+        "install_count as installs",
+        "tags",
+      ])
       .where(where)
+      .orderBy(sortExpression, sortOrder)
+      // Rank ties are common — every Resource matching on the same single
+      // low-weight lexeme scores alike — so recency breaks them before `id`
+      // does, which is insertion order and reads as arbitrary to a reader.
+      .$if(sortBy === "relevance", (qb) => qb.orderBy("updated_at", "desc"))
       // Tiebreak on id (uuidv7, so insertion-ordered). Without one, rows
-      // sharing a sort_by value — every never-installed Resource reads 0 —
-      // have no stable order across requests, and infinite scroll repeats or
-      // skips rows.
-      .orderBy(orderBy, asc(resourceDirectory.id))
+      // sharing every preceding sort value have no stable order across
+      // requests, and infinite scroll repeats or skips rows.
+      .orderBy("id", "asc")
       .limit(pageSize)
-      .offset((page - 1) * pageSize);
+      .offset((page - 1) * pageSize)
+      .execute();
 
-    const [totals] = await this.db.select({ total: count() }).from(resourceDirectory).where(where);
+    const { total } = await this.db
+      .selectFrom("resource_directory")
+      .select((eb) => eb.fn.countAll<number>().as("total"))
+      .where(where)
+      .executeTakeFirstOrThrow();
 
-    return { items: rows, page, page_size: pageSize, total: totals?.total ?? 0 };
+    const items = rows.map((row) => ({ ...row, source: this.resolveSource(row.source) }));
+    return { items, page, page_size: pageSize, total };
   }
 
   /**
@@ -322,12 +502,18 @@ export class ResourcesService {
    * ```
    */
   async getStats(): Promise<ResourceDirectoryStats> {
-    const [rows, installs] = await Promise.all([
-      this.db.select({ skills: count(), publishers: countDistinct(resources.published_by_email) }).from(resources),
+    const [counts, installs] = await Promise.all([
+      this.db
+        .selectFrom("resources")
+        .select((eb) => [
+          eb.fn.countAll<number>().as("skills"),
+          eb.fn.count<number>("published_by_email").distinct().as("publishers"),
+        ])
+        .executeTakeFirstOrThrow(),
       this.analytics.getTotalInstallCount(),
     ]);
 
-    return { skills: rows[0]?.skills ?? 0, publishers: rows[0]?.publishers ?? 0, installs };
+    return { ...counts, installs };
   }
 
   /**
@@ -347,7 +533,7 @@ export class ResourcesService {
    * ```
    */
   async get(id: string): Promise<SkillDetail> {
-    return this.readSkill(eq(resources.id, id));
+    return this.readSkill((eb) => eb("resources.id", "=", id));
   }
 
   /**
@@ -357,25 +543,96 @@ export class ResourcesService {
    * The web keeps `/skills/<name>` as a browser URL, so a reader arriving from
    * a bookmark or shared link needs an authoritative name → id resolution.
    *
-   * An indexed equality match on the unique `(kind, name)` pair, not search:
-   * `GET /resources?q=` ranks by recency and caps at one page, and Postgres's
-   * `english` config drops stopwords — which would 404 a real Skill whose name
-   * happens to be one (docs/data-model.md allows single-word names).
+   * An indexed equality match on the unique `(kind, namespace, name)` triple,
+   * not search: `GET /resources?q=` ranks by recency and caps at one page, and
+   * Postgres's `english` config drops stopwords — which would 404 a real Skill
+   * whose name happens to be one (docs/data-model.md allows single-word names).
+   *
+   * A bare name still reads, which is the point: Namespaces exist to let two
+   * parties publish `pdf`, not to make either one harder to look up (ADR-0042).
+   * Unqualified, the lookup takes the only candidate when there is one, and
+   * otherwise the one published here — so a name that resolved before still
+   * resolves, and to the same Skill. Only a genuine tie between outside
+   * parties has no answer, and that refuses rather than guesses.
+   *
+   * Qualification is what *installing* needs, not what reading needs: an
+   * install writes a directory and can hold only one Skill of a name
+   * (ADR-0022), so the CLI resolves the tie with the caller. Reading has no
+   * such constraint.
+   *
+   * Resolved here rather than at the route, so every caller — the web, the
+   * CLI, the MCP server — agrees on what an unqualified name means.
    *
    * @param kind - The Kind path segment, not yet known to be registered.
    * @param name - The Skill's name.
+   * @param namespace - Which party named it. Omitted, the rule above applies.
    * @returns `SkillDetail`
    * @throws ResourceNotFoundError if `kind` isn't `"skill"`, or no Skill
    * exists by that name — a route param, so an unrecognised Kind here reads
    * as "not found" rather than a validation error (unlike the same check on
    * `publish`, whose `kind` chooses what gets written).
+   * @throws AmbiguousResourceNameError if the bare name matches several
+   * Namespaces and none of them is this Registry's own.
    * @example
    * ```ts
-   * const skill = await resourcesService.getByName("skill", "code-review");
+   * await resourcesService.getByName("skill", "code-review");
+   * await resourcesService.getByName("skill", "pdf", "anthropics/skills");
    * ```
    */
-  async getByName(kind: string, name: string): Promise<SkillDetail> {
-    return this.readSkill(and(eq(resources.kind, kind), eq(resources.name, name)) as SQL);
+  async getByName(kind: string, name: string, namespace?: string): Promise<SkillDetail> {
+    const named = namespace ?? (await this.resolveNamespace(kind, name));
+    return this.readSkill((eb) =>
+      eb.and({ "resources.kind": kind, "resources.namespace": named, "resources.name": name }),
+    );
+  }
+
+  /**
+   * Which Namespace an unqualified name means.
+   *
+   * @remarks
+   * One extra query, and only on the unqualified path — the qualified one hits
+   * the unique index directly. Worth it: the alternative is a `LIMIT 1` over an
+   * ordering nobody chose, which would answer a tie differently depending on
+   * how the rows happened to be laid out.
+   */
+  private async resolveNamespace(kind: string, name: string): Promise<string> {
+    const candidates = await this.db
+      .selectFrom("resources")
+      .select("namespace")
+      .where("kind", "=", kind)
+      .where("name", "=", name)
+      .execute();
+
+    const [only] = candidates;
+    if (!only) throw new ResourceNotFoundError();
+    if (candidates.length === 1) return only.namespace;
+
+    const own = registryNamespace(this.publicUrl);
+    if (candidates.some((candidate) => candidate.namespace === own)) return own;
+    throw new AmbiguousResourceNameError(name, candidates.map((candidate) => candidate.namespace).sort());
+  }
+
+  /**
+   * Resolves a Resource's stored `source` into the one every read returns.
+   *
+   * @param stored - The column's value: a repository URL for an Import, and
+   * null for a Resource published straight to this Registry.
+   * @returns `stored` when there is one, and otherwise this Registry's own
+   * domain in reverse-DNS notation.
+   *
+   * @remarks
+   * Resolved here rather than written into the row on publish, because the
+   * fallback is this Registry's identity — configuration, not a fact about the
+   * Resource. Storing it would duplicate `PUBLIC_URL` into every row, go stale
+   * the day the deployment moves, and leave every Resource published before
+   * this column existed needing a backfill the migration cannot perform
+   * (ADR-0041).
+   *
+   * Every read goes through here — the detail, the publish response, and each
+   * row of the directory — so no caller ever sees the column's null.
+   */
+  private resolveSource(stored: string | null): string {
+    return stored ?? reverseDomain(this.publicUrl);
   }
 
   /**
@@ -397,21 +654,21 @@ export class ResourcesService {
    * a Skill-only assembly, since that's the only Kind a row here can be.
    *
    * @param identity - The condition identifying the Resource, over
-   * `resources` — by id alone, or by `(kind, name)`.
+   * `resources` — by id alone, or by `(kind, namespace, name)`.
    * @returns `SkillDetail`
    * @throws ResourceNotFoundError if nothing matches.
    * @example
    * ```ts
-   * const skill = await this.readSkill(eq(resources.id, id));
+   * const skill = await this.readSkill((eb) => eb("resources.id", "=", id));
    * ```
    */
-  private async readSkill(identity: SQL): Promise<SkillDetail> {
-    const [skill] = await this.db
+  private async readSkill(identity: ResourceIdentity): Promise<SkillDetail> {
+    const skill = await this.db
+      .selectFrom("resources")
+      .leftJoin("users", "users.id", "resources.published_by")
       .select(skillSelection)
-      .from(resources)
-      .leftJoin(users, eq(resources.published_by, users.id))
       .where(identity)
-      .limit(1);
+      .executeTakeFirst();
     if (!skill) throw new ResourceNotFoundError();
 
     const [tags, installs] = await Promise.all([
@@ -422,6 +679,7 @@ export class ResourcesService {
     return {
       id: skill.id,
       kind: "skill",
+      namespace: skill.namespace,
       name: skill.name,
       description: skill.description,
       // Written by `validateSkillBody` on every publish; only null in
@@ -432,8 +690,15 @@ export class ResourcesService {
       compatibility: payload.compatibility,
       metadata: payload.metadata,
       allowed_tools: payload.allowed_tools,
+      source: this.resolveSource(skill.source),
       published_at: skill.published_at,
-      published_by: skill.published_by,
+      updated_at: skill.updated_at,
+      published_by: {
+        user_id: skill.publisher_user_id,
+        email: skill.published_by_email,
+        first_name: skill.publisher_first_name,
+        last_name: skill.publisher_last_name,
+      },
       tags,
       installs,
     };
@@ -481,6 +746,15 @@ export class ResourcesService {
     // `null`, not left `undefined`: a republish fully replaces the frontmatter
     // (ADR-0002), so a field the payload no longer sets must clear what an
     // earlier publish stored.
+    // `null`, not left `undefined`, for the same reason the payload fields are:
+    // a republish fully replaces what was recorded (ADR-0002), so re-uploading
+    // from disk a Skill that was first Imported must clear the old origin
+    // rather than leave it claiming a repository these bytes did not come from.
+    const source = input.source ?? null;
+    // Follows `source`, so a republish that clears an Import's origin also
+    // moves the Skill into this Registry's own Namespace rather than leaving
+    // it filed under a repository these bytes no longer come from.
+    const namespace = namespaceForSource(source, this.publicUrl);
     const skillPayload: SkillPayload = {
       kind,
       license: input.license ?? null,
@@ -497,10 +771,11 @@ export class ResourcesService {
     // and search can use without joining `users`, surviving a rename or
     // removal.
     const published_by_name = `${publisher.first_name} ${publisher.last_name}`;
-    const upserted = await this.db
-      .insert(resources)
+    const row = await this.db
+      .insertInto("resources")
       .values({
         kind,
+        namespace,
         name,
         description,
         body,
@@ -509,10 +784,14 @@ export class ResourcesService {
         published_by_email: publisher.email,
         published_by_name,
         published_at,
+        source,
       })
-      .onConflictDoUpdate({
-        target: [resources.kind, resources.name],
-        set: {
+      // Matches resources_kind_namespace_name_unique, which is NULLS NOT
+      // DISTINCT (ADR-0042) — so a republish of a Skill published here, whose
+      // namespace is null, still conflicts with the row already there and
+      // updates it rather than inserting a second one.
+      .onConflict((oc) =>
+        oc.columns(["kind", "namespace", "name"]).doUpdateSet({
           description,
           body,
           payload: skillPayload,
@@ -520,11 +799,12 @@ export class ResourcesService {
           published_by_email: publisher.email,
           published_by_name,
           published_at,
+          source,
           updated_at: new Date(),
-        },
-      })
-      .returning();
-    const row = firstRow(upserted, "Skill upsert");
+        }),
+      )
+      .returning("id")
+      .executeTakeFirstOrThrow();
 
     await this.pruneArtifactFiles(row.id, manifest);
     const uploads = await Promise.all(
@@ -549,7 +829,7 @@ export class ResourcesService {
       // or `resource_install_events`, and nothing but `refreshInstallCounts`
       // ever writes `resource_analytics` (ADR-0012); a brand new Skill simply
       // has neither yet.
-      skill: await this.readSkill(eq(resources.id, row.id)),
+      skill: await this.readSkill((eb) => eb("resources.id", "=", row.id)),
       upload: { files: uploads, expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS },
     };
   }
@@ -578,7 +858,7 @@ export class ResourcesService {
     try {
       const objects = await this.storage.list(artifactPrefix(id));
       await Promise.all(objects.map((object) => this.storage.delete(object.key)));
-      await this.db.delete(resources).where(eq(resources.id, id));
+      await this.db.deleteFrom("resources").where("id", "=", id).execute();
     } catch (cause) {
       throw new ResourceDeleteFailedError(cause);
     }
@@ -686,7 +966,7 @@ export class ResourcesService {
    *
    * @remarks
    * An Artifact is stored as its files (ADR-0032); a zip is the
-   * representation `skillset add`, the web Download control, and a
+   * representation `skillset install`, the web Download control, and a
    * marketplace `archive` source all want, so the API builds one on demand.
    * This is the read path where Artifact bytes do pass through the API, which
    * is what ADR-0032 amends ADR-0001 to allow — uploading still bypasses it
@@ -800,7 +1080,7 @@ export class ResourcesService {
    * @throws ResourceNotFoundError if no Resource exists by `id`.
    */
   private async getNameOrThrow(id: string): Promise<string> {
-    const [row] = await this.db.select({ name: resources.name }).from(resources).where(eq(resources.id, id)).limit(1);
+    const row = await this.db.selectFrom("resources").select("name").where("id", "=", id).executeTakeFirst();
     if (!row) throw new ResourceNotFoundError();
     return row.name;
   }

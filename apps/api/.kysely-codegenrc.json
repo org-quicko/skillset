@@ -1,0 +1,28 @@
+{
+  "dialect": "postgres",
+  "outFile": "src/db/database.ts",
+  "defaultSchemas": [
+    "public"
+  ],
+  "excludePattern": "kysely_migration*",
+  "typeMapping": {
+    "int8": "number"
+  },
+  "overrides": {
+    "columns": {
+      "resources.payload": "Record<string, unknown>",
+      "resource_submissions.payload": "Record<string, unknown>",
+      "resource_directory.tags": "Array<{ id: string; name: string }>",
+      "resource_directory.id": "string",
+      "resource_directory.kind": "string",
+      "resource_directory.namespace": "string",
+      "resource_directory.name": "string",
+      "resource_directory.description": "string",
+      "resource_directory.published_by_name": "string",
+      "resource_directory.updated_at": "Date",
+      "resource_directory.install_count": "number",
+      "resource_analytics.resource_id": "string",
+      "resource_analytics.install_count": "number"
+    }
+  }
+}

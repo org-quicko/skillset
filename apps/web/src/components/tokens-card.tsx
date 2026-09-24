@@ -61,7 +61,7 @@ function MintedSecret({ token, onDismiss }: { token: TokenCreated; onDismiss: ()
         </button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Copy it now. It's shown once and can't be retrieved again.
+        Copy it now. It&apos;s shown once and can&apos;t be retrieved again.
       </p>
       <Button variant="outline" size="sm" className="w-fit" onClick={onDismiss}>
         Done
@@ -95,9 +95,9 @@ export function TokensCard() {
       </div>
 
       <form onSubmit={handleSubmit}>
-        <Panel title="New Token" contentClassName="p-0">
+        <Panel title="New Token" contentClassName="p-0" className="bg-transparent">
           <InfoRow title="Name">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <Input
                 id="token_name"
                 placeholder="Eg. my-laptop"
@@ -116,7 +116,7 @@ export function TokensCard() {
         {mint.isError && <p className="mt-3 text-sm text-destructive">{apiErrorMessage(mint.error)}</p>}
       </form>
 
-      <Panel title="Your Tokens" contentClassName="p-0">
+      <Panel title="Your Tokens" contentClassName="p-0" className="bg-transparent">
         {tokens.isPending && <TokenRowsSkeleton />}
         {tokens.isError && <p className="p-5 text-sm text-destructive">{apiErrorMessage(tokens.error)}</p>}
         {tokens.isSuccess && tokens.data.length === 0 && (

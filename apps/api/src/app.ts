@@ -3,7 +3,9 @@ import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { csrf } from "hono/csrf";
 import { requestId } from "hono/request-id";
-import type postgres from "postgres";
+import mcpDiscovery from "../../../docs/mcp.json" with { type: "json" };
+import openapiSpec from "../../../docs/openapi.json" with { type: "json" };
+import { sql } from "kysely";
 import type { Database } from "./db/client.js";
 import { authRoutes } from "./features/auth/auth.routes.js";
 import { connectionsRoutes } from "./features/connections/connections.routes.js";
@@ -12,6 +14,7 @@ import { importsRoutes } from "./features/imports/imports.routes.js";
 import { integrationsRoutes } from "./features/integrations/integrations.routes.js";
 import { resourcesRoutes } from "./features/resources/resources.routes.js";
 import { setupRoutes } from "./features/setup/setup.routes.js";
+import { submissionsRoutes } from "./features/submissions/submissions.routes.js";
 import { tagsRoutes } from "./features/tags/tags.routes.js";
 import { usersRoutes } from "./features/users/users.routes.js";
 import { notFound, onError } from "./lib/errors.js";
@@ -44,7 +47,7 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
  *
  * @remarks
  * The default is deliberately loose: the web interface fires several requests
- * per page and a `skillset add` run fires a few per Skill, so this is a
+ * per page and a `skillset install` run fires a few per Skill, so this is a
  * ceiling on a script, not a quota. The two overrides are the routes where one
  * request costs far more than a database read — assembling a zip reads every
  * file of an Artifact, and an import fans out to the Git provider's API on
@@ -61,7 +64,6 @@ const RATE_LIMIT = {
 };
 
 export interface AppDependencies {
-  sql: postgres.Sql;
   db: Database;
   /** Better Auth's signing secret (ADR-0016). */
   betterAuthSecret: string;
@@ -71,6 +73,13 @@ export interface AppDependencies {
   logger: Logger;
   /** Absolute path to the built web interface's static assets, if any. */
   webRoot?: string;
+  /**
+   * Absolute path to the packed `skillset-mcp.mcpb` bundle, if this build produced one
+   * (`apps/mcp`'s `package:mcpb`, ADR-0037). Served at `GET /mcp.mcpb` for a host that installs
+   * an MCP server from one file, e.g. Claude Desktop's Extensions UI. Absent in ordinary
+   * development, where nobody has run that script — the route is simply not registered then.
+   */
+  mcpbPath?: string;
   /**
    * Addresses of the proxies this app sits behind, if any. Empty means no
    * `x-forwarded-for` header is believed and the socket address is used
@@ -109,7 +118,7 @@ function createApi(deps: AppDependencies) {
       await next();
     })
     .get("/health", async (c) => {
-      await deps.sql`SELECT 1`;
+      await sql`SELECT 1`.execute(deps.db);
       return c.json({ status: "ok" });
     })
     .route("/setup", setupRoutes)
@@ -120,6 +129,7 @@ function createApi(deps: AppDependencies) {
     .route("/imports", importsRoutes)
     .route("/users", usersRoutes)
     .route("/resources", resourcesRoutes)
+    .route("/submissions", submissionsRoutes)
     .route("/tags", tagsRoutes);
 
   // Registered before `app.route("/api", api)` below: Hono wraps a sub-app's
@@ -132,15 +142,30 @@ function createApi(deps: AppDependencies) {
 export type ApiType = ReturnType<typeof createApi>;
 
 /**
- * Builds the fully wired app: the API under `/api`, and — when a built web
- * interface is available — the web interface, with an SPA fallback.
+ * Builds the fully wired app: the API under `/api`, the OpenAPI and MCP
+ * discovery documents, and — when a built web interface is available — the
+ * web interface, with an SPA fallback.
  *
  * @param deps - The database, storage adapter, signing secret, public URL,
  * logger, and optional web interface root.
  * @returns `Hono`
+ *
+ * @remarks
+ * `GET /openapi.json` serves `docs/openapi.json` verbatim — that file is the
+ * hand-written wire contract, not generated from the routes below, so it and
+ * the routes must be kept in sync by hand. `GET /mcp` serves `docs/mcp.json`,
+ * a discovery document for the separate `@in-org-quicko/skillset-mcp` server
+ * that is generated from that server itself (`apps/mcp/src/discovery.ts`) and
+ * held to it by a test there. It is descriptive only: this app never speaks
+ * the MCP protocol itself (ADR-0033). The server is stdio-only, run locally by
+ * each Agent, so the document says how to run it rather than being an
+ * endpoint to connect to. `GET /mcp.mcpb`, present only when
+ * `deps.mcpbPath` is given, serves that server packed as a single file for a
+ * host that installs one that way instead (ADR-0037).
+ *
  * @example
  * ```ts
- * const app = createApp({ sql, db, betterAuthSecret, publicUrl, storage, logger });
+ * const app = createApp({ db, betterAuthSecret, publicUrl, storage, logger });
  * ```
  */
 export function createApp(deps: AppDependencies): Hono {
@@ -161,6 +186,19 @@ export function createApp(deps: AppDependencies): Hono {
   app.use("/api/*", csrf({ origin: trustedOrigins(deps.publicUrl) }));
 
   app.route("/api", createApi(deps));
+
+  // Registered before the static/SPA fallback below: both are dotted paths
+  // that fallback would otherwise either 404 (an extension it can't find) or
+  // swallow into the SPA shell (no extension).
+  app.get("/openapi.json", (c) => c.json(openapiSpec));
+  app.get("/mcp", (c) => c.json(mcpDiscovery));
+  if (deps.mcpbPath) {
+    const mcpbPath = deps.mcpbPath;
+    app.get("/mcp.mcpb", (c) => {
+      c.header("content-disposition", 'attachment; filename="skillset-mcp.mcpb"');
+      return c.body(Bun.file(mcpbPath).stream(), 200, { "content-type": "application/octet-stream" });
+    });
+  }
 
   // Only an `/api` path that no route matched reaches here: every other miss
   // is either a static file or the SPA's own route.

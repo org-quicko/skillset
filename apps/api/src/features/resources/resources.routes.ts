@@ -86,8 +86,18 @@ export const resourcesRoutes = createRouter()
   .get("/stats", async (c) => {
     return c.json(SkillDirectoryStatsSchema.parse(await c.var.services.resources.getStats()));
   })
+  // `namespace` is a query parameter rather than more path segments: it may
+  // itself contain a slash (`anthropics/skills`), and a Namespace is compared
+  // whole and never split (ADR-0042) — so a path would have to be parsed back
+  // apart on a "the last segment is the name" rule that nothing else needs.
+  // Omitted means this Registry's own, which `getByName` supplies.
   .get(`/${KIND}/by-name/:name`, async (c) => {
-    return c.json(SkillSchema.parse(await c.var.services.resources.getByName(c.req.param("kind"), c.req.param("name"))));
+    const skill = await c.var.services.resources.getByName(
+      c.req.param("kind"),
+      c.req.param("name"),
+      c.req.query("namespace"),
+    );
+    return c.json(SkillSchema.parse(skill));
   })
   .get(`/${ID}`, resourceId, async (c) => {
     return c.json(SkillSchema.parse(await c.var.services.resources.get(c.req.valid("param").id)));
@@ -147,7 +157,7 @@ export const resourcesRoutes = createRouter()
   // records exactly one Install (ADR-0012, ADR-0028).
   .get(`/${ID}/artifact`, resourceId, async (c) => {
     // `?source=` identifies the caller: the web's Download button sends none,
-    // `skillset add` sends `cli`. Anything missing or unrecognised counts as
+    // `skillset install` sends `cli`. Anything missing or unrecognised counts as
     // `web` rather than refusing the download, so an old client keeps working.
     const rawSource = c.req.query("source");
     const source: InstallSource = rawSource && isInstallSource(rawSource) ? rawSource : "web";

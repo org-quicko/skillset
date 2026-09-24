@@ -143,3 +143,35 @@ export async function uploadArtifactFile(
     throw new Error(`Uploading "${target.path}" failed with status ${res.status}.`);
   }
 }
+
+/**
+ * Uploads every file of a manifest to the presigned destinations the Registry
+ * returned for it, one per file in the order the manifest declared them
+ * (ADR-0032).
+ *
+ * @param fetchImpl - The fetch implementation to use.
+ * @param targets - The presigned destinations, as a publish or a Submission returned them.
+ * @param files - The files, in the same order as the manifest that was sent.
+ * @throws Error when the two lists do not line up path for path, which means
+ * the Registry answered for a different manifest than the one it was sent.
+ * @throws Whatever {@link uploadArtifactFile} throws for any one file.
+ * @example
+ * ```ts
+ * await uploadArtifactFiles(fetch, published.upload.files, bundle.files);
+ * ```
+ */
+export async function uploadArtifactFiles(
+  fetchImpl: typeof fetch,
+  targets: readonly { path: string; url: string; method: "PUT"; headers: Record<string, string> }[],
+  files: readonly { path: string; bytes: Uint8Array }[],
+): Promise<void> {
+  await Promise.all(
+    targets.map((target, index) => {
+      const file = files[index];
+      if (!file || file.path !== target.path) {
+        throw new Error("The Registry returned upload targets that do not match the files it was told about.");
+      }
+      return uploadArtifactFile(fetchImpl, target, file.bytes);
+    }),
+  );
+}

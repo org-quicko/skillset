@@ -3,13 +3,14 @@ import type { Hono } from "hono";
 import type { Role } from "@in-org-quicko/skillset-shared";
 import { setPasswordCredential } from "../src/features/auth/credential.js";
 import { hashPassword } from "../src/features/auth/password.js";
-import { createDatabase } from "../src/db/client.js";
-import { users, type UserRow } from "../src/db/schemas/index.js";
+import { createDatabase, type Database } from "../src/db/client.js";
+import { readDbSchema } from "../src/db/schemaName.js";
+import type { UserRow } from "../src/db/tables.js";
 import { runMigrations, waitForDatabase } from "../src/db/migrate.js";
 import { createLogger } from "../src/lib/logger.js";
 import { AnalyticsService } from "../src/features/analytics/analytics.service.js";
 import { FakeStorageAdapter } from "../src/storage/fake.js";
-import { createApp } from "../src/app.js";
+import { createApp, type AppDependencies } from "../src/app.js";
 
 export const TEST_AUTH_SECRET = "test-auth-secret-do-not-use-in-production";
 
@@ -31,8 +32,13 @@ export const SESSION_COOKIE_NAME = "better-auth.session_token";
 
 export interface TestContext {
   app: Hono;
-  sql: ReturnType<typeof createDatabase>["sql"];
-  db: ReturnType<typeof createDatabase>["db"];
+  db: Database;
+  /**
+   * The schema `db` is scoped to, from `DB_SCHEMA` — for raw `sql`, which
+   * `withSchema` does not qualify: `sql.id(context.schema, "users")`.
+   */
+  schema: string;
+  close: () => Promise<void>;
   storage: FakeStorageAdapter;
 }
 
@@ -40,34 +46,41 @@ export interface TestContext {
  * Seam 1 — the API request boundary: no server listens, `app.request(...)`
  * calls the Hono app directly against a real Postgres and a fake storage
  * adapter, per the spec's testing decisions.
+ *
+ * @param overrides - `AppDependencies` fields a specific test needs to set itself, e.g.
+ * `mcpbPath` — a fixture path a test writes, rather than depending on `apps/mcp` having been
+ * built. Merged over this function's own defaults.
  */
-export async function startTestContext(): Promise<{
+export async function startTestContext(
+  overrides: Partial<Pick<AppDependencies, "mcpbPath">> = {},
+): Promise<{
   context: TestContext;
   container: StartedPostgreSqlContainer;
 }> {
   const container = await new PostgreSqlContainer("postgres:18-alpine").start();
-  const { sql, db } = createDatabase(container.getConnectionUri());
+  const schema = readDbSchema(process.env.DB_SCHEMA);
+  const { db, close } = createDatabase(container.getConnectionUri(), schema);
 
-  await waitForDatabase(sql);
-  await runMigrations(sql, db);
+  await waitForDatabase(db);
+  await runMigrations(db, schema);
   // Migrations must be idempotent across restarts.
-  await runMigrations(sql, db);
+  await runMigrations(db, schema);
 
   const storage = new FakeStorageAdapter();
   const app = createApp({
-    sql,
     db,
     storage,
     betterAuthSecret: TEST_AUTH_SECRET,
     publicUrl: TEST_PUBLIC_URL,
-    logger: createLogger("silent"),
+    logger: createLogger(process.env.TEST_LOG_LEVEL ?? "silent"),
     // Off for the suite as a whole: every test signs in from the same
     // address, which the credential limiter is built to refuse. Tests that
     // are *about* the limiter build their own app with it on.
     rateLimiting: false,
+    ...overrides,
   });
 
-  return { context: { app: withTestOrigin(app), sql, db, storage }, container };
+  return { context: { app: withTestOrigin(app), db, schema, close, storage }, container };
 }
 
 /**
@@ -118,16 +131,16 @@ export async function seedUserWithPassword(
   context: TestContext,
   body: { first_name: string; last_name: string; email: string; password: string; role: Role },
 ): Promise<UserRow> {
-  const [row] = await context.db
-    .insert(users)
+  const row = await context.db
+    .insertInto("users")
     .values({
       first_name: body.first_name,
       last_name: body.last_name,
       email: body.email,
       role: body.role,
     })
-    .returning();
-  if (!row) throw new Error("Insert did not return the created User.");
+    .returningAll()
+    .executeTakeFirstOrThrow();
 
   await setPasswordCredential(context.db, row.id, await hashPassword(body.password));
   return row;
@@ -170,7 +183,7 @@ export async function stopTestContext(
   context: TestContext,
   container: StartedPostgreSqlContainer,
 ): Promise<void> {
-  await context.sql.end();
+  await context.close();
   await container.stop();
 }
 

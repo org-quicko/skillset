@@ -4,11 +4,9 @@ import {
   type IdentityProviderUpdate,
   type PublicIdentityProvider,
 } from "@in-org-quicko/skillset-shared";
-import { asc, eq } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
-import { firstRow } from "../../db/rows.js";
 import { isUniqueViolation } from "../../db/pg-errors.js";
-import { identityProviders, type IdentityProviderRow } from "../../db/schemas/index.js";
+import type { IdentityProviderRow } from "../../db/tables.js";
 import type { Logger } from "../../lib/logger.js";
 import { sealSecret, type DerivedKeys } from "../../lib/secrets.js";
 import { IdentityProviderKindTakenError, IdentityProviderNotFoundError } from "./identity-providers.errors.js";
@@ -61,7 +59,7 @@ export class IdentityProvidersService {
    * field.
    */
   async list(): Promise<IdentityProviderRow[]> {
-    return this.db.select().from(identityProviders).orderBy(asc(identityProviders.created_at));
+    return this.db.selectFrom("identity_providers").selectAll().orderBy("created_at").execute();
   }
 
   /**
@@ -72,13 +70,11 @@ export class IdentityProvidersService {
    */
   async listEnabled(): Promise<PublicIdentityProvider[]> {
     return this.db
-      .select({
-        kind: identityProviders.kind,
-        display_name: identityProviders.display_name,
-      })
-      .from(identityProviders)
-      .where(eq(identityProviders.enabled, true))
-      .orderBy(asc(identityProviders.created_at));
+      .selectFrom("identity_providers")
+      .select(["kind", "display_name"])
+      .where("enabled", "=", true)
+      .orderBy("created_at")
+      .execute();
   }
 
   /**
@@ -114,8 +110,8 @@ export class IdentityProvidersService {
     const enabled = input.enabled ?? false;
 
     try {
-      const inserted = await this.db
-        .insert(identityProviders)
+      const created = await this.db
+        .insertInto("identity_providers")
         .values({
           kind: input.kind,
           display_name: input.display_name,
@@ -124,8 +120,8 @@ export class IdentityProvidersService {
           permitted_organisations: permittedOrganisations,
           enabled,
         })
-        .returning();
-      const created = firstRow(inserted, "Identity Provider insert");
+        .returningAll()
+        .executeTakeFirstOrThrow();
 
       this.logger.info({ identity_provider_id: created.id, kind: created.kind }, "identity provider created");
       this.warnIfUngated(created);
@@ -163,7 +159,11 @@ export class IdentityProvidersService {
    * ```
    */
   async update(id: string, input: IdentityProviderUpdate): Promise<IdentityProviderRow> {
-    const [existing] = await this.db.select().from(identityProviders).where(eq(identityProviders.id, id)).limit(1);
+    const existing = await this.db
+      .selectFrom("identity_providers")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
     if (!existing) throw new IdentityProviderNotFoundError();
 
     const permittedOrganisations =
@@ -172,8 +172,8 @@ export class IdentityProvidersService {
         : normaliseOrganisations(input.permitted_organisations);
     const enabled = input.enabled ?? existing.enabled;
 
-    const [updated] = await this.db
-      .update(identityProviders)
+    const updated = await this.db
+      .updateTable("identity_providers")
       .set({
         ...(input.display_name !== undefined ? { display_name: input.display_name } : {}),
         ...(input.client_id !== undefined ? { client_id: input.client_id } : {}),
@@ -184,8 +184,9 @@ export class IdentityProvidersService {
         enabled,
         updated_at: new Date(),
       })
-      .where(eq(identityProviders.id, id))
-      .returning();
+      .where("id", "=", id)
+      .returningAll()
+      .executeTakeFirst();
     if (!updated) throw new IdentityProviderNotFoundError();
 
     this.logger.info(

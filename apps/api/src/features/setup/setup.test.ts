@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { users } from "../../db/schemas/index.js";
 import { startTestContext, stopTestContext, type TestContext } from "../../../test/context.js";
 
 /**
@@ -41,7 +40,7 @@ describe("Setup initialisation under concurrency", () => {
 
     expect(statuses).toEqual([201, 409, 409, 409, 409]);
 
-    const rows = await context.db.select().from(users);
+    const rows = await context.db.selectFrom("users").selectAll().execute();
     expect(rows.length).toBe(1);
   }, 15_000);
 });

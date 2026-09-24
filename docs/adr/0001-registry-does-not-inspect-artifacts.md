@@ -16,7 +16,7 @@ and rejected as unnecessary round-trips.
 ## Consequences
 
 Validation lives at the two edges and never in the middle. The authoring client checks
-bundles before upload, which catches honest mistakes; `skillreg add` performs full
+bundles before upload, which catches honest mistakes; `skillset install` performs full
 path-safety and size/entry-cap validation at **extraction** time, which is what actually
 protects a developer's filesystem from a hostile bundle — a registry-side check could not,
 since the bytes are already on the machine by then.

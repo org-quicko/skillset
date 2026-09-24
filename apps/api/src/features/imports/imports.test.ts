@@ -2,13 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Role } from "@in-org-quicko/skillset-shared";
 import { symmetricEncrypt } from "better-auth/crypto";
-import {
-  connections,
-  identityProviders,
-  integrations,
-  type IntegrationRow,
-  type UserRow,
-} from "../../db/schemas/index.js";
+import type { IntegrationRow, NewConnectionRow, UserRow } from "../../db/tables.js";
 import { createLogger } from "../../lib/logger.js";
 import { deriveKeys } from "../../lib/secrets.js";
 import { ConnectionsService } from "../connections/connections.service.js";
@@ -135,14 +129,14 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
   });
 
   async function clearAll() {
-    await context.db.delete(connections);
-    await context.db.delete(integrations);
-    await context.db.delete(identityProviders);
+    await context.db.deleteFrom("connections").execute();
+    await context.db.deleteFrom("integrations").execute();
+    await context.db.deleteFrom("identity_providers").execute();
   }
 
   async function seedIntegration(app_slug: string | null = "acme-registry"): Promise<IntegrationRow> {
-    const [row] = await context.db
-      .insert(integrations)
+    return context.db
+      .insertInto("integrations")
       .values({
         provider: "github",
         display_name: "GitHub",
@@ -150,27 +144,29 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
         client_secret: "the-secret",
         app_slug,
       })
-      .returning();
-    if (!row) throw new Error("Integration insert did not return a row.");
-    return row;
+      .returningAll()
+      .executeTakeFirstOrThrow();
   }
 
   // No default `integrationId`: a caller with no Integration seeded must name
   // one explicitly (even a nonexistent one) to prove the foreign key, rather
   // than silently succeeding against nothing.
-  async function seedConnection(overrides: Record<string, unknown> = {}, integrationId?: string) {
-    await context.db.insert(connections).values({
-      user_id: writer.id,
-      provider: "github",
-      integration_id: integrationId ?? "00000000-0000-0000-0000-000000000000",
-      external_account_id: "1",
-      external_account_login: "ada-work",
-      access_token: await symmetricEncrypt({ key: TEST_AUTH_SECRET, data: "ghu_writer_token" }),
-      refresh_token: await symmetricEncrypt({ key: TEST_AUTH_SECRET, data: "ghr_writer_token" }),
-      expires_at: new Date(Date.now() + 3_600_000),
-      refresh_token_expires_at: new Date(Date.now() + 30 * 86_400_000),
-      ...overrides,
-    });
+  async function seedConnection(overrides: Partial<NewConnectionRow> = {}, integrationId?: string) {
+    await context.db
+      .insertInto("connections")
+      .values({
+        user_id: writer.id,
+        provider: "github",
+        integration_id: integrationId ?? "00000000-0000-0000-0000-000000000000",
+        external_account_id: "1",
+        external_account_login: "ada-work",
+        access_token: await symmetricEncrypt({ key: TEST_AUTH_SECRET, data: "ghu_writer_token" }),
+        refresh_token: await symmetricEncrypt({ key: TEST_AUTH_SECRET, data: "ghr_writer_token" }),
+        expires_at: new Date(Date.now() + 3_600_000),
+        refresh_token_expires_at: new Date(Date.now() + 30 * 86_400_000),
+        ...overrides,
+      })
+      .execute();
   }
 
   /** Ready to import: an Integration and a Connection for the writer. */
@@ -214,7 +210,7 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
       const provider = stub({ [CONTENTS]: [file("code-review/SKILL.md")], [`${RAW}/SKILL.md`]: new Uint8Array([1]) });
       expect(await imports.fetchSkillFiles(writer.id, location(), provider.fetch)).toHaveLength(1);
 
-      await context.db.delete(connections);
+      await context.db.deleteFrom("connections").execute();
       await expect(imports.fetchSkillFiles(writer.id, location(), provider.fetch)).rejects.toMatchObject({
         code: "not_connected",
       });
@@ -231,27 +227,31 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
       expect(await imports.fetchSkillFiles(writer.id, location(), provider.fetch)).toHaveLength(1);
 
       await context.db
-        .insert(identityProviders)
+        .insertInto("identity_providers")
         .values({
           kind: "github",
           display_name: "GitHub",
           client_id: "oauth-client",
           client_secret: "oauth-secret",
           enabled: false,
-        });
+        })
+        .execute();
 
       expect(await imports.fetchSkillFiles(writer.id, location(), provider.fetch)).toHaveLength(1);
     });
 
     it("leaves GitHub sign-in working with no Integration at all", async () => {
       await clearAll();
-      await context.db.insert(identityProviders).values({
-        kind: "github",
-        display_name: "GitHub",
-        client_id: "oauth-client",
-        client_secret: "oauth-secret",
-        enabled: true,
-      });
+      await context.db
+        .insertInto("identity_providers")
+        .values({
+          kind: "github",
+          display_name: "GitHub",
+          client_id: "oauth-client",
+          client_secret: "oauth-secret",
+          enabled: true,
+        })
+        .execute();
 
       const res = await context.app.request("/api/auth/providers");
       expect(res.status).toBe(200);

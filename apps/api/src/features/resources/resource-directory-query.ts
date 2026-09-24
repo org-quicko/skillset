@@ -1,6 +1,7 @@
 import {
   isKind,
   KIND_KEYS,
+  resolveSkillDirectorySortField,
   SKILL_DIRECTORY_DEFAULT_PAGE_SIZE,
   SKILL_DIRECTORY_MAX_PAGE_SIZE,
   SKILL_DIRECTORY_MIN_PAGE_SIZE,
@@ -89,13 +90,13 @@ export const ResourceDirectoryQuerySchema = z
     q: SearchTerm,
     kind: Kind,
     tag_id: TagIds,
+    // Left optional rather than defaulted, because the default depends on
+    // `q`: the transform below resolves it once both are in hand.
     sort_by: z
       .enum(SKILL_DIRECTORY_SORT_FIELDS, {
         error: `sort_by must be one of: ${SKILL_DIRECTORY_SORT_FIELDS.join(", ")}.`,
       })
-      // ADR-0028: installs are not comparable across Kinds, so the default
-      // listing no longer orders by them — updated_at does.
-      .default("updated_at"),
+      .optional(),
     sort_order: z
       .enum(SKILL_DIRECTORY_SORT_ORDERS, {
         error: `sort_order must be one of: ${SKILL_DIRECTORY_SORT_ORDERS.join(", ")}.`,
@@ -108,9 +109,10 @@ export const ResourceDirectoryQuerySchema = z
     q: query.q,
     kind: query.kind,
     tagIds: query.tag_id,
-    sortBy: query.sort_by,
+    sortBy: resolveSkillDirectorySortField(query.sort_by, query.q),
     sortOrder: query.sort_order,
   }));
+
 
 /** A validated, fully-typed `GET /resources` query. */
 export type ResourceDirectoryQuery = z.infer<typeof ResourceDirectoryQuerySchema>;
