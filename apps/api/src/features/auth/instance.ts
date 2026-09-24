@@ -530,12 +530,14 @@ export function createAuth(deps: BetterAuthDependencies, providers: IdentityProv
           before: async (user) => {
             const claims = user as unknown as Record<string, unknown>;
             const [first, last] = namesFrom(claims, String(user.email ?? ""));
-            // `name` is dropped rather than written: the column is generated
-            // from these two halves, so Postgres refuses an insert into it.
-            const { name: _name, ...rest } = user;
+            // `name` is generated from these two halves, so Postgres refuses an
+            // insert into it. Set to `undefined` rather than omitted: Better Auth
+            // merges this result over its own data (see `withoutGitHubTokens`),
+            // so an omitted key is restored, while the adapter skips undefined.
             return {
               data: {
-                ...rest,
+                ...user,
+                name: undefined,
                 first_name: first,
                 last_name: last,
                 role: "reader",
