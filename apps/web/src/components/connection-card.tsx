@@ -1,5 +1,7 @@
 import type { ConnectableProvider, Connection } from "@in-org-quicko/skillset-shared";
 import { EllipsisIcon, ExternalLinkIcon, Link2OffIcon } from "lucide-react";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
@@ -13,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { connectHref, useConnections, useDisconnect } from "@/hooks/use-connections";
 import { apiErrorMessage } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+import { useRouter } from "@/lib/use-router";
 
 /** Placeholder rows, shaped like `ConnectedAccountRow`, while `useConnections` is in flight. */
 function ConnectionsListSkeleton() {
@@ -129,6 +132,24 @@ function ConnectedAccountRow({
 export function ConnectionCard() {
   const connections = useConnections();
   const disconnect = useDisconnect();
+  const { pathname, search, replace } = useRouter();
+
+  // The OAuth callback (`connections.routes.ts`) bounces the browser back here
+  // with `?connected=<provider>` on success or `?declined=<provider>` when the
+  // writer cancelled at the provider instead of a failure. `replace`, not
+  // `navigate` — this is cleanup of a one-time signal, not a step the back
+  // button should revisit.
+  useEffect(() => {
+    const connected = search.get("connected");
+    const declined = search.get("declined");
+    if (connected === "github") {
+      toast.success("GitHub connected.");
+      replace(pathname);
+    } else if (declined === "github") {
+      toast.error("You didn't authorize GitHub, so nothing was connected.");
+      replace(pathname);
+    }
+  }, [search, pathname, replace]);
 
   // One Connection per provider (ADR-0025) — which of a provider's several
   // Integrations it runs through is `integration_id`.

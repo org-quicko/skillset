@@ -258,12 +258,14 @@ function FormDialogHeader({
  * `overflow-y-auto` alone makes the browser compute `overflow-x` as `auto`
  * too (the CSS spec forces a non-`visible` pair when only one axis is set),
  * which clips a focused field's ring box-shadow against this element's own
- * edge. `px-1 -mx-1` gives the ring room to render without shifting the
- * fields' visual alignment with the header above.
+ * edge. `px-1 -mx-1` gives the ring room on the sides without shifting the
+ * fields' visual alignment with the header above; `pb-1 -mb-1` does the same
+ * at the bottom, where the last field sits flush against this element's own
+ * bottom edge (the top edge already has `mt-4` to spare).
  */
 function FormDialogBody({ children }: { children: ReactNode }) {
   return (
-    <div className="scrollbar-hidden -mx-1 mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1">
+    <div className="scrollbar-hidden -mx-1 -mb-1 mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 pb-1">
       {children}
     </div>
   )

@@ -42,6 +42,10 @@ export type PublicIdentityProvider = z.infer<typeof PublicIdentityProviderSchema
  */
 export const LOGIN_REFUSAL_MESSAGE: Record<string, string> = {
   external_login_failed: "The sign-in attempt failed. Try again, or use your password.",
+  // The provider's own OAuth code for "the visitor clicked Cancel/Deny" —
+  // passed straight through by Better Auth's callback rather than mapped to
+  // one of this Registry's own codes, since nothing here judged the attempt.
+  access_denied: "Sign-in was cancelled.",
   provider_disabled:
     "Signing in with a third-party account is currently switched off. Use your password, or ask an administrator.",
   provider_not_configured: "Signing in with a third-party account is not configured. Use your password instead.",

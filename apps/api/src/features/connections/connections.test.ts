@@ -297,8 +297,8 @@ describe("Connections (ADR-0024)", () => {
         `error=access_denied&state=${encodeURIComponent(state)}`,
       );
 
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as ApiError).error.code).toBe("authorization_declined");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toContain("/settings/connected-accounts?declined=github");
       expect(await context.db.selectFrom("connections").selectAll().execute()).toEqual([]);
     });
   });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createRouter } from "../../lib/factory.js";
 import { validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
+import { ConnectionDeclinedError } from "./connections.errors.js";
 
 /**
  * The cookie carrying the connect flow's nonce.
@@ -87,7 +88,20 @@ export const connectionsRoutes = createRouter()
       return c.redirect(new URL(`${SETTINGS_PATH}?repositories=${provider}`, c.var.publicUrl).href, 302);
     }
 
-    await c.var.services.connections.complete(c.var.user, provider, { code, state, nonce, error });
+    try {
+      await c.var.services.connections.complete(c.var.user, provider, { code, state, nonce, error });
+    } catch (err) {
+      // A writer who clicks "Cancel" at the provider made a decision, not a
+      // failed or forged attempt — it belongs back in settings with a plain
+      // explanation, not the raw API error a top-level navigation would
+      // otherwise land on. Every other failure here (a tampered state, an
+      // exchange the provider refused) is left to the generic error response;
+      // this is the one outcome the writer caused on purpose.
+      if (err instanceof ConnectionDeclinedError) {
+        return c.redirect(new URL(`${SETTINGS_PATH}?declined=${provider}`, c.var.publicUrl).href, 302);
+      }
+      throw err;
+    }
 
     return c.redirect(new URL(`${SETTINGS_PATH}?connected=${provider}`, c.var.publicUrl).href, 302);
   })

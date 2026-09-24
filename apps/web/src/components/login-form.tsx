@@ -1,6 +1,7 @@
 import { loginRefusalMessage, type PublicIdentityProvider } from "@in-org-quicko/skillset-shared";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 import { WordmarkButton } from "@/components/logo";
 import { PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { useLogin } from "@/hooks/use-auth";
 import { useLoginProviders } from "@/hooks/use-identity-providers";
 import { ApiError } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
+import { LOGIN_PATH } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
 import { cn } from "@/lib/utils";
 
@@ -17,9 +19,15 @@ import { cn } from "@/lib/utils";
  * authorization URL and the browser leaves the app for it — a top-level
  * navigation, not a client-side route change, because the provider is a
  * different origin.
+ *
+ * @remarks
+ * `errorCallbackURL` is what lands a refused or cancelled attempt back on
+ * `LOGIN_PATH` with `?error=<code>` instead of Better Auth's own bare error
+ * page — without it, `errorURL` in the OAuth state falls back to
+ * `{baseURL}/error`, a route this app never renders.
  */
 function startExternalLogin(kind: string): void {
-  void authClient.signIn.social({ provider: kind, callbackURL: "/" });
+  void authClient.signIn.social({ provider: kind, callbackURL: "/", errorCallbackURL: LOGIN_PATH });
 }
 
 function FieldLabel({ children, uppercase = true }: { children: React.ReactNode; uppercase?: boolean }) {
@@ -34,13 +42,21 @@ export function LoginForm() {
   const [reveal, setReveal] = useState(false);
   const login = useLogin();
   const providers = useLoginProviders();
-  const { search } = useRouter();
+  const { pathname, search, replace } = useRouter();
 
-  // Set by the API when it bounces a failed external login back here. The code
-  // names which check refused it, so the message can be the one that helps —
-  // an unapproved OAuth app and a wrong organisation look identical to the
-  // person hitting them but are fixed in completely different places.
-  const externalError = search.get("error");
+  // Set by the API when it bounces a failed or cancelled external login back
+  // here. The code names which check refused it, so the message can be the
+  // one that helps — an unapproved OAuth app and a wrong organisation look
+  // identical to the person hitting them but are fixed in completely
+  // different places. `replace`, not `navigate` — this is cleanup of a
+  // one-time signal, not a step the back button should revisit.
+  useEffect(() => {
+    const error = search.get("error");
+    if (error) {
+      toast.error(loginRefusalMessage(error));
+      replace(pathname);
+    }
+  }, [search, pathname, replace]);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -60,8 +76,6 @@ export function LoginForm() {
       <div className="flex flex-1 items-start justify-center px-7 py-20 sm:py-24">
         <div className="flex w-full max-w-[400px] flex-col gap-6">
           <h1 className="text-[22px] font-medium tracking-tight">Sign in</h1>
-
-          {externalError && <p className="text-sm text-destructive">{loginRefusalMessage(externalError)}</p>}
 
           <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
             <div className="flex flex-col gap-1.5">
