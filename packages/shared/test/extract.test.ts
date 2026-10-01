@@ -1,10 +1,13 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import { zipSync, type Zippable } from "fflate";
 import {
   ARTIFACT_MAX_ENTRIES,
   ARTIFACT_MAX_TRANSFER_BYTES,
   ARTIFACT_MAX_UNCOMPRESSED_BYTES,
+  buildSkillBundle,
   extractSkillFiles,
+  isSkillArchiveName,
   SkillValidationError,
   type SkillRule,
 } from "../src/index.js";
@@ -174,5 +177,37 @@ describe("extractSkillFiles", () => {
 
   it("rejects an archive with no SKILL.md", () => {
     expect(ruleFor(zip({ "readme.txt": encoder.encode("hello") }))).toBe("skill_md_missing");
+  });
+});
+
+describe("a .skill file", () => {
+  const fixture = () => new Uint8Array(readFileSync(new URL("./fixtures/code-review.skill", import.meta.url)));
+
+  it("is recognised by its extension, in any letter case", () => {
+    expect(isSkillArchiveName("code-review.skill")).toBe(true);
+    expect(isSkillArchiveName("Code-Review.SKILL")).toBe(true);
+    expect(isSkillArchiveName("code-review.zip")).toBe(false);
+    expect(isSkillArchiveName("SKILL.md")).toBe(false);
+  });
+
+  it("unpacks to the Skill's files with the wrapping directory stripped", () => {
+    expect(
+      extractSkillFiles(fixture())
+        .map((file) => file.path)
+        .sort(),
+    ).toEqual(["SKILL.md", "references/checklist.md", "scripts/lint.sh"]);
+  });
+
+  it("publishes as the Skill its SKILL.md frontmatter names", () => {
+    const bundle = buildSkillBundle(extractSkillFiles(fixture()));
+    expect(bundle.name).toBe("code-review");
+    expect(bundle.request.description).toBe("Reviews code for correctness and style.");
+    expect(bundle.files.map((file) => file.path).sort()).toEqual(["SKILL.md", "references/checklist.md", "scripts/lint.sh"]);
+  });
+
+  it("is refused, with the rule that broke, when its entries escape the Skill's directory", () => {
+    expect(ruleFor(zip({ "code-review/SKILL.md": encoder.encode("x"), "../evil.sh": encoder.encode("x") }))).toBe(
+      "entry_path_traversal",
+    );
   });
 });

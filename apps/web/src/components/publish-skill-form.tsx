@@ -27,7 +27,7 @@ import { SkillUploadError, usePublishSkill } from "@/hooks/use-skills";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { discoverSkillSources, fetchSkillFilesAt } from "@/lib/read-source-files";
-import { readDroppedFiles, readPickedFiles } from "@/lib/read-skill-files";
+import { readDroppedFiles, readPickedFiles, readSkillArchive } from "@/lib/read-skill-files";
 
 /**
  * One Skill folder's label in the candidate list.
@@ -101,6 +101,11 @@ function describeFailure(error: unknown): string {
   }
   if (error instanceof SkillUploadError) return error.message;
   return apiErrorMessage(error);
+}
+
+/** A validation failure's own message — it names what is wrong with the upload — and `fallback` for anything else. */
+function readUploadFailure(error: unknown, fallback: string): string {
+  return error instanceof SkillValidationError ? describeFailure(error) : fallback;
 }
 
 /**
@@ -354,6 +359,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
   const [step, setStep] = useState<ImportStep>({ kind: "pick" });
   const [selectedPaths, setSelectedPaths] = useState<ReadonlySet<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const archiveInputRef = useRef<HTMLInputElement>(null);
   const publish = usePublishSkill();
   // Also read for the repository-selection remedy's URL (built server-side
   // from the Integration's app slug this form cannot see) and to tell a
@@ -474,8 +480,8 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
     if (isBusy) return;
     try {
       handleFiles(await readDroppedFiles(event.dataTransfer.items));
-    } catch {
-      setReadError({ message: "Could not read the dropped folder. Try again.", remedy: null });
+    } catch (error) {
+      setReadError({ message: readUploadFailure(error, "Could not read the dropped folder. Try again."), remedy: null });
     }
   }
 
@@ -491,6 +497,17 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
       handleFiles(await readPickedFiles(files));
     } catch {
       setReadError({ message: "Could not read the chosen folder. Try again.", remedy: null });
+    }
+  }
+
+  async function handlePickedArchive(event: React.ChangeEvent<HTMLInputElement>) {
+    const [file] = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!file || isBusy) return;
+    try {
+      handleFiles(await readSkillArchive(file));
+    } catch (error) {
+      setReadError({ message: readUploadFailure(error, "Could not read the chosen file. Try again."), remedy: null });
     }
   }
 
@@ -520,11 +537,11 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
           }}
           onDrop={handleDrop}
-          // Dropping is read via `webkitGetAsEntry` and accepts a folder or a
-          // lone SKILL.md either way (see `readDroppedFiles`). Clicking opens
-          // a native dialog, which can only ever be in one mode or the
-          // other — `webkitdirectory` below picks folder-picking mode, so a
-          // single markdown file has to be dragged in instead.
+          // Dropping is read via `webkitGetAsEntry` and accepts a folder, a
+          // lone SKILL.md or a .skill file either way (see `readDroppedFiles`).
+          // Clicking opens a native dialog, which can only ever be in one mode
+          // or the other — `webkitdirectory` below picks folder-picking mode,
+          // so a single file is chosen through the second input instead.
           onClick={() => fileInputRef.current?.click()}
           className={cn(
             "flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
@@ -534,10 +551,27 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
         >
           <UploadIcon className="size-5 text-muted-foreground" />
           <p className="text-sm text-pretty text-muted-foreground">
-            Drag and drop a Skill&apos;s folder or a SKILL.md file here, or{" "}
+            Drag and drop a Skill&apos;s folder, a .skill file or a SKILL.md file here, or{" "}
             <span className="text-foreground underline underline-offset-2">browse for a folder</span>
           </p>
         </button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isBusy}
+          onClick={() => archiveInputRef.current?.click()}
+          className="self-center"
+        >
+          Choose a .skill file
+        </Button>
+        <input
+          ref={archiveInputRef}
+          type="file"
+          accept=".skill"
+          className="hidden"
+          onChange={handlePickedArchive}
+        />
         {/* Kept outside the button — HTML doesn't allow interactive content
             nested inside one — but still hidden and driven entirely by
             `fileInputRef`, so it needs no layout of its own. */}
@@ -553,6 +587,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
         />
         <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
           <li>A folder must include a SKILL.md file</li>
+          <li>A .skill file is a zip archive of a Skill and must include a SKILL.md file</li>
           <li>A markdown file must have its skill name and description in YAML frontmatter</li>
         </ul>
         {readError && <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />}
