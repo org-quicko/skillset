@@ -1,4 +1,9 @@
-import { SKILL_FILE_NAME, type SkillFile } from "@in-org-quicko/skillset-shared";
+import {
+  extractSkillFiles,
+  isSkillArchiveName,
+  SKILL_FILE_NAME,
+  type SkillFile,
+} from "@in-org-quicko/skillset-shared";
 
 const MARKDOWN_EXTENSIONS = [".md", ".markdown"];
 
@@ -37,7 +42,11 @@ async function readEntry(entry: FileSystemEntry, path: string): Promise<SkillFil
  * directories — or, when what was dropped is a single markdown file rather
  * than a folder, that file alone, renamed to `SKILL.md` so it feeds the same
  * publishing pipeline a folder's own `SKILL.md` would (its frontmatter is
- * still where the Skill's name and description come from).
+ * still where the Skill's name and description come from). A single `.skill`
+ * file is unpacked into the files it holds, as `readSkillArchive` does.
+ *
+ * @throws SkillValidationError when a dropped `.skill` file is not a safe,
+ * well-formed Skill archive (see `extractSkillFiles`).
  */
 export async function readDroppedFiles(items: DataTransferItemList): Promise<SkillFile[]> {
   const entries = Array.from(items)
@@ -49,8 +58,30 @@ export async function readDroppedFiles(items: DataTransferItemList): Promise<Ski
     return [{ path: SKILL_FILE_NAME, bytes: new Uint8Array(await file.arrayBuffer()) }];
   }
 
+  if (entries.length === 1 && entries[0].isFile && isSkillArchiveName(entries[0].name)) {
+    return readSkillArchive(await readFileEntry(entries[0] as FileSystemFileEntry));
+  }
+
   const nested = await Promise.all(entries.map((entry) => readEntry(entry, entry.name)));
   return nested.flat();
+}
+
+/**
+ * A `.skill` file — a zip archive of a Skill — unpacked into its files.
+ *
+ * @remarks
+ * Goes through `extractSkillFiles`, the one place an archive is inspected, so
+ * a `.skill` upload is held to the same limits as an installed Artifact: no
+ * path traversal, absolute paths or symlinks, bounded size and entry count,
+ * and a `SKILL.md` required. A single wrapping directory is stripped.
+ *
+ * @param file - The chosen or dropped `.skill` file.
+ * @returns The Skill's files, at paths relative to its root.
+ * @throws SkillValidationError when the archive is corrupt, hostile, over a
+ * limit, or holds no `SKILL.md`.
+ */
+export async function readSkillArchive(file: File): Promise<SkillFile[]> {
+  return extractSkillFiles(new Uint8Array(await file.arrayBuffer()));
 }
 
 /**

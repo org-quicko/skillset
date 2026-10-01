@@ -21,6 +21,24 @@ const LOCAL_HEADER_LENGTH = 30;
 /** General-purpose bit 3: sizes are in a trailing data descriptor, and the local header's read zero (APPNOTE 4.4.4). */
 const DATA_DESCRIPTOR_FLAG = 0x0008;
 
+/** The extension of a packaged Skill — an ordinary zip archive that Claude's skill tooling names `.skill`. */
+export const SKILL_ARCHIVE_EXTENSION = ".skill";
+
+/**
+ * Whether `name` names a packaged Skill, by extension.
+ *
+ * @param name - A file name or path.
+ * @returns `true` if it ends in `.skill`, in any letter case.
+ * @example
+ * ```ts
+ * isSkillArchiveName("code-review.skill"); // true
+ * isSkillArchiveName("notes.md"); // false
+ * ```
+ */
+export function isSkillArchiveName(name: string): boolean {
+  return name.toLowerCase().endsWith(SKILL_ARCHIVE_EXTENSION);
+}
+
 interface CentralDirectoryEntry {
   name: string;
   /** The size the archive *claims* it will expand to. Declared by the archive's author, so it bounds the work but does not prove it. */
