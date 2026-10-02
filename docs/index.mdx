@@ -1,0 +1,105 @@
+---
+title: "Skillset: Self-Hosted Skill Registry for Teams"
+sidebarTitle: "Home"
+description: "Skillset is a self-hosted registry for Skills, MCP Servers, and Plugins. Publish, discover, and install coding-agent resources under your own infrastructure."
+---
+
+Skillset gives your team a private, self-hosted registry for everything a coding agent loads — Skills (prompt + file bundles), MCP Servers (tool pointers), and Plugins (bundles of the above). Publish resources from the CLI or web interface; discover, preview, and install them via the web, the `skillset` CLI, or the bundled MCP server. All under your own infrastructure, with your own access control.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Deploy Skillset with Docker and publish your first Skill in minutes.
+  </Card>
+  <Card title="Concepts" icon="book-open" href="/concepts">
+    Understand Skills, MCP Servers, Plugins, Namespaces, and the Registry data model.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/commands">
+    Every `skillset` command — install, publish, search, update, and more.
+  </Card>
+  <Card title="MCP Server" icon="robot" href="/mcp/overview">
+    Connect any MCP-capable agent directly to your Registry's catalog.
+  </Card>
+</CardGroup>
+
+## What's in Skillset
+
+<CardGroup cols={3}>
+  <Card title="Skills" icon="file-code" href="/features/skills">
+    Directory bundles with a `SKILL.md` manifest that agents read as context.
+  </Card>
+  <Card title="MCP Servers" icon="server" href="/features/mcp-servers">
+    Package pointers for npm, PyPI, OCI, NuGet, Cargo, and remote URLs.
+  </Card>
+  <Card title="Plugins" icon="puzzle-piece" href="/features/plugins">
+    Multi-resource bundles an agent can load together from one manifest.
+  </Card>
+  <Card title="Import from Git" icon="code-branch" href="/features/import">
+    Pull Skills and Plugins straight from GitHub or GitLab repositories.
+  </Card>
+  <Card title="Fuzzy Search" icon="magnifying-glass" href="/features/search">
+    Full-text and trigram search so typos still find the right Skill.
+  </Card>
+  <Card title="Tags" icon="tags" href="/features/tags">
+    A shared tag catalog across all resource kinds for browsing and filtering.
+  </Card>
+</CardGroup>
+
+## Get Up and Running
+
+<Steps>
+  <Step title="Deploy the Registry">
+    Copy `.env.example` to `.env`, fill in your secrets, and run `docker compose up`. The API and web interface are served together on port 3000.
+  </Step>
+  <Step title="Create the superadmin">
+    Open `http://localhost:3000` in your browser. On first boot you are prompted to create the superadmin account.
+  </Step>
+  <Step title="Install the CLI">
+    ```bash
+    npm install -g @in-org-quicko/skillset-cli
+    skillset login --registry http://localhost:3000
+    ```
+  </Step>
+  <Step title="Publish your first Skill">
+    ```bash
+    skillset publish ./my-skill
+    ```
+    Then install it anywhere your team works:
+    ```bash
+    skillset install my-skill
+    ```
+  </Step>
+</Steps>
+
+## Deploy Options
+
+<CardGroup cols={2}>
+  <Card title="Docker Compose" icon="docker" href="/deployment/docker">
+    The fastest path: one command brings up the app, Postgres, and MinIO.
+  </Card>
+  <Card title="Configuration Reference" icon="gear" href="/deployment/configuration">
+    Every environment variable — database, storage, auth secrets, and more.
+  </Card>
+  <Card title="Database Setup" icon="database" href="/deployment/database">
+    Postgres requirements, the `pg_trgm` extension, and schema placement.
+  </Card>
+  <Card title="Object Storage" icon="box" href="/deployment/storage">
+    Connect AWS S3 or any S3-compatible endpoint for Skill artifact storage.
+  </Card>
+</CardGroup>
+
+## For Admins
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/admin/users">
+    Create users, assign roles, and manage access to the Registry.
+  </Card>
+  <Card title="Git Integrations" icon="code-branch" href="/admin/integrations">
+    Register GitHub or GitLab apps so writers can import from private repos.
+  </Card>
+  <Card title="Submissions" icon="inbox" href="/admin/submissions">
+    Review and approve Skills submitted by the team from external repositories.
+  </Card>
+  <Card title="Identity Providers" icon="shield-check" href="/auth/identity-providers">
+    Add Google Workspace, Microsoft Entra, or GitHub OAuth for SSO login.
+  </Card>
+</CardGroup>

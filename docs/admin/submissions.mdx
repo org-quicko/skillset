@@ -1,0 +1,221 @@
+---
+title: "Review and Approve URL-Installed Skill Submissions"
+sidebarTitle: "Submissions"
+description: "How admins review, approve, and reject URL-installed Skill Submissions. Covers the full lifecycle: from install and pending state through to catalog entry."
+---
+
+A Submission is created when a signed-in User runs `skillset install <url>` — the CLI clones the repository, installs the Skill locally, and simultaneously forwards it to the Registry for admin review. Any authenticated User (even a reader) can submit, because submitting publishes nothing. The Skill only enters the Registry catalog — and becomes discoverable and installable by the whole team — when an Admin approves it. This page covers the full Submission lifecycle from initial install to catalog entry.
+
+## What a Submission Is
+
+<CardGroup cols={2}>
+  <Card title="Not a Resource" icon="clock">
+    A Submission is held separately from the catalog. No one can browse, search, or install it until an Admin approves it. It is pending — not published.
+  </Card>
+  <Card title="Carries a future identity" icon="tag">
+    Every Submission records the `(kind, namespace, name)` it would have as a Resource. The Namespace is derived from its source repository URL — the same way a direct publish derives it — so the final Resource lands exactly where a manual publish of the same source would have.
+  </Card>
+  <Card title="Idempotent by identity" icon="refresh">
+    Submitting the same URL again replaces the existing pending Submission. Only the latest copy is reviewed; earlier submissions don't accumulate.
+  </Card>
+  <Card title="Credited to the submitter" icon="user">
+    On approval, the new Resource is credited to whoever submitted it. The submitter's email and display name are recorded as the publisher.
+  </Card>
+</CardGroup>
+
+## The Submission Lifecycle
+
+```text
+skillset install <url>
+        │
+        ▼
+  CLI clones repo
+  Skill written to .agents/skills/<name>
+  Submission sent to Registry
+        │
+        ▼
+  Lockfile records:
+    source = <repo url>
+    no Registry revision (pending)
+        │
+        ├─── Admin rejects ──→ Submission deleted
+        │                      Local install unaffected
+        │
+        └─── Admin approves ──→ Resource created in catalog
+                                submitted_by = submitter
+                                │
+                                ▼
+                          skillset update reports:
+                            status = outdated
+                          Run `skillset update` to switch
+                          local copy to Registry's copy
+```
+
+### Status during the Submission workflow
+
+`skillset update` reports the status of every installed Skill by comparing the local copy against the Lockfile and the Registry. For a URL-installed Skill that has been submitted but not yet approved:
+
+| State | What `skillset update` reports |
+|---|---|
+| Submitted, awaiting review | `pending` — no Registry revision to compare against |
+| Approved | `outdated` — Registry revision now exists and local copy predates it |
+| Rejected | `pending` — the Submission is gone but the local install is unchanged |
+
+Once the status is `outdated`, running `skillset update` replaces the locally-cloned copy with the Registry's canonical copy, and the Lockfile is updated to point to the Registry revision.
+
+<Note>
+  Rejection does not remove the Skill from the submitter's machine. The local copy remains installed and functional. The submitter can re-submit it, or keep using it as a URL-installed Skill indefinitely.
+</Note>
+
+## Reviewing Submissions
+
+Admins review pending Submissions from **Settings → Submissions**. Each Submission shows:
+
+- The Skill's name, description, and body content
+- The source repository URL it was cloned from
+- The Namespace and `(kind, namespace, name)` it would occupy as a Resource
+- Who submitted it and when
+
+### Approving a Submission
+
+<Steps>
+  <Step title="Open the Submission">
+    Go to **Settings → Submissions** and select the Submission you want to review.
+  </Step>
+  <Step title="Review the content">
+    Read the Skill's description and body. Check the source URL — it records where the bytes came from. Verify that the `(kind, namespace, name)` identity is appropriate for your Registry.
+  </Step>
+  <Step title="Approve">
+    Click **Approve**. The Submission's files are copied into the new Resource's storage prefix, the Resource row is created, and the Submission is deleted.
+  </Step>
+  <Step title="Notify the submitter (optional)">
+    The Registry sends no email. If you want the submitter to know their Skill was approved, notify them through your own channels. They will see the status change to `outdated` the next time they run `skillset update`.
+  </Step>
+</Steps>
+
+### Rejecting a Submission
+
+Click **Reject** on the Submission. This deletes the Submission and its uploaded files. The submitter's locally-installed copy is unaffected — they can continue using it or re-submit it.
+
+## API
+
+<CodeGroup>
+```bash List pending Submissions
+curl https://your-registry.example.com/api/submissions \
+  -H "Authorization: Bearer <token>"
+```
+
+```json Response
+{
+  "items": [
+    {
+      "id": "01944b3e-1234-7000-abcd-000000000003",
+      "kind": "skill",
+      "namespace": "github.com/acme/skills",
+      "name": "pdf-reader",
+      "description": "Reads and summarises PDF documents.",
+      "body": "# pdf-reader\n\nThis skill ...",
+      "source": "https://github.com/acme/skills",
+      "allowed_tools": null,
+      "submitted_by_email": "ada@example.com",
+      "submitted_by_name": "Ada Lovelace",
+      "submitted_at": "2025-01-15T09:00:00.000Z"
+    }
+  ]
+}
+```
+</CodeGroup>
+
+<CodeGroup>
+```bash Approve a Submission
+curl -X POST https://your-registry.example.com/api/submissions/<id>/approve \
+  -H "Authorization: Bearer <token>"
+```
+
+```json Response (200) — the new Resource
+{
+  "id": "01944b3e-1234-7000-abcd-000000000004",
+  "kind": "skill",
+  "namespace": "github.com/acme/skills",
+  "name": "pdf-reader",
+  "description": "Reads and summarises PDF documents.",
+  "published_by_email": "ada@example.com",
+  "published_by_name": "Ada Lovelace",
+  "source": "https://github.com/acme/skills"
+}
+```
+</CodeGroup>
+
+```bash Reject a Submission
+curl -X DELETE https://your-registry.example.com/api/submissions/<id> \
+  -H "Authorization: Bearer <token>"
+```
+
+A successful rejection returns `204 No Content`.
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  The Submission's unique identifier (UUID).
+</ResponseField>
+
+<ResponseField name="kind" type="string">
+  Always `skill` — only Skills can be submitted via URL install.
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  The Namespace the Resource would occupy, derived from the source repository URL.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The Skill's name, as parsed from the `SKILL.md` frontmatter.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  The Skill's description, as parsed from the `SKILL.md` frontmatter.
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  The repository URL the Skill was cloned from. Always a repository URL — a Submission can only exist because the bytes came from somewhere other than this Registry.
+</ResponseField>
+
+<ResponseField name="allowed_tools" type="string | null">
+  The `allowed-tools` value parsed from the Skill's `SKILL.md` frontmatter, or `null` if none was declared.
+</ResponseField>
+
+<ResponseField name="submitted_by_email" type="string">
+  The email address of the User who submitted the Skill.
+</ResponseField>
+
+<ResponseField name="submitted_by_name" type="string">
+  The display name of the User who submitted the Skill.
+</ResponseField>
+
+<ResponseField name="submitted_at" type="string">
+  ISO 8601 timestamp of when the Submission was created or last replaced.
+</ResponseField>
+
+## Constraints and Edge Cases
+
+<Accordion title="What if a Resource with the same identity is published while a Submission is pending?">
+  Approval is refused with a conflict error if a Resource of the same `(kind, namespace, name)` already exists at the time of approval. The Submission is left in place — an Admin can reject it manually once the conflict is resolved or understood.
+</Accordion>
+
+<Accordion title="What if no files were uploaded before approval?">
+  Approval is refused if none of the Skill's files were uploaded to object storage. The CLI uploads files as part of `skillset install`, so this should not occur in normal use — but a Submission created via direct API call may be in this state. Re-submit with the correct files to resolve it.
+</Accordion>
+
+<Accordion title="Can a Submission be for a Plugin or MCP Server?">
+  No. Only Skills can be submitted via `skillset install <url>`. Plugins and MCP Servers are published directly by Writers using the CLI or web interface.
+</Accordion>
+
+## API Reference
+
+All Submission management endpoints require an `admin` role.
+
+| Method | Path | Role required | Description |
+|---|---|---|---|
+| `GET` | `/api/submissions` | admin | List all pending Submissions |
+| `PUT` | `/api/submissions/:kind/:name` | any authenticated | Submit a URL-installed Skill for review |
+| `POST` | `/api/submissions/:id/approve` | admin | Approve a Submission, creating a Resource |
+| `DELETE` | `/api/submissions/:id` | admin | Reject and delete a Submission |

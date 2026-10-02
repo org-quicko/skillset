@@ -1,0 +1,217 @@
+---
+title: "Configure Git Integrations to Enable Repository Import"
+sidebarTitle: "Integrations"
+description: "Register GitHub or GitLab as a Git Integration to enable Import. Covers creating, updating, and deleting Integrations, and how Connections relate to them."
+---
+
+An Integration is the Registry's registration with a Git Provider — GitHub or GitLab. Creating an Integration is what makes the Import feature available for that provider: there is no separate toggle. Writers can then grant personal Connections through an Integration, and those Connections are what an Import uses to read a private repository. This page explains how to configure Integrations as an Admin, how they relate to Connections, and what the constraints are when removing one.
+
+<Info>
+  An Integration is distinct from an Identity Provider. A GitHub Identity Provider lets Users sign in with GitHub OAuth — a GitHub Integration lets writers Import Skills from GitHub repositories. The two are registered and managed entirely separately, and neither knows about the other.
+</Info>
+
+## How Integrations Work
+
+<CardGroup cols={2}>
+  <Card title="Enables Import" icon="plug">
+    Creating the first Integration for a Git Provider is the only step needed to make Import available for it. Deleting the last one makes Import unavailable again.
+  </Card>
+  <Card title="Writers connect through it" icon="link">
+    After an Integration exists, writers grant personal Connections through it from Settings → Connections. A Connection is what gives an Import access to a private repository.
+  </Card>
+  <Card title="Multiple Integrations per provider" icon="copy">
+    More than one Integration may be configured for the same Git Provider — two GitHub Apps, for instance. Writers choose which one to connect through.
+  </Card>
+  <Card title="Admin-only" icon="shield">
+    All Integration management is admin-only. Writers see only whether a connectable provider is available — they never see credentials or Integration details.
+  </Card>
+</CardGroup>
+
+## Creating an Integration
+
+<Tabs>
+  <Tab title="GitHub">
+    GitHub Integrations are registered as **GitHub Apps**.
+
+    <Steps>
+      <Step title="Create a GitHub App">
+        In your GitHub organisation settings, go to **Developer settings → GitHub Apps → New GitHub App**. Configure the following:
+
+        - **Callback URL**: `https://your-registry.example.com/api/connections/github/callback`
+        - **Repository permissions**: `Contents` (read) and `Metadata` (read)
+        - **User permissions**: none required
+        - Disable the **Webhook** unless you have a separate use for it
+
+        After creating the app, note the **App ID**, generate a **private key**, and record the **App slug** (shown in the app's URL).
+      </Step>
+      <Step title="Register the Integration in Skillset">
+        Go to **Settings → Integrations → New Integration** and fill in:
+
+        - **Provider**: `github`
+        - **Display name**: a label for your team, e.g. `GitHub (Acme)`
+        - **Client ID**: the GitHub App's **Client ID** (from its settings page)
+        - **Client secret**: the GitHub App's **Client secret**
+        - **App slug**: the slug from the App's URL (required for GitHub — it is used to build the repository-access management link)
+      </Step>
+      <Step title="Verify">
+        The Integration appears in **Settings → Integrations**. Writers can now connect from **Settings → Connections** and begin Importing.
+      </Step>
+    </Steps>
+
+    <Note>
+      The GitHub App needs read access to **Contents** and **Metadata** on repositories. Access to specific repositories is chosen by the writer when they manage their Connection's repository permissions.
+    </Note>
+  </Tab>
+  <Tab title="GitLab">
+    GitLab Integrations are registered as **OAuth Applications**.
+
+    <Steps>
+      <Step title="Create a GitLab OAuth Application">
+        In your GitLab group or instance settings, go to **Applications → Add new application**. Configure the following:
+
+        - **Redirect URI**: `https://your-registry.example.com/api/connections/gitlab/callback`
+        - **Scopes**: `read_repository`
+
+        After saving, note the **Application ID** and **Secret**.
+      </Step>
+      <Step title="Register the Integration in Skillset">
+        Go to **Settings → Integrations → New Integration** and fill in:
+
+        - **Provider**: `gitlab`
+        - **Display name**: a label for your team, e.g. `GitLab (Internal)`
+        - **Client ID**: the GitLab Application ID
+        - **Client secret**: the GitLab Application Secret
+        - **App slug**: leave blank (GitLab has no installation step)
+      </Step>
+      <Step title="Verify">
+        The Integration appears in **Settings → Integrations**. Writers can connect from **Settings → Connections**.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+### API
+
+<CodeGroup>
+```bash Create an Integration
+curl -X POST https://your-registry.example.com/api/integrations \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "github",
+    "display_name": "GitHub (Acme)",
+    "client_id": "Iv1.abc123def456",
+    "client_secret": "ghp_...",
+    "app_slug": "acme-skill-registry"
+  }'
+```
+
+```json Response (201)
+{
+  "id": "01944b3e-1234-7000-abcd-000000000002",
+  "provider": "github",
+  "display_name": "GitHub (Acme)",
+  "description": null,
+  "client_id": "Iv1.abc123def456",
+  "app_slug": "acme-skill-registry",
+  "created_at": "2025-01-15T09:00:00.000Z",
+  "updated_at": "2025-01-15T09:00:00.000Z"
+}
+```
+</CodeGroup>
+
+<Warning>
+  The `client_secret` is accepted on write but **never returned in any response** — not even to the Admin who set it. To rotate a secret, send a `PATCH` with the new value. To confirm the stored value, you must check the Git Provider directly.
+</Warning>
+
+The `POST /api/integrations` request body accepts:
+
+<ParamField body="provider" type="string" required>
+  The Git Provider to register against. One of `github` or `gitlab`.
+</ParamField>
+
+<ParamField body="display_name" type="string" required>
+  A human-readable label shown to writers when they choose which Integration to connect through. Maximum 100 characters.
+</ParamField>
+
+<ParamField body="description" type="string">
+  An optional note on what this Integration is for. Maximum 180 characters.
+</ParamField>
+
+<ParamField body="client_id" type="string" required>
+  The app's Client ID at the Git Provider.
+</ParamField>
+
+<ParamField body="client_secret" type="string" required>
+  The app's client secret. Encrypted at rest; never returned in responses.
+</ParamField>
+
+<ParamField body="app_slug" type="string">
+  The app's slug at the provider, used to build the repository-access management link. Required for GitHub — omitting it prevents writers from reaching the page where they choose which repositories the Registry may read.
+</ParamField>
+
+## Updating an Integration
+
+Use `PATCH /api/integrations/:id` to update any field except `provider` — which Git Provider an app is registered with does not change.
+
+<CodeGroup>
+```bash Rotate a secret
+curl -X PATCH https://your-registry.example.com/api/integrations/<id> \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"client_secret": "ghp_new_secret_value"}'
+```
+
+```bash Point at a different app
+curl -X PATCH https://your-registry.example.com/api/integrations/<id> \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": "Iv23li_new_app_id",
+    "client_secret": "ghp_new_secret_value"
+  }'
+```
+</CodeGroup>
+
+<Warning>
+  Updating `client_id` repoints the Integration at a **different app**. This silently invalidates every writer's Connection that was granted through the old app, because those tokens were issued to the old app's credentials. All affected Connections are deleted in the same transaction. Writers will need to reconnect. Rotating `client_secret` alone does **not** affect Connections.
+</Warning>
+
+## Connections
+
+A Connection is a writer's personal grant of repository access to the Registry. Once an Integration exists, writers can create a Connection from **Settings → Connections** by going through the Git Provider's OAuth or App installation flow.
+
+- A writer holds at most one Connection per Git Provider at a time — reconnecting replaces the previous Connection rather than adding another.
+- The connected account does not have to be the same account the writer signs in with.
+- A Connection reaches only the repositories its Integration's app was granted access to — not everything the writer can read personally.
+
+<Accordion title="Revoking a Connection">
+  A writer can disconnect from **Settings → Connections → Disconnect**. This removes the Registry's stored copy of the grant and stops the Registry using it for future Imports. It does **not** revoke the grant at the Git Provider — to do that fully, the writer must also revoke the app's access from their account settings at the provider.
+</Accordion>
+
+## Deleting an Integration
+
+An Integration can be deleted from **Settings → Integrations**, or via `DELETE /api/integrations/:id`.
+
+```bash
+curl -X DELETE https://your-registry.example.com/api/integrations/<id> \
+  -H "Authorization: Bearer <token>"
+```
+
+<Warning>
+  Deletion is **refused with `409 Conflict`** while any writer still holds a Connection that references the Integration. Remove all Connections first (writers can disconnect themselves, or you can ask them), then delete the Integration. Alternatively, use `PATCH` to repoint the Integration at a new app — this clears Connections automatically and informs writers they need to reconnect.
+</Warning>
+
+## API Reference
+
+All Integration endpoints require an `admin` role.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/integrations` | List all configured Integrations |
+| `POST` | `/api/integrations` | Create a new Integration |
+| `PATCH` | `/api/integrations/:id` | Update an Integration's details or credentials |
+| `DELETE` | `/api/integrations/:id` | Delete an Integration (refused if Connections exist) |
+| `GET` | `/api/connections` | List own Connections and connectable providers (writer+) |
+| `GET` | `/api/connections/:provider/start` | Begin the OAuth flow for a Connection (writer+) |
+| `DELETE` | `/api/connections/:provider` | Disconnect from a provider (writer+) |

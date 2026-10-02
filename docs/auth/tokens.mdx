@@ -1,0 +1,163 @@
+---
+title: "Mint, Use, and Revoke API Tokens for Skillset CLI and API"
+sidebarTitle: "Tokens"
+description: "Create, use, and revoke API Tokens so the skillset CLI, MCP server, and direct API clients can authenticate without a browser session."
+---
+
+Tokens give the `skillset` CLI, the MCP server, and direct API clients a way to authenticate without a browser session. A Token is a 256-bit secret tied to the User who minted it, carrying that User's full role. It is shown once at creation and stored only as a SHA-256 hash — there is no way to retrieve the secret after the minting confirmation screen is dismissed. If you lose it, revoke the old Token and mint a new one.
+
+## Minting a Token from the web interface
+
+<Steps>
+  <Step title="Open Settings → Tokens">
+    Sign in to the web interface and navigate to **Settings → Tokens**.
+  </Step>
+  <Step title="Create a new Token">
+    Click **New Token**, enter a descriptive name (e.g. `ci-pipeline` or `laptop-cli`), and confirm.
+  </Step>
+  <Step title="Copy the secret immediately">
+    The secret is displayed exactly once. Copy it to a password manager or your CI secrets store before closing the dialog — the Registry stores only the hash and cannot show the secret again.
+  </Step>
+</Steps>
+
+<Warning>
+  If you navigate away without copying the secret, the Token cannot be recovered. Revoke it and mint a fresh one.
+</Warning>
+
+## Using a Token
+
+<CodeGroup>
+
+```bash CLI login
+# Store the token in the CLI's credential store for subsequent commands
+skillset login --registry https://skills.example.com --token <secret>
+
+# After login, normal commands authenticate automatically
+skillset publish
+skillset install my-skill
+```
+
+```bash Environment variables (CI)
+# Skip interactive login entirely; both variables must be set
+export SKILLSET_REGISTRY=https://skills.example.com
+export SKILLSET_TOKEN=<secret>
+
+# Commands read these automatically — no login step needed
+skillset publish --yes
+skillset install my-skill --json
+```
+
+```http API request
+GET /api/users/me HTTP/1.1
+Host: skills.example.com
+Authorization: Bearer <secret>
+```
+
+</CodeGroup>
+
+<Info>
+  The `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` environment variables are the recommended approach for CI pipelines. Any `skillset` command that would otherwise prompt for credentials reads these variables instead, and `--json` makes every command non-interactive with machine-readable output on stdout and errors on stderr.
+</Info>
+
+## Using a Token with the MCP server
+
+Pass the Token directly to the MCP server at startup, or set `SKILLSET_TOKEN` in the environment where the server runs:
+
+<CodeGroup>
+
+```bash CLI flag
+npx -y @in-org-quicko/skillset-mcp --registry https://skills.example.com --token <secret>
+```
+
+```json MCP client config
+{
+  "mcpServers": {
+    "skillset": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@in-org-quicko/skillset-mcp",
+        "--registry",
+        "https://skills.example.com",
+        "--token",
+        "<secret>"
+      ]
+    }
+  }
+}
+```
+
+```bash Environment variable
+export SKILLSET_TOKEN=<secret>
+npx -y @in-org-quicko/skillset-mcp --registry https://skills.example.com
+```
+
+</CodeGroup>
+
+## Listing your Tokens
+
+The API returns the id, name, and creation timestamp for every Token you hold. The secret is never included in any listing response.
+
+```http
+GET /api/users/me/tokens HTTP/1.1
+Host: skills.example.com
+Authorization: Bearer <secret>
+```
+
+Example response:
+
+```json
+[
+  {
+    "id": "01932b5f-1234-7abc-8def-000000000001",
+    "name": "ci-pipeline",
+    "created_at": "2024-11-01T09:00:00.000Z",
+    "last_used_at": "2024-11-15T14:23:11.000Z"
+  },
+  {
+    "id": "01932b5f-5678-7abc-8def-000000000002",
+    "name": "laptop-cli",
+    "created_at": "2024-11-03T16:45:00.000Z",
+    "last_used_at": null
+  }
+]
+```
+
+## Revoking a Token
+
+You can revoke a Token from the web interface or directly via the API.
+
+<Tabs>
+  <Tab title="Web interface">
+    Navigate to **Settings → Tokens**, find the Token by name, and click **Revoke**. The Token is invalidated immediately — any in-flight request using it after revocation will receive `401 Unauthorized`.
+  </Tab>
+  <Tab title="API">
+    Send a `DELETE` request with the Token's id (from the listing above):
+
+    ```http
+    DELETE /api/users/me/tokens/01932b5f-1234-7abc-8def-000000000001 HTTP/1.1
+    Host: skills.example.com
+    Authorization: Bearer <any-valid-token>
+    ```
+
+    A successful revocation returns `204 No Content`.
+  </Tab>
+</Tabs>
+
+## Security considerations
+
+<Accordion title="Tokens inherit the full role of the issuing User">
+  A Token minted by a Writer can publish and import Resources. A Token minted by an Admin can create and remove Users. There are no scope or permission restrictions beyond the User's existing role. Mint Tokens with the least privileged User account appropriate for the task.
+</Accordion>
+
+<Accordion title="Revoke immediately if compromised">
+  Because Tokens are stored only as hashes, the Registry cannot rotate them for you. If a Token is exposed — in a log file, a public repository, or a leaked environment — revoke it immediately from Settings → Tokens or via `DELETE /api/users/me/tokens/:token_id`, then mint a replacement.
+</Accordion>
+
+<Accordion title="Role changes take effect on the next request">
+  The Registry re-reads the User's current role from the database on every authenticated request (session or Token). If the issuing User's role is changed or the account is removed, the Token's effective permissions change immediately — no re-issue is required and no cached state lingers.
+</Accordion>
+
+<Accordion title="One Token per use case">
+  Name Tokens after where they are used (`ci-pipeline`, `laptop-cli`, `staging-mcp`). This makes it straightforward to identify and revoke a specific credential without affecting others when a machine is decommissioned or a pipeline is retired.
+</Accordion>

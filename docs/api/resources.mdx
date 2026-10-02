@@ -1,0 +1,442 @@
+---
+title: "Resources API: Publish, Browse, and Download Skills"
+sidebarTitle: "Resources"
+description: "All /api/resources endpoints for listing, fetching, publishing, tagging, deleting Resources, and downloading Skill Artifacts from the Skillset catalog."
+---
+
+The Resources API is the core of the Skillset catalog. It covers everything from browsing the public list of Skills to publishing a new version and downloading the Artifact zip. Catalog reads (list, fetch, file access, artifact download) require no authentication; writes and deletes are role-gated.
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/resources` | None | List and search the catalog |
+| GET | `/api/resources/stats` | None | Catalog hero counts |
+| GET | `/api/resources/:kind/by-name/:name` | None | Fetch a Resource by Kind and name |
+| GET | `/api/resources/:id` | None | Fetch a Resource by id |
+| GET | `/api/resources/:id/installs/trend` | None | Daily install trend |
+| PUT | `/api/resources/:kind/:name` | Writer+ | Publish a Resource |
+| PUT | `/api/resources/:id/tags` | Writer+ | Replace a Resource's Tags |
+| DELETE | `/api/resources/:id` | Admin+ | Delete a Resource |
+| GET | `/api/resources/:id/files` | None | List Artifact files |
+| GET | `/api/resources/:id/files/:path` | None | Read one Artifact file |
+| GET | `/api/resources/:id/artifact` | None | Download the Artifact zip |
+
+---
+
+## List the catalog
+
+```
+GET /api/resources
+```
+
+Returns a paginated, optionally filtered and sorted directory of all Resources. No authentication required — any anonymous client can browse the catalog.
+
+### Query parameters
+
+<ParamField query="kind" type="string">
+  Filter by Resource Kind. Accepted value: `skill`.
+</ParamField>
+
+<ParamField query="q" type="string">
+  Full-text search term. Matches against name and description. Falls back to trigram matching when no full-text matches exist, so a mistyped query still finds the right Skill.
+</ParamField>
+
+<ParamField query="tag_id" type="string">
+  Filter to Resources carrying the Tag with this id. Obtain Tag ids from `GET /api/tags`.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number (1-based).
+</ParamField>
+
+<ParamField query="page_size" type="integer" default="10">
+  Records per page. Clamped to the range 1–100; values outside that range are clamped rather than rejected.
+</ParamField>
+
+<ParamField query="sort_by" type="string" default="updated_at">
+  Sort order. One of `installs`, `updated_at`, or `relevance`. When `q` is set the default becomes `relevance`; requesting `relevance` with no `q` falls back to `updated_at`.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  Array of Resource directory entries. Each entry contains:
+  <Expandable>
+    <ResponseField name="id" type="string">UUID of the Resource.</ResponseField>
+    <ResponseField name="kind" type="string">Resource Kind (`skill`).</ResponseField>
+    <ResponseField name="namespace" type="string">Publishing identity — `owner/repo` for Imports, Registry domain for direct publishes.</ResponseField>
+    <ResponseField name="name" type="string">Resource name.</ResponseField>
+    <ResponseField name="description" type="string">Short description.</ResponseField>
+    <ResponseField name="published_by_name" type="string">Snapshot of the publisher's name at publish time.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 timestamp of the last publish.</ResponseField>
+    <ResponseField name="allowed_tools" type="string | null">Tools the Skill claims access to, or `null` if unset.</ResponseField>
+    <ResponseField name="source" type="string">Repository URL for Imports; reverse-DNS Registry domain for direct publishes.</ResponseField>
+    <ResponseField name="installs" type="integer">Total recorded installs (periodically refreshed).</ResponseField>
+    <ResponseField name="tags" type="array">Tags attached to this Resource — each has `id` and `name`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="page" type="integer">Current page.</ResponseField>
+<ResponseField name="page_size" type="integer">Records per page.</ResponseField>
+<ResponseField name="total" type="integer">Total matching Resources across all pages.</ResponseField>
+
+```bash
+curl https://registry.example.com/api/resources?q=typescript&tag_id=018f1234-abcd-7000-8000-000000000001&page=1&page_size=10
+```
+
+---
+
+## Catalog stats
+
+```
+GET /api/resources/stats
+```
+
+Returns unfiltered, registry-wide counts. These are the numbers shown in the catalog hero banner and are independent of any search or filter.
+
+### Response fields
+
+<ResponseField name="skills" type="integer">Total number of Skills in the Registry.</ResponseField>
+<ResponseField name="publishers" type="integer">Number of distinct publishers who have published at least one Skill.</ResponseField>
+<ResponseField name="installs" type="integer">Total install count across all Skills (periodically refreshed).</ResponseField>
+
+```bash
+curl https://registry.example.com/api/resources/stats
+```
+
+---
+
+## Fetch by Kind and name
+
+```
+GET /api/resources/:kind/by-name/:name
+```
+
+Returns the full Resource record (including body) for the given Kind and name.
+
+### Path parameters
+
+<ParamField path="kind" type="string" required>
+  Resource Kind. Currently `skill`.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Resource name.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="namespace" type="string">
+  Namespace to resolve the name within. Omit to use this Registry's own namespace. Required when the same name exists in multiple namespaces — the server returns `409 ambiguous_name` if it cannot resolve unambiguously.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Resource with that Kind and name. |
+| `ambiguous_name` | 409 | The name exists in multiple Namespaces and none is this Registry's own. |
+
+```bash
+curl "https://registry.example.com/api/resources/skill/by-name/build-react-app?namespace=acme/skills"
+```
+
+---
+
+## Fetch by id
+
+```
+GET /api/resources/:id
+```
+
+Returns the full Resource record, including the Skill body, by UUID.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource.
+</ParamField>
+
+```bash
+curl https://registry.example.com/api/resources/018f1234-abcd-7000-8000-000000000001
+```
+
+---
+
+## Install trend
+
+```
+GET /api/resources/:id/installs/trend
+```
+
+Returns a daily install timeseries for the Resource over a trailing window (oldest first).
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="points" type="array">
+  Ordered array of daily counts. Each point has:
+  <Expandable>
+    <ResponseField name="date" type="string">`YYYY-MM-DD` (UTC).</ResponseField>
+    <ResponseField name="count" type="integer">Installs recorded on that day.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Publish a Resource
+
+```
+PUT /api/resources/:kind/:name
+```
+
+Creates or replaces a Resource. This is a full replace — every field is overwritten on republish. Requires **Writer** role or higher.
+
+Publishing a Skill with an Artifact is a two-step process:
+<Steps>
+  <Step title="Send the publish request">
+    Send `PUT /api/resources/skill/:name` with the metadata body. The `files` field declares the Artifact manifest — the paths and byte sizes of every file you intend to upload.
+  </Step>
+  <Step title="Upload Artifact files">
+    For each entry in `upload.files`, PUT the file bytes directly to the presigned `url` using the supplied `method` and `headers`. Files are uploaded straight to object storage — they never pass through the API.
+  </Step>
+</Steps>
+
+### Path parameters
+
+<ParamField path="kind" type="string" required>
+  Resource Kind. Currently `skill`.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Resource name. Must match the `name` field in the Skill's `SKILL.md` frontmatter.
+</ParamField>
+
+### Request body
+
+<ParamField body="description" type="string" required>
+  Short description of the Skill (max length enforced by the shared rules).
+</ParamField>
+
+<ParamField body="body" type="string" required>
+  Full `SKILL.md` Markdown content (the body of the Skill document, excluding frontmatter).
+</ParamField>
+
+<ParamField body="files" type="array" required>
+  Artifact manifest: one entry per file to upload. Each entry has:
+  - `path` (string) — path relative to the Skill root
+  - `size` (integer) — byte size of the file
+</ParamField>
+
+<ParamField body="license" type="string">
+  SPDX license identifier or custom license text.
+</ParamField>
+
+<ParamField body="compatibility" type="string">
+  Agents or environments this Skill is compatible with.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Free-form string-to-string key/value pairs.
+</ParamField>
+
+<ParamField body="allowed_tools" type="string">
+  Comma-separated list of tools the Skill is permitted to invoke.
+</ParamField>
+
+<ParamField body="source" type="string">
+  Repository URL this Skill was imported from. Omit to record this Registry as the source.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="skill" type="object">
+  The Resource as stored — full `SkillSchema` shape including `id`, `kind`, `name`, `description`, `body`, `published_by`, `published_at`, `updated_at`, `installs`, `tags`, `namespace`, `source`, `license`, `compatibility`, `metadata`, and `allowed_tools`.
+</ResponseField>
+
+<ResponseField name="upload" type="object">
+  Presigned upload destinations for the Artifact files.
+  <Expandable>
+    <ResponseField name="files" type="array">
+      One entry per file in the same order as the manifest you sent. Each entry has `path`, `url`, `method` (`PUT`), and `headers` to use when uploading.
+    </ResponseField>
+    <ResponseField name="expires_in_seconds" type="integer">
+      How long the presigned URLs remain valid.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```bash Publish request
+curl -X PUT https://registry.example.com/api/resources/skill/build-react-app \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "A Skill for scaffolding React applications with Vite.",
+    "body": "# Build React App\n\nThis Skill helps you...",
+    "license": "MIT",
+    "files": [
+      { "path": "SKILL.md", "size": 1024 },
+      { "path": "references/react.md", "size": 4096 }
+    ]
+  }'
+```
+```bash Upload an Artifact file
+# Use the url, method, and headers from publish response's upload.files[n]
+curl -X PUT "https://storage.example.com/presigned-url..." \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @SKILL.md
+```
+</CodeGroup>
+
+---
+
+## Set Resource Tags
+
+```
+PUT /api/resources/:id/tags
+```
+
+Fully replaces the Tags on a Resource. The body is the **complete new set** — omitting a Tag that was previously attached removes it. Requires **Writer** role or higher.
+
+Tags are referenced by name; the server resolves each name to an existing catalog Tag or creates one.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource.
+</ParamField>
+
+### Request body
+
+<ParamField body="tags" type="array" required>
+  Array of Tag name strings (e.g. `["typescript", "react"]`). Send an empty array to remove all Tags.
+</ParamField>
+
+### Response
+
+Returns `{ "tags": [{ "id": "...", "name": "..." }, ...] }` — the resolved Tags now attached to the Resource.
+
+```bash
+curl -X PUT https://registry.example.com/api/resources/018f1234-abcd-7000-8000-000000000001/tags \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "tags": ["typescript", "react", "frontend"] }'
+```
+
+---
+
+## Delete a Resource
+
+```
+DELETE /api/resources/:id
+```
+
+Permanently removes the Resource and its stored Artifact. Requires **Admin** role.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource to delete.
+</ParamField>
+
+Returns `204 No Content` on success.
+
+```bash
+curl -X DELETE https://registry.example.com/api/resources/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## List Artifact files
+
+```
+GET /api/resources/:id/files
+```
+
+Returns the manifest of every file stored in the Resource's Artifact — paths and byte sizes, but not content. No authentication required.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="files" type="array">
+  Sorted list of Artifact files. Each entry has:
+  <Expandable>
+    <ResponseField name="path" type="string">Path relative to the Skill root (e.g. `SKILL.md`, `references/react.md`).</ResponseField>
+    <ResponseField name="size" type="integer">Byte size of the file.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl https://registry.example.com/api/resources/018f1234-abcd-7000-8000-000000000001/files
+```
+
+---
+
+## Read one Artifact file
+
+```
+GET /api/resources/:id/files/:path
+```
+
+Returns the raw bytes of one file from the Resource's Artifact. The `Content-Type` header is derived from the file's extension. No authentication required.
+
+<Note>
+Every file (except PDFs) is served with a strict Content-Security-Policy that disables scripts, plugins, and all external fetches. This prevents uploaded HTML, SVG, or XML files from executing against your Registry's origin.
+</Note>
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource.
+</ParamField>
+
+<ParamField path="path" type="string" required>
+  Path within the Artifact, preserving slashes (e.g. `references/java.md`).
+</ParamField>
+
+```bash
+curl https://registry.example.com/api/resources/018f1234-abcd-7000-8000-000000000001/files/SKILL.md
+```
+
+---
+
+## Download the Artifact zip
+
+```
+GET /api/resources/:id/artifact
+```
+
+Assembles the full Artifact on demand as a zip archive and returns it. Records one install event per unique client per day (deduplicated by IP and User-Agent hash). No authentication required.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Resource.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="source" type="string" default="web">
+  Caller identity for install analytics. One of `web`, `cli`, or `mcp`. Unrecognised or absent values are treated as `web` so old clients continue to work.
+</ParamField>
+
+Returns a `application/zip` stream with `Content-Disposition: attachment; filename="<name>.zip"`.
+
+```bash
+# CLI install
+curl -o build-react-app.zip \
+  "https://registry.example.com/api/resources/018f1234-abcd-7000-8000-000000000001/artifact?source=cli"
+```

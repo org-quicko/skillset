@@ -1,0 +1,139 @@
+---
+title: "Deploy Skillset with Docker Compose: Complete Guide"
+sidebarTitle: "Docker"
+description: "Run a Skillset Registry with Docker Compose: set required env vars, start the app and Postgres, create the first Superadmin, and harden for production use."
+---
+
+Docker Compose is the fastest way to stand up a Skillset Registry. The official `docker-compose.yml` provisions two services — the `app` container running the `labsatquicko/skillset` image and a `postgres` container running `postgres:18-alpine` — and a named volume that persists database state across restarts. Object storage for Skill and Plugin Artifacts is handled externally; the `.env.example` defaults point at a local MinIO instance for development.
+
+## Prerequisites
+
+- Docker Engine 24+ with the Compose plugin (`docker compose`, not legacy `docker-compose`)
+- A terminal with access to the host where the Registry will run
+- An S3-compatible bucket (MinIO works for local dev; a real AWS S3 or compatible service for production)
+
+## Setup
+
+<Steps>
+
+### Clone and copy the environment file
+
+```bash
+git clone https://github.com/org-quicko/skillset.git
+cd skillset
+cp .env.example .env
+```
+
+The `.env.example` is pre-populated with values that work against the MinIO defaults for local development. Open `.env` and fill in the required variables before proceeding.
+
+### Set the required environment variables
+
+Open `.env` in an editor and provide values for every required variable. See [Configuration](/deployment/configuration) for the full reference; the five you must set before first boot are:
+
+| Variable | What to set |
+|---|---|
+| `BETTER_AUTH_SECRET` | Run `openssl rand -base64 32` and paste the output |
+| `PUBLIC_URL` | Absolute URL the Registry is reachable at, e.g. `http://localhost:3000` |
+| `STORAGE_BUCKET` | Name of the S3 bucket Artifact files are stored in |
+| `POSTGRES_USER` | Postgres superuser username for the managed container |
+| `POSTGRES_PASSWORD` | Postgres superuser password for the managed container |
+| `POSTGRES_DB` | Database name for the managed container |
+| `DATABASE_URL` | Must match the three `POSTGRES_*` values above |
+
+<Warning>
+The app refuses to start if `BETTER_AUTH_SECRET`, `PUBLIC_URL`, `STORAGE_BUCKET`, or `DATABASE_URL` is missing. A missing secret would silently invalidate every session on restart, so there is no generated fallback.
+</Warning>
+
+### Start the stack
+
+```bash
+docker compose up -d
+```
+
+The `app` service declares a `depends_on` health check against `postgres`, so it will not receive traffic until Postgres passes a `pg_isready` probe. On a fresh database the app then runs all migrations — including creating the `pg_trgm` extension needed for fuzzy search — before serving the API.
+
+### Create the Superadmin account
+
+On first boot, before any user has registered, Skillset redirects to a setup wizard where you create the **Superadmin** account. Open the `PUBLIC_URL` in a browser and complete the form. The Superadmin is permanent and unique — only one exists per Registry at any time.
+
+<Note>
+The Superadmin is the only role that cannot be removed or demoted. Keep the credentials safe and consider creating a named Admin account for day-to-day administration.
+</Note>
+
+### Verify the stack is healthy
+
+```bash
+docker compose ps
+```
+
+Both `app` and `postgres` should show status `running (healthy)`. The API exposes a health endpoint you can probe directly:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+</Steps>
+
+## The `docker-compose.yml` in full
+
+The compose file shipped with the repository provisions the two services and the persistent volume:
+
+```yaml
+services:
+  app:
+    image: labsatquicko/skillset
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER must be set} -d ${POSTGRES_DB:?POSTGRES_DB must be set}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres-data:
+```
+
+A few things to note:
+
+- **`app` waits for Postgres**: the `depends_on` with `condition: service_healthy` means the `app` container only starts once Postgres is accepting connections. This prevents migration races on slow hardware.
+- **Port is configurable**: `PORT` defaults to `3000` if unset in `.env`.
+- **`POSTGRES_*` are required**: Docker Compose will refuse to start if any of the three Postgres variables are missing — they carry the `:?` mandatory syntax.
+- **MinIO is not in `docker-compose.yml`**: for local development the `.env.example` points `STORAGE_ENDPOINT` and `STORAGE_PUBLIC_ENDPOINT` at a separately-run MinIO instance. See [Storage](/deployment/storage) for details.
+
+## The container image
+
+The `labsatquicko/skillset` image is built from the repository's multi-stage `Dockerfile`. It runs as the non-root `bun` user and ships a built-in health check that calls `GET /api/health` via Bun's own HTTP client — no `curl` is needed or included in the image.
+
+The image bundles both the API server (`apps/api`) and the compiled web interface (`apps/web/dist`), so the Registry's API and UI are served from the same origin and the same container.
+
+## Production considerations
+
+<Tip>
+When running behind a load balancer or reverse proxy, set `TRUSTED_PROXY_IPS` to the proxy's address. Without this, every request appears to come from the proxy's IP — login rate limiting falls back to a single shared bucket and install counts stop being deduplicated per client.
+</Tip>
+
+For a production deployment, make the following changes to your `.env`:
+
+- **Use real S3**: replace the MinIO `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID`, and `STORAGE_SECRET_ACCESS_KEY` with your actual S3 configuration, or unset the key variables entirely to use the AWS default credential chain (instance/task role).
+- **Use an external Postgres**: swap `DATABASE_URL` to point at a managed database (RDS, Cloud SQL, etc.) and remove or comment out the `postgres` service from the compose file.
+- **Set `TRUSTED_PROXY_IPS`**: add your load balancer or reverse proxy address.
+- **Set a strong `BETTER_AUTH_SECRET`**: generate one fresh with `openssl rand -base64 32` — never reuse a development secret in production.
+
+See the [Configuration reference](/deployment/configuration) for all available variables and their validation rules.

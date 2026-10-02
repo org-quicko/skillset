@@ -1,0 +1,140 @@
+---
+title: "MCP Servers: Register Tool Pointers in the Registry"
+sidebarTitle: "MCP Servers"
+description: "MCP Servers are pure metadata — no bytes stored. Covers server.json payload shape, reverse-DNS naming, and how install counts work for this Resource Kind."
+---
+
+MCP Server resources let your team register and discover Model Context Protocol servers through the same Skillset catalog used for Skills and Plugins — without the Registry ever storing the server's own files. This page explains the MCP Server payload shape, the naming rules the upstream MCP specification fixes, how to publish and install one, and what install counts mean for this Kind.
+
+## What is an MCP Server resource?
+
+An MCP Server is a pure-metadata Resource. The Registry stores no bytes for it — no Artifact, no files, no zip. What it stores is a `server.json`-shaped record that points at where the server actually lives: either a package in a public registry or a remote URL.
+
+This mirrors the design of the public MCP registry: Skillset is a pointer, not a host.
+
+<Note>
+  Because the Registry stores no bytes for MCP Servers, they are never listed in the Marketplace (`.claude-plugin/marketplace.json`) and cannot be imported from a Git repository. Import is files-only.
+</Note>
+
+## Payload shape
+
+An MCP Server's payload is a `server.json`-shaped record with exactly one of two keys at the top level: `packages` or `remotes`.
+
+<Tabs>
+  <Tab title="packages">
+    A list of package-based MCP server definitions. Each entry names a package in a supported registry, plus the transport, arguments, and environment variables the agent needs to launch it.
+
+    ```json
+    {
+      "packages": [
+        {
+          "registry_name": "npm",
+          "name": "@modelcontextprotocol/server-filesystem",
+          "version": "latest",
+          "package_arguments": [],
+          "environment_variables": [
+            { "name": "ALLOWED_PATHS", "description": "Comma-separated allowed paths" }
+          ]
+        }
+      ]
+    }
+    ```
+
+    Supported registries: `npm`, `pypi`, `oci`, `nuget`, `cargo`, `mcpb`.
+  </Tab>
+  <Tab title="remotes">
+    A list of URL-based MCP server definitions. Each entry names a URL and the transport the agent uses to reach it.
+
+    ```json
+    {
+      "remotes": [
+        {
+          "transport_type": "sse",
+          "url": "https://mcp.example.com/sse"
+        }
+      ]
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Naming rules
+
+MCP Server names follow reverse-DNS format with exactly one slash, as fixed by the upstream MCP specification. The name is capped at 100 characters and its description at 100 characters.
+
+```
+com.example/my-server
+io.github.acme/filesystem
+```
+
+<Warning>
+  MCP Server naming and description rules differ from Skill rules. A Skill's `name` is lowercase alphanumerics and hyphens (max 64 chars); an MCP Server's `name` is reverse-DNS with a single slash (max 100 chars). The two are not interchangeable.
+</Warning>
+
+## Publishing an MCP Server
+
+MCP Servers are published through the web interface. Because the payload is a structured JSON record rather than a file bundle, the CLI `publish` command (which uploads files) does not apply.
+
+<Steps>
+  <Step title="Open the publish screen">
+    Navigate to the web interface and select **Publish → MCP Server**.
+  </Step>
+  <Step title="Paste the server.json payload">
+    Enter the reverse-DNS name, a description (max 100 chars), and paste your `server.json` payload into the editor. The interface validates the shape before submission.
+  </Step>
+  <Step title="Save">
+    The MCP Server appears in the catalog immediately, visible to anyone browsing the Registry — no authentication required to read.
+  </Step>
+</Steps>
+
+## Installing an MCP Server
+
+`skillset install` handles MCP Server resources as well as Skills. When the installed Resource is an MCP Server, the CLI writes or merges the server's configuration into the project's `.mcp.json` file rather than writing files to `.agents/skills/`.
+
+```bash
+# Install an MCP Server by name
+skillset install com.example/my-server
+```
+
+<Note>
+  MCP Server installation is **project scope only**. There is no `--scope user` option for MCP Servers — they are always installed into the current project's `.mcp.json`.
+</Note>
+
+### Install counts
+
+For MCP Servers, an Install is counted when the web interface's config reveal button is clicked (the user views the configuration to copy it) or when the CLI writes the config. This is different from Skills, where an Install is counted on every Artifact download.
+
+<Warning>
+  Install counts are **not comparable across Kinds**. An MCP Server's install count reflects config-reveal events; a Skill's reflects Artifact downloads. Never compare or rank Resources across Kinds by install count.
+</Warning>
+
+## What MCP Servers are not
+
+| Capability | MCP Server |
+|---|---|
+| Stored files / Artifact | ✗ No bytes stored |
+| Import from Git repository | ✗ Not supported |
+| Marketplace listing | ✗ Not listed |
+| Project-scope install | ✓ `.mcp.json` merge |
+| User-scope install | ✗ Not supported |
+| CLI publish | ✗ Web interface only |
+| Tag filtering | ✓ Same catalog |
+
+## Browsing MCP Servers
+
+MCP Server resources appear in the same catalog as Skills and Plugins. Use the **Kind** filter to narrow the listing.
+
+```http
+GET /api/resources?kind=mcp-server
+```
+
+```bash
+# List everything — Skills, MCP Servers, and Plugins
+skillset search
+```
+
+<Note>
+  `skillset search` always returns **Skills only** — the CLI sends `kind=skill` with every request and does not accept a `--kind` flag. To browse MCP Servers from the command line, call the API endpoint above directly.
+</Note>
+
+The `GET /api/resources?kind=mcp-server` endpoint returns MCP Server entries in the same `SkillDirectoryPage` shape as other Resources. No authentication is required.

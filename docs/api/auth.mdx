@@ -1,0 +1,96 @@
+---
+title: "Auth API: Identity Providers and Session Endpoints"
+sidebarTitle: "Auth"
+description: "The /api/auth endpoints for listing enabled Identity Providers and the Better Auth session, OAuth sign-in, sign-out, and callback routes."
+---
+
+The Auth API covers two separate concerns: a single endpoint that tells the login page which Identity Providers are enabled, and the full set of session management routes owned by Better Auth. This page documents both, and explains the OAuth flow that allows users to sign in with Google Workspace, Microsoft Entra, or GitHub OAuth.
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/auth/providers` | None | List enabled Identity Providers |
+| ALL | `/api/auth/*` | Varies | Better Auth session, sign-in, sign-out, and OAuth callbacks |
+
+---
+
+## List enabled Identity Providers
+
+```
+GET /api/auth/providers
+```
+
+Returns the Identity Providers that are currently enabled on this Registry. No authentication required — this endpoint is called by the login page before a user has signed in, to know which sign-in buttons to display.
+
+The response includes only enabled providers and contains no secrets. A provider that has been configured but not enabled is absent from the list.
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  Enabled Identity Providers. Each entry has:
+  <Expandable>
+    <ResponseField name="kind" type="string">
+      Provider type. One of `google`, `microsoft`, or `github`.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Human-readable display name (e.g. `"Google Workspace"`, `"Microsoft Entra"`, `"GitHub OAuth"`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl https://registry.example.com/api/auth/providers
+```
+
+```json
+{
+  "items": [
+    { "kind": "google", "name": "Google Workspace" },
+    { "kind": "github", "name": "GitHub OAuth" }
+  ]
+}
+```
+
+---
+
+## Better Auth routes (`/api/auth/*`)
+
+All other routes under `/api/auth/` are handled by [Better Auth](https://better-auth.com). These include:
+
+- **Sign in** — `POST /api/auth/sign-in/email` (password-based)
+- **Sign out** — `POST /api/auth/sign-out`
+- **OAuth redirect** — `GET /api/auth/sign-in/:provider` — initiates the OAuth dance
+- **OAuth callback** — `GET /api/auth/callback/:kind` — receives the authorization code from the Identity Provider
+
+The callback URL you must register in each provider's developer console is:
+
+```
+<PUBLIC_URL>/api/auth/callback/<kind>
+```
+
+Where `<kind>` is `google`, `microsoft`, or `github` depending on the provider.
+
+### OAuth sign-in flow
+
+<Steps>
+  <Step title="Initiate">
+    The user clicks a sign-in button. The login page navigates them to `GET /api/auth/sign-in/:provider`. Better Auth builds the authorization URL and redirects the browser to the Identity Provider.
+  </Step>
+  <Step title="Provider login">
+    The user authenticates with the Identity Provider (Google Workspace, Microsoft Entra, or GitHub). On success, the provider redirects the browser back to `<PUBLIC_URL>/api/auth/callback/<kind>` with an authorization code.
+  </Step>
+  <Step title="Callback">
+    Better Auth exchanges the code for tokens, creates or updates the user's account, and sets a session cookie. The browser is redirected to the web interface.
+  </Step>
+</Steps>
+
+<Note>
+Password-based login is always available regardless of Identity Provider configuration. It is the recovery path if a provider's client secret expires.
+</Note>
+
+<Note>
+For Google Workspace and Microsoft Entra, a provider cannot be enabled without a permitted Workspace domain or Entra tenant ID. Any user whose account matches the configured domain or tenant automatically gets a Reader account on first sign-in.
+</Note>
+
+For detailed Identity Provider setup instructions, see the [Identity Providers configuration guide](/auth/identity-providers).

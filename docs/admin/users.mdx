@@ -1,0 +1,201 @@
+---
+title: "Managing Users, Roles, and Tokens in Your Registry"
+sidebarTitle: "Users"
+description: "Create, update, and remove Users in your Registry. Covers all four roles — reader, writer, admin, superadmin — and how each is assigned and managed."
+---
+
+The Users system in Skillset controls who can access your Registry and what they are allowed to do. Every person is identified by their email address — two logins that assert the same address are the same User regardless of which Identity Provider vouched for them. This page covers how to create Users, assign and change roles, remove Users, and how Users manage their own profiles.
+
+## Roles
+
+Roles are cumulative — each level includes all the permissions of the one below it.
+
+| Role | Browse catalog | Publish resources | Manage readers & writers | Manage admins |
+|---|---|---|---|---|
+| **reader** | ✓ | — | — | — |
+| **writer** | ✓ | ✓ | — | — |
+| **admin** | ✓ | ✓ | ✓ | — |
+| **superadmin** | ✓ | ✓ | ✓ | ✓ |
+
+<Note>
+  Browsing and reading the catalog requires no authentication at all — catalog reads are fully public. Roles govern publishing, administration, and anything that changes Registry state.
+</Note>
+
+### The Superadmin
+
+The Superadmin is the first User to complete signup after a Registry is deployed. There is exactly one Superadmin per Registry, and the role is **permanent** — it can never be transferred, reassigned, or removed. The Superadmin can do everything an Admin can, and additionally create and manage Admins.
+
+<Warning>
+  The `superadmin` role cannot be assigned through the API or the Settings interface. It is set exactly once, by the `/setup` flow during initial Registry provisioning.
+</Warning>
+
+## Creating Users
+
+Admins and the Superadmin can create new Users from **Settings → Users → New User**, or via the API.
+
+<Steps>
+  <Step title="Open Settings → Users">
+    Navigate to **Settings → Users** in the web interface and click **New User**.
+  </Step>
+  <Step title="Fill in the details">
+    Provide the new User's first name, last name, email address, and role. The role must be one of `reader`, `writer`, or `admin` — `superadmin` cannot be assigned here.
+  </Step>
+  <Step title="Share the generated password">
+    On success, the response includes a one-time `initial_password`. This value is shown once and never stored — copy it and share it with the new User through a secure channel.
+  </Step>
+  <Step title="User changes their password on first login">
+    The new User will be required to change their password on first login. The `must_change_password` flag is set to `true` on all admin-created accounts, and is cleared only after the User successfully calls the change-password endpoint.
+  </Step>
+</Steps>
+
+### API
+
+<CodeGroup>
+```bash Create a User
+curl -X POST https://your-registry.example.com/api/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@example.com",
+    "role": "writer"
+  }'
+```
+
+```json Response (201)
+{
+  "user": {
+    "id": "01944b3e-1234-7000-abcd-000000000001",
+    "email": "ada@example.com",
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "role": "writer",
+    "must_change_password": true,
+    "created_at": "2025-01-15T09:00:00.000Z"
+  },
+  "initial_password": "G7kPqR2mXvLs"
+}
+```
+</CodeGroup>
+
+<Warning>
+  The `initial_password` is returned only in this response. It is never stored and cannot be recovered. If it is lost, an Admin must delete and recreate the User, or the User must reset their password via the login page if email recovery is configured.
+</Warning>
+
+The request body accepts the following fields:
+
+<ParamField body="first_name" type="string" required>
+  The User's first name. Must be at least one non-whitespace character.
+</ParamField>
+
+<ParamField body="last_name" type="string" required>
+  The User's last name. Must be at least one non-whitespace character.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  The User's email address. Must be unique in the Registry — this is the identity. Cannot be changed after creation.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  One of `reader`, `writer`, or `admin`. The `superadmin` role cannot be assigned via this endpoint.
+</ParamField>
+
+## Changing a User's Role
+
+Admins can change the role of any User except the Superadmin. The change takes effect on the target User's next request — the role is re-read from the database on every request and is never cached in a session or Token.
+
+From the web interface, go to **Settings → Users**, find the User, and select a new role from the role picker.
+
+### API
+
+```bash
+curl -X PATCH https://your-registry.example.com/api/users/<user_id> \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+```
+
+<Note>
+  An Admin cannot change their own role through this endpoint — returns `422`. The Superadmin's role cannot be changed by anyone — returns `409`.
+</Note>
+
+## Removing Users
+
+Admins can remove any User except the Superadmin. Removing a User ends their access immediately — all their sessions are invalidated and their Tokens are deleted. Resources they published remain in the catalog; the published-by snapshot on each Resource is preserved even after the account is gone.
+
+From the web interface, go to **Settings → Users**, open the User's record, and click **Remove User**.
+
+### API
+
+```bash
+curl -X DELETE https://your-registry.example.com/api/users/<user_id> \
+  -H "Authorization: Bearer <token>"
+```
+
+A successful deletion returns `204 No Content`. Attempting to remove yourself returns `422`. Attempting to remove the Superadmin returns `409`.
+
+## User Profile and Password
+
+Every User can update their own name and change their own password from **Settings → Profile**, or via the API.
+
+<Tabs>
+  <Tab title="Update name">
+    ```bash
+    curl -X PATCH https://your-registry.example.com/api/users/me \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{"last_name": "Lovelace-Byron"}'
+    ```
+
+    Send `first_name`, `last_name`, or both. At least one field is required.
+
+    <Note>
+      The email address is the identity of a User in Skillset and **cannot be changed** — not even by an Admin.
+    </Note>
+  </Tab>
+  <Tab title="Change password">
+    ```bash
+    curl -X PUT https://your-registry.example.com/api/users/me/password \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "current_password": "the-generated-one",
+        "new_password": "a-new-password-of-my-choice"
+      }'
+    ```
+
+    The `new_password` must be at least 12 characters. A successful change clears `must_change_password` and revokes all other active sessions for the User (the session making the request is kept alive). Tokens are not revoked — manage them individually from **Settings → Tokens**.
+  </Tab>
+</Tabs>
+
+<ParamField body="current_password" type="string" required>
+  The User's current password. Must match what is stored — returns `422` with field `current_password` if it does not.
+</ParamField>
+
+<ParamField body="new_password" type="string" required>
+  The replacement password. Must be at least 12 characters.
+</ParamField>
+
+## SSO and Automatic Account Creation
+
+When a User signs in via a configured Identity Provider (Google Workspace, Microsoft Entra, or GitHub OAuth) for the first time, a `reader` account is created automatically using the email address that the Identity Provider asserted. The new User can be promoted to `writer` or `admin` by an Admin after their first login.
+
+<Info>
+  An Identity Provider and a Git Integration are separate registrations — a GitHub Identity Provider for login and a GitHub Integration for Import are configured and managed independently, and neither knows about the other.
+</Info>
+
+## API Reference
+
+| Method | Path | Role required | Description |
+|---|---|---|---|
+| `GET` | `/api/users` | admin | List all Users, paginated (50 per page, newest first) |
+| `POST` | `/api/users` | admin | Create a User with a generated initial password |
+| `GET` | `/api/users/me` | any authenticated | Get the current User's profile |
+| `PATCH` | `/api/users/me` | any authenticated | Update own first or last name |
+| `PUT` | `/api/users/me/password` | any authenticated | Change own password |
+| `GET` | `/api/users/me/tokens` | any authenticated | List own Tokens, newest first |
+| `POST` | `/api/users/me/tokens` | any authenticated | Mint a new Token |
+| `DELETE` | `/api/users/me/tokens/:token_id` | any authenticated | Delete a Token |
+| `PATCH` | `/api/users/:user_id` | admin | Change another User's role |
+| `DELETE` | `/api/users/:user_id` | admin | Remove a User |

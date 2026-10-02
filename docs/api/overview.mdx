@@ -1,0 +1,182 @@
+---
+title: "Skillset REST API: Base URL, Auth, and Conventions"
+sidebarTitle: "Overview"
+description: "Base URL, authentication methods, request format, pagination envelope, common error codes, and rate-limiting rules for the Skillset REST API."
+---
+
+The Skillset REST API is a JSON over HTTP interface that backs the web interface, CLI, and MCP server. Every endpoint lives under `<PUBLIC_URL>/api`, where `PUBLIC_URL` is the value you set in your Registry's environment. This page explains the conventions that apply to every route: how to authenticate, what a paginated list looks like, and how errors are shaped.
+
+## Base URL
+
+All endpoints are relative to your Registry's origin:
+
+```
+<PUBLIC_URL>/api
+```
+
+For a local Docker Compose install, `PUBLIC_URL` defaults to `http://localhost:3000`, so the base URL is:
+
+```
+http://localhost:3000/api
+```
+
+## Authentication
+
+<Tabs>
+  <Tab title="No auth needed">
+    Catalog reads require **no authentication**. Any anonymous HTTP client can call:
+
+    - `GET /api/resources` — browse the catalog
+    - `GET /api/resources/stats` — hero counts
+    - `GET /api/resources/:kind/by-name/:name` — fetch a Resource by name
+    - `GET /api/resources/:id` — fetch a Resource by id
+    - `GET /api/resources/:id/installs/trend` — install trend
+    - `GET /api/resources/:id/files` — list Artifact files
+    - `GET /api/resources/:id/files/:path` — read one Artifact file
+    - `GET /api/resources/:id/artifact` — download the zip
+    - `GET /api/tags` — list Tags
+    - `GET /api/auth/providers` — list enabled Identity Providers
+  </Tab>
+  <Tab title="Bearer Token">
+    All write and admin endpoints require a credential. Pass your Token as a Bearer header:
+
+    ```http
+    Authorization: Bearer <token>
+    ```
+
+    Mint a Token from **Settings → Tokens** in the web interface, or via [`POST /api/users/me/tokens`](/api/users#mint-a-token). The secret is shown exactly once; store it immediately.
+  </Tab>
+  <Tab title="Session Cookie">
+    If you are already signed in to the web interface, the session cookie is accepted on every endpoint that accepts a Bearer Token. Nothing extra is needed — the browser attaches it automatically.
+  </Tab>
+</Tabs>
+
+### Role requirements
+
+Every authenticated endpoint checks the caller's role before executing:
+
+| Role | Can do |
+|---|---|
+| **Reader** | Browse and install — catalog reads need no auth at all |
+| **Writer** | Publish, import, and manage own Tokens and Connections |
+| **Admin** | Everything a Writer can do, plus manage Users, Tags, Integrations, and Submissions |
+| **Superadmin** | First user; permanent Admin whose account cannot be altered |
+
+<Note>
+A user whose generated password has not yet been changed is blocked from all endpoints except `GET /api/users/me` and `PUT /api/users/me/password`. Both of those endpoints work regardless of `must_change_password`.
+</Note>
+
+## Request format
+
+All request bodies must be JSON. Include the content-type header on every request that carries a body:
+
+```http
+Content-Type: application/json
+```
+
+## Pagination
+
+List endpoints that return many rows accept a `page` query parameter and respond with a pagination envelope. Some endpoints also accept `page_size` to control the number of results per page; others use a fixed page size. See each endpoint's documentation for the exact parameters accepted.
+
+| Field | Type | Description |
+|---|---|---|
+| `items` | array | The records for this page |
+| `page` | integer | The current page (1-based) |
+| `page_size` | integer | Records per page |
+| `total` | integer | Total matching records across all pages |
+
+**Example:**
+
+```
+GET /api/resources?page=2&page_size=20
+```
+
+```json
+{
+  "items": [...],
+  "page": 2,
+  "page_size": 20,
+  "total": 83
+}
+```
+
+## Error format
+
+Every error response uses the same JSON envelope:
+
+```json
+{
+  "error": {
+    "code": "<error_code>",
+    "message": "<human-readable message>",
+    "field": "<field name>"
+  }
+}
+```
+
+The `field` key is only present when the error is attributable to a specific request field (for example, a validation failure on `email`).
+
+### Common error codes
+
+| Code | Status | When it occurs |
+|---|---|---|
+| `unauthenticated` | 401 | No valid session or Token was presented |
+| `forbidden` | 403 | The caller's role is too low for this action |
+| `password_change_required` | 403 | Generated password must be replaced before continuing |
+| `validation_failed` | 400 | A request field failed validation |
+| `not_found` | 404 | The requested resource does not exist |
+| `ambiguous_name` | 409 | A bare name matched Resources in more than one Namespace |
+| `artifact_missing` | 404 | The Resource exists but its Artifact was never uploaded |
+| `artifact_too_large` | 413 | The stored Artifact exceeds the allowed size |
+| `email_taken` | 409 | A User with that email already exists |
+| `superadmin_protected` | 409 | The Superadmin's account cannot be changed or removed |
+| `integration_in_use` | 409 | An Integration cannot be deleted while Connections reference it |
+| `integration_not_configured` | 409 | No Integration exists for the requested Git Provider |
+| `not_connected` | 409 | The writer has no Connection for the requested provider |
+| `tag_name_conflict` | 409 | A Tag with that name already exists |
+| `already_published` | 409 | A Submission's target `(kind, namespace, name)` is already in the Registry |
+| `source_required` | 400 | A Submission must include a `source` repository URL |
+| `request_rejected` | 4xx | The request was rejected by the framework (e.g. unsupported method or malformed body) |
+| `internal_error` | 500 | An unexpected server-side failure |
+
+## Rate limiting
+
+Requests are rate-limited per client IP using a fixed window. The default limit is **600 requests per 60 seconds**. Two endpoint groups have tighter per-path limits:
+
+| Path prefix | Limit |
+|---|---|
+| `/api/resources` | 300 requests per 60 seconds |
+| `/api/imports` | 60 requests per 60 seconds |
+
+When a load balancer or proxy sits in front of the Registry, set `TRUSTED_PROXY_IPS` in your environment to the proxy's address so the real client IP is read from `X-Forwarded-For` instead of the socket. Leaving it empty behind a proxy collapses all traffic into one shared rate-limit bucket.
+
+When a limit is exceeded, the API responds with `429 rate_limited` and a `retry-after` header indicating how many seconds to wait before retrying.
+
+## Endpoint groups
+
+<CardGroup cols={2}>
+  <Card title="Resources" icon="box" href="/api/resources">
+    Publish, browse, download, and delete Resources. The core catalog API.
+  </Card>
+  <Card title="Tags" icon="tag" href="/api/tags">
+    Browse the Tag catalog and rename Tags (admin).
+  </Card>
+  <Card title="Users" icon="user" href="/api/users">
+    Manage accounts, roles, passwords, and personal Tokens.
+  </Card>
+  <Card title="Auth" icon="lock" href="/api/auth">
+    Identity Provider list and the Better Auth session endpoints.
+  </Card>
+  <Card title="Imports" icon="arrow-down-to-line" href="/api/imports">
+    Read Skills from Git repositories through configured Integrations.
+  </Card>
+  <Card title="Integrations" icon="plug" href="/api/integrations">
+    Register and manage Git Provider app credentials (admin).
+  </Card>
+  <Card title="Connections" icon="link" href="/api/connections">
+    Grant the Registry personal access to your Git repositories.
+  </Card>
+  <Card title="Submissions" icon="inbox" href="/api/submissions">
+    Submit community-sourced Resources and approve or reject them (admin).
+  </Card>
+</CardGroup>

@@ -1,0 +1,211 @@
+---
+title: "Skillset Environment Variable Configuration Reference"
+sidebarTitle: "Configuration"
+description: "Every environment variable Skillset reads on startup: validation rules, defaults, and guidance for generating required secrets and configuring storage."
+---
+
+Skillset reads its configuration exclusively from environment variables at startup. Required variables are validated before any request is handled — a misconfiguration surfaces immediately as a startup error rather than as a runtime failure on the first request that needs it. This page documents every variable from `.env.example` and the `loadConfig` function in `apps/api/src/config.ts`.
+
+<Note>
+Copy `.env.example` to `.env` before first boot. The example file is pre-populated with values that work against the local MinIO and Postgres containers, so local development requires only filling in `BETTER_AUTH_SECRET` and `PUBLIC_URL`.
+</Note>
+
+## Required variables
+
+These variables must be set. The app **will not start** if any of them is missing or invalid.
+
+<ParamField body="DATABASE_URL" type="string" required>
+  Postgres connection string in `postgres://user:password@host:port/dbname` form.
+
+  For the Docker Compose stack this must match `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`. Do not add a `search_path` parameter — all queries are schema-qualified at runtime from `DB_SCHEMA` instead.
+
+  ```
+  DATABASE_URL=postgres://postgres:postgres@postgres:5432/skill_registry
+  ```
+</ParamField>
+
+<ParamField body="BETTER_AUTH_SECRET" type="string" required>
+  Signing secret for session tokens. Must be set explicitly — the app refuses to start without one because a randomly generated fallback would silently invalidate every active session on restart.
+
+  Generate a strong secret with:
+
+  ```bash
+  openssl rand -base64 32
+  ```
+</ParamField>
+
+<ParamField body="PUBLIC_URL" type="string" required>
+  Absolute base URL the Registry is reachable at, with no trailing slash. Every session cookie boundary and OAuth redirect URI is derived from this value.
+
+  **Validation**: must be a well-formed `http://` or `https://` URL. The app strips any trailing slash before storing the value. A value that is not an absolute HTTP(S) URL causes a startup failure.
+
+  ```
+  PUBLIC_URL=https://skills.example.com
+  ```
+
+  Register the OAuth redirect URI in each Identity Provider's console as `<PUBLIC_URL>/api/auth/callback/<kind>`, where `<kind>` is `google`, `microsoft`, or `github`.
+</ParamField>
+
+<ParamField body="STORAGE_BUCKET" type="string" required>
+  Name of the S3 (or S3-compatible) bucket where Skill and Plugin Artifacts are stored. Publishing presigns an upload URL against this bucket, so the app refuses to start without a value.
+
+  ```
+  STORAGE_BUCKET=skill-registry
+  ```
+</ParamField>
+
+<ParamField body="POSTGRES_USER" type="string" required>
+  Postgres superuser username passed to the `postgres` Docker Compose service. Must match the username in `DATABASE_URL`.
+
+  ```
+  POSTGRES_USER=postgres
+  ```
+</ParamField>
+
+<ParamField body="POSTGRES_PASSWORD" type="string" required>
+  Postgres superuser password passed to the `postgres` Docker Compose service. Must match the password in `DATABASE_URL`.
+
+  ```
+  POSTGRES_PASSWORD=postgres
+  ```
+</ParamField>
+
+<ParamField body="POSTGRES_DB" type="string" required>
+  Database name passed to the `postgres` Docker Compose service. Must match the database name in `DATABASE_URL`.
+
+  ```
+  POSTGRES_DB=skill_registry
+  ```
+</ParamField>
+
+## Optional variables
+
+These variables have defaults or are only needed in specific deployments.
+
+### Server
+
+<ParamField body="PORT" type="number" default="3000">
+  TCP port the API server listens on.
+
+  **Validation**: must be a valid port number (integer between 1 and 65535). An invalid value causes a startup failure.
+
+  ```
+  PORT=3000
+  ```
+</ParamField>
+
+<ParamField body="LOG_LEVEL" type="string" default="info">
+  Logging verbosity. Accepts standard log-level strings: `trace`, `debug`, `info`, `warn`, `error`, `fatal`.
+
+  ```
+  LOG_LEVEL=info
+  ```
+</ParamField>
+
+<ParamField body="TRUSTED_PROXY_IPS" type="string" default="">
+  Comma-separated list of proxy IP addresses the app sits behind.
+
+  When empty (the default), the client address is read directly from the socket and the `x-forwarded-for` header is ignored entirely. This is the safe default: it keeps login rate limiting and `sessions.ip_address` accurate when there is no proxy.
+
+  Set this to your load balancer's IP when running behind one. Without it, every request appears to originate from the proxy — rate limiting falls back to a single shared bucket and install counts stop being deduplicated per client.
+
+  ```
+  TRUSTED_PROXY_IPS=10.0.0.1,10.0.0.2
+  ```
+
+  <Warning>
+    Leaving this empty behind a proxy is not a security problem, but it does degrade rate limiting and install analytics. Set it to your load balancer's address in production.
+  </Warning>
+</ParamField>
+
+### Database
+
+<ParamField body="DB_SCHEMA" type="string" default="public">
+  Postgres schema all tables, enums, and views are created in and queried against.
+
+  Use this when the database is shared with other applications — give each application its own schema rather than its own database.
+
+  **Validation**: must be a plain lowercase Postgres identifier (`[a-z_][a-z0-9_$]*`) of at most 63 characters. Uppercase letters are rejected because Kysely quotes the identifier — `DB_SCHEMA=Registry` would silently become a different schema from anything unquoted resolves to. The `pg_` prefix is reserved by Postgres and is also rejected.
+
+  The schema is created on startup if it does not already exist. Changing this value after first boot points the app at an empty schema and re-runs all migrations against it; no existing data is moved.
+
+  ```
+  DB_SCHEMA=skillset
+  ```
+
+  <Note>
+    Do not add `search_path` to `DATABASE_URL` to achieve the same effect. All queries and migrations are schema-qualified from this single variable — `DATABASE_URL` needs no `search_path` parameter.
+  </Note>
+</ParamField>
+
+### Analytics
+
+<ParamField body="ANALYTICS_REFRESH_CRON" type="string" default="*/30 * * * * *">
+  How often the `resource_analytics` materialized view (install counts) is refreshed, as a `node-cron` expression. The seconds field comes first.
+
+  **Validation**: must be a valid `node-cron` expression. An invalid value causes a startup failure.
+
+  ```
+  ANALYTICS_REFRESH_CRON=*/30 * * * * *
+  ```
+</ParamField>
+
+### Storage
+
+<ParamField body="STORAGE_REGION" type="string">
+  AWS region of the S3 bucket. Required for AWS S3; can be omitted for S3-compatible endpoints that do not require a region.
+
+  ```
+  STORAGE_REGION=us-east-1
+  ```
+</ParamField>
+
+<ParamField body="STORAGE_ACCESS_KEY_ID" type="string">
+  AWS access key ID. Leave **unset** in production on AWS to fall back to the default credential chain (instance profile, ECS task role, etc.) rather than embedding a long-lived key.
+
+  ```
+  STORAGE_ACCESS_KEY_ID=minioadmin
+  ```
+</ParamField>
+
+<ParamField body="STORAGE_SECRET_ACCESS_KEY" type="string">
+  AWS secret access key. Leave **unset** alongside `STORAGE_ACCESS_KEY_ID` to use the default credential chain.
+
+  ```
+  STORAGE_SECRET_ACCESS_KEY=minioadmin123
+  ```
+</ParamField>
+
+<ParamField body="STORAGE_ENDPOINT" type="string">
+  Base URL of a self-hosted S3-compatible endpoint, e.g. `http://minio:9000`. Leave unset when using real AWS S3.
+
+  ```
+  STORAGE_ENDPOINT=http://minio:9000
+  ```
+</ParamField>
+
+<ParamField body="STORAGE_PUBLIC_ENDPOINT" type="string">
+  The endpoint embedded in presigned URLs, when the browser reaches storage at a different address than the API does. Defaults to `STORAGE_ENDPOINT` when unset.
+
+  This is needed in a Docker Compose setup where the API reaches MinIO over the Docker network hostname (`minio`) but presigned URLs must use `localhost` so a browser can follow them.
+
+  ```
+  STORAGE_PUBLIC_ENDPOINT=http://localhost:9000
+  ```
+
+  See [Storage](/deployment/storage) for a full explanation of when and why this differs from `STORAGE_ENDPOINT`.
+</ParamField>
+
+## Startup validation summary
+
+The table below shows exactly when each validation is applied and what error is raised on failure:
+
+| Variable | Condition that fails startup |
+|---|---|
+| `DATABASE_URL` | Missing or empty |
+| `BETTER_AUTH_SECRET` | Missing or empty |
+| `PUBLIC_URL` | Missing, empty, or not an absolute `http(s)://` URL |
+| `STORAGE_BUCKET` | Missing or empty |
+| `PORT` | Set to a non-integer or a value outside 1–65535 |
+| `DB_SCHEMA` | Not a lowercase Postgres identifier, longer than 63 chars, or starts with `pg_` |
+| `ANALYTICS_REFRESH_CRON` | Not a valid `node-cron` expression |

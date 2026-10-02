@@ -1,0 +1,163 @@
+---
+title: "Connections API: Manage Personal Git Access Grants"
+sidebarTitle: "Connections"
+description: "All /api/connections endpoints for listing, creating, and revoking a writer's personal Git Provider access grants. Requires Writer role throughout."
+---
+
+The Connections API manages a writer's personal grants of repository access to the Registry. A Connection is the result of a writer authorizing a GitHub App (or equivalent OAuth app) to act on their behalf — the Registry then uses the stored token to fetch repository content during imports.
+
+Before a writer can create a Connection, an Admin must first configure an Integration for the provider. One Connection can exist per Git Provider; connecting again replaces the existing grant.
+
+<Warning>
+Revoking a Connection from the Registry does **not** revoke the authorization at the Git Provider. The writer must separately visit the provider's settings to remove the app's access if they want to fully withdraw it.
+</Warning>
+
+All endpoints require **Writer** role.
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/connections` | Writer+ | List own Connections and connectable providers |
+| GET | `/api/connections/:provider/start` | Writer+ | Start the OAuth connect flow |
+| GET | `/api/connections/:provider/callback` | Writer+ | OAuth callback (provider redirects here) |
+| DELETE | `/api/connections/:provider` | Writer+ | Revoke a Connection |
+
+---
+
+## List Connections
+
+```
+GET /api/connections
+```
+
+Returns the caller's own Connections alongside the list of providers they could connect to. Both are returned in one response because the interface needs both at the same time — a "connected as ada-work" card and a "connect GitHub" card are the same card in two states.
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  The writer's existing Connections. Each entry has:
+  <Expandable>
+    <ResponseField name="provider" type="string">
+      Git Provider name (e.g. `github`).
+    </ResponseField>
+    <ResponseField name="integration_id" type="string">
+      UUID of the Integration through which this Connection was created. Identifies which OAuth app was used when more than one Integration exists for the same provider.
+    </ResponseField>
+    <ResponseField name="external_account_login" type="string">
+      The Git Provider username of the connected account (e.g. `ada-lovelace`). May differ from the user's Registry login.
+    </ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 timestamp of initial connection.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 timestamp of last update (e.g. a reconnect).</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="connectable" type="array">
+  Integrations the writer could connect through but has not yet. Each entry has:
+  <Expandable>
+    <ResponseField name="id" type="string">Integration UUID — pass as `integration_id` on the start endpoint when more than one Integration exists for the same provider.</ResponseField>
+    <ResponseField name="provider" type="string">Git Provider name.</ResponseField>
+    <ResponseField name="display_name" type="string">Admin-chosen label for the Integration.</ResponseField>
+    <ResponseField name="app_slug" type="string | null">GitHub App slug, or `null` for providers with no installation step.</ResponseField>
+    <ResponseField name="manage_access_url" type="string | null">URL where the writer can manage which repositories the app can access. Built from the app slug; `null` when none is set.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl https://registry.example.com/api/connections \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Start the connect flow
+
+```
+GET /api/connections/:provider/start
+```
+
+Initiates the OAuth authorization flow for the given provider. Redirects the browser to the provider's authorization page. The Registry sets a short-lived, signed nonce cookie (`skillset_connection_state`) to protect the callback against CSRF.
+
+### Path parameters
+
+<ParamField path="provider" type="string" required>
+  Git Provider to connect. Currently `github`.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="integration_id" type="string">
+  UUID of the specific Integration to use. Required when more than one Integration is configured for the same provider — the server returns `400 integration_choice_required` if this is omitted and multiple choices exist.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `provider_not_connectable` | 400 | The provider has no credentialed OAuth flow (e.g. GitLab is public-read only). |
+| `integration_choice_required` | 400 | Multiple Integrations exist for the provider and `integration_id` was not specified. |
+| `integration_not_configured` | 409 | No Integration is configured for this provider. Ask an Admin to set one up. |
+
+<Note>
+This endpoint is designed to be opened in a browser — it responds with a `302` redirect, not JSON. Calling it with `curl -L` will follow the redirect to the provider's authorization page.
+</Note>
+
+---
+
+## OAuth callback
+
+```
+GET /api/connections/:provider/callback
+```
+
+This endpoint is the OAuth redirect target that the Git Provider calls after the user authorizes (or declines) the app. It is not called directly by writers — the provider redirects the browser here after the authorization step.
+
+The Registry validates the `state` parameter against the nonce cookie, exchanges the authorization code for a token, stores the Connection, and redirects the browser to **Settings → Connected Accounts**.
+
+### Callback outcomes
+
+| Query params on callback | Outcome | Redirect destination |
+|---|---|---|
+| `code` + `state` | Connection created or updated | `/settings/connected-accounts?connected=<provider>` |
+| `error=access_denied` | Writer declined | `/settings/connected-accounts?declined=<provider>` |
+| `setup_action` only | Repository access changed | `/settings/connected-accounts?repositories=<provider>` |
+| Other error | Connection failed | `/settings/connected-accounts?connection_error=<message>` |
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `invalid_state` | 400 | The state parameter was missing, tampered with, expired, or already used. |
+| `exchange_failed` | 502 | The provider refused to exchange the authorization code for a token. |
+| `connection_expired` | 409 | The app's permission is insufficient; reconnecting or fixing the app config is needed. |
+
+---
+
+## Revoke a Connection
+
+```
+DELETE /api/connections/:provider
+```
+
+Removes the writer's Connection for the given provider from the Registry. Returns `204 No Content`.
+
+<Warning>
+This only removes the Connection from the Registry — the OAuth app's authorization at the Git Provider remains active. To fully revoke access, the writer must also remove the app from their provider account settings.
+</Warning>
+
+### Path parameters
+
+<ParamField path="provider" type="string" required>
+  Git Provider whose Connection to revoke (e.g. `github`).
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Connection exists for this provider under your account. |
+
+```bash
+curl -X DELETE https://registry.example.com/api/connections/github \
+  -H "Authorization: Bearer <token>"
+```

@@ -1,0 +1,93 @@
+---
+title: "Skillset: Self-Hosted Skill Registry for Coding Agents"
+sidebarTitle: "Introduction"
+description: "Skillset is a self-hosted registry for Skills, MCP Servers, and Plugins that your team publishes, discovers, and installs on your own infrastructure."
+---
+
+Skillset is a self-hosted registry that lets your team publish, discover, and install the resources a coding agent needs: **Skills**, **MCP Servers**, and **Plugins**. This page explains what Skillset is, how its three Resource kinds differ, how access is controlled, and the four components that make up a running Registry.
+
+## What Skillset Does
+
+Your team publishes Resources from the CLI or the web interface. Developers and agents discover, preview, and install them from either the web interface or the bundled MCP server. Everything runs on your own infrastructure — your Postgres, your object storage, your access rules.
+
+Reading the catalog needs no account at all. Publishing, deleting, and administration are restricted to Users who hold the right role.
+
+## The Three Resource Kinds
+
+Every Resource the Registry holds has a **Kind** — `skill`, `mcp-server`, or `plugin` — which fixes the shape of its payload, the validation rules its `name` and `description` must satisfy, whether it carries an Artifact, and what `skillset install` does with it.
+
+<CardGroup cols={3}>
+  <Card title="Skill" icon="book-open">
+    A directory bundle: a root `SKILL.md` with YAML frontmatter, alongside any supporting files. The Registry stores all of it as an **Artifact** and serves it for `skillset install` or direct download.
+  </Card>
+  <Card title="MCP Server" icon="server">
+    Pure metadata — a pointer to an npm, PyPI, OCI, NuGet, Cargo, or MCPB package, or a remote URL. **The Registry stores no bytes for it.** It is a record, not a file.
+  </Card>
+  <Card title="Plugin" icon="puzzle-piece">
+    A repository bundle with a `.claude-plugin/plugin.json` manifest, grouping skills, commands, agents, and hooks for an agent to load together. Has an **Artifact**; the Registry never inspects its contents.
+  </Card>
+</CardGroup>
+
+### What distinguishes them
+
+| | Skill | MCP Server | Plugin |
+|---|---|---|---|
+| Has an Artifact | ✅ | ❌ | ✅ |
+| `skillset install` writes | Files to `.agents/skills/` | Entry in `.mcp.json` | Bundle to disk |
+| Source of truth | `SKILL.md` frontmatter | `server.json`-shaped record | `.claude-plugin/plugin.json` |
+| Can be Imported | ✅ | ❌ | ✅ |
+
+## How Access Works
+
+Skillset follows a role hierarchy. Catalog reads — browsing, searching, previewing, downloading — need **no authentication**. Everything that changes the Registry's state requires a User with the right role.
+
+<CardGroup cols={2}>
+  <Card title="Reader" icon="eye">
+    Browse and install Resources. Catalog reads need no account; a Reader account is created automatically on first SSO login.
+  </Card>
+  <Card title="Writer" icon="pen">
+    Publish, import, and update Resources. Mint Tokens for CLI access. Grant Connections for Git Provider imports.
+  </Card>
+  <Card title="Admin" icon="shield">
+    Everything a Writer can do, plus manage Users and delete Resources. Review and approve Submissions.
+  </Card>
+  <Card title="Superadmin" icon="crown">
+    Everything an Admin can do, plus manage Admins. The first User to sign up; one per Registry, permanent.
+  </Card>
+</CardGroup>
+
+## The Four Components
+
+A Skillset deployment runs as a single `docker compose up` command that starts one application container and a Postgres database. Within that application, four components work together:
+
+<CardGroup cols={2}>
+  <Card title="Web UI" icon="globe">
+    A Vite + React interface served from the same origin as the API. Browse the catalog, preview Skills, manage Users and settings, and review Submissions — no install required.
+  </Card>
+  <Card title="API" icon="code">
+    A Hono + Kysely HTTP API that the web UI, CLI, and MCP server all talk to. Handles authentication, resource storage, presigned uploads to object storage, and fuzzy search.
+  </Card>
+  <Card title="CLI" icon="terminal">
+    The `skillset` binary, installed globally with `npm install -g @in-org-quicko/skillset-cli`. Publish, install, update, and remove Skills from any terminal. Emits `--json` output for CI and scripting.
+  </Card>
+  <Card title="MCP Server" icon="robot">
+    An stdio MCP server (`@in-org-quicko/skillset-mcp`) that exposes the catalog and install tools to any agent that speaks MCP. Run with `npx` or configure it once in an agent's client config.
+  </Card>
+</CardGroup>
+
+## Where to Go Next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="quickstart">
+    Deploy a Registry, create your first Skill, and install it — in under five minutes.
+  </Card>
+  <Card title="Concepts" icon="lightbulb" href="concepts">
+    Namespaces, Artifacts, Lockfiles, roles, and the rest of the Skillset data model — explained.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="cli/commands">
+    Every `skillset` command, its flags, and how to use it in CI without a login prompt.
+  </Card>
+  <Card title="MCP Server" icon="robot" href="mcp/overview">
+    Configure the MCP server for your agent, and see every tool it exposes.
+  </Card>
+</CardGroup>

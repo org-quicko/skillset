@@ -1,0 +1,74 @@
+---
+title: "Skillset Authentication: Sessions, Tokens, and Roles"
+sidebarTitle: "Overview"
+description: "How Skillset controls access: two credential types, four roles from reader to superadmin, and why catalog reads need no authentication at all."
+---
+
+Skillset uses a two-track authentication model. Browsing and installing from the catalog requires no credentials — any client can search, preview, and download without an account. Any action that writes to the Registry (publishing, importing, managing users) or reads privileged data requires a verified identity, supplied either as a browser session cookie or as a Bearer Token in the `Authorization` header.
+
+## Unauthenticated catalog access
+
+Read operations on the catalog — searching for Resources, reading a Skill's body, listing Tags — are deliberately open. A coding agent or CI pipeline can install Skills without holding any credential at all. The moment a request attempts to publish, import, delete, or administer, the API requires authentication.
+
+## The four roles
+
+Every User holds exactly one role. Roles are cumulative: each level includes everything the level below it can do.
+
+<CardGroup cols={2}>
+  <Card title="Reader" icon="eye">
+    Browse the catalog, search for Resources, and install Skills, MCP Servers, and Plugins. The default role assigned to any new User who signs up through an Identity Provider.
+  </Card>
+  <Card title="Writer" icon="pen">
+    Everything a Reader can do, plus publish and import Resources, set Tags on their own Resources, and manage their own Git Provider Connections.
+  </Card>
+  <Card title="Admin" icon="shield">
+    Everything a Writer can do, plus create and remove Users, delete any Resource, manage Git Provider Integrations, and approve or reject Submissions.
+  </Card>
+  <Card title="Superadmin" icon="crown">
+    Everything an Admin can do, plus promote Users to Admin, and configure Identity Providers. There is exactly one Superadmin per Registry — the first User to sign up. The role is permanent and cannot be transferred or removed.
+  </Card>
+</CardGroup>
+
+<Note>
+  Tokens carry the role of the User who minted them. Revoking a Token or changing the User's role takes effect on the next request — no token re-issue is needed.
+</Note>
+
+## Session authentication (browser)
+
+The web interface authenticates via cookie-based sessions managed by [Better Auth](https://www.better-auth.com/). A session is created on sign-in and invalidated on sign-out. Sessions are stored in Postgres and expire after seven days of inactivity, refreshing automatically on each request within the last 24 hours of that window.
+
+The API validates a session by reading the session cookie from the request headers:
+
+```http
+Cookie: better-auth.session_token=<session_token>
+```
+
+## Token authentication (API and CLI)
+
+The `skillset` CLI and the MCP server use Bearer Tokens rather than browser sessions. A Token is a 256-bit secret minted by a User from **Settings → Tokens** in the web interface. It is shown once at creation and stored only as a SHA-256 hash — it cannot be retrieved after the moment it is displayed.
+
+Pass a Token as an `Authorization` header on any API request:
+
+```http
+Authorization: Bearer <token>
+```
+
+See [Tokens](/auth/tokens) for minting, using, and revoking Tokens.
+
+## Password login
+
+Password authentication is always available, even when one or more Identity Providers are configured. It is the guaranteed way back in if a provider's client secret expires or an SSO service is unreachable. Users created by an Admin receive a generated password; see the `must_change_password` note below.
+
+## Identity Providers
+
+The Superadmin can configure up to three Identity Providers — Google Workspace, Microsoft Entra, and GitHub OAuth — so that Users can sign in without a locally-managed password. They appear as additional buttons on the login page alongside the password form.
+
+See [Identity Providers](/auth/identity-providers) for setup instructions.
+
+## The `must_change_password` flag
+
+When an Admin creates a User, the Registry generates a temporary password for that account and sets `must_change_password: true`. That User can reach `GET /api/users/me` and `PUT /api/users/me/password` while the flag is set, but every other authenticated route returns `423 Password Change Required` until the password is replaced. Once the User sets a new password of at least 12 characters, the flag is cleared and normal access is restored.
+
+<Warning>
+  A User in the `must_change_password` state cannot mint Tokens or access any resource-writing route. Ask the User to complete the password-change flow first.
+</Warning>

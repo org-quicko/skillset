@@ -1,0 +1,172 @@
+{
+  "projectType": "saas",
+  "projectName": "Skillset",
+  "projectDescription": "A self-hosted registry for Skills, MCP Servers, and Plugins that a coding agent loads — publish, discover, and install them from a web interface or CLI, under your own infrastructure.",
+  "theme": "luma",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4338ca",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/configuration",
+              "deployment/database",
+              "deployment/storage"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "auth/overview",
+              "auth/identity-providers",
+              "auth/tokens"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/installation",
+              "cli/commands",
+              "cli/ci-automation"
+            ]
+          },
+          {
+            "group": "MCP Server",
+            "pages": [
+              "mcp/overview",
+              "mcp/configuration",
+              "mcp/tools"
+            ]
+          },
+          {
+            "group": "Registry Features",
+            "pages": [
+              "features/skills",
+              "features/mcp-servers",
+              "features/plugins",
+              "features/import",
+              "features/search",
+              "features/tags"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/users",
+              "admin/integrations",
+              "admin/submissions"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/resources",
+              "api/tags",
+              "api/users",
+              "api/auth",
+              "api/imports",
+              "api/integrations",
+              "api/connections",
+              "api/submissions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Self-hosted registry for Skills, MCP Servers, and Plugins",
+    "CLI (skillset) for publish, install, search, update, and remove",
+    "MCP server exposing catalog and install tools to coding agents",
+    "Unauthenticated catalog reads; role-gated writes (reader / writer / admin / superadmin)",
+    "Import Skills and Plugins from GitHub or GitLab repositories",
+    "Lockfile (skillset-lock.json) tracking installed Skill state (current / outdated / modified / missing)",
+    "Full-text + trigram fuzzy search backed by PostgreSQL pg_trgm",
+    "Identity Providers: Google Workspace, Microsoft Entra, GitHub OAuth",
+    "S3-compatible object storage for Skill and Plugin artifacts",
+    "Submission workflow for community-sourced Skills pending admin approval",
+    "Tag catalog for browsing and filtering across all resource kinds",
+    "Analytics with install-trend charts per resource",
+    "Marketplace endpoint (/.claude-plugin/marketplace.json) for native agent discovery"
+  ],
+  "publicApiSurface": [
+    "GET /api/resources — list/search the catalog",
+    "GET /api/resources/stats — catalog hero stats",
+    "GET /api/resources/:kind/by-name/:name — fetch by name (+ ?namespace=)",
+    "GET /api/resources/:id — fetch by id",
+    "GET /api/resources/:id/installs/trend — install trend data",
+    "PUT /api/resources/:kind/:name — publish a resource (writer+)",
+    "PUT /api/resources/:id/tags — set resource tags (writer+)",
+    "DELETE /api/resources/:id — delete a resource (admin+)",
+    "GET /api/resources/:id/files — list artifact files",
+    "GET /api/resources/:id/files/:path — read one artifact file",
+    "GET /api/resources/:id/artifact — download artifact zip",
+    "GET /api/tags — list tag catalog",
+    "GET /api/users — list users (admin+)",
+    "POST /api/users — create user (admin+)",
+    "GET /api/users/me — current user profile",
+    "PATCH /api/users/me — update own name",
+    "PUT /api/users/me/password — change own password",
+    "GET /api/users/me/tokens — list own tokens",
+    "POST /api/users/me/tokens — mint a token",
+    "DELETE /api/users/me/tokens/:token_id — revoke a token",
+    "PATCH /api/users/:user_id — update user role (admin+)",
+    "DELETE /api/users/:user_id — remove user (admin+)",
+    "GET /api/auth/providers — list enabled identity providers",
+    "POST /api/imports/:provider/skill-files — fetch skill files from a git provider",
+    "POST /api/imports/:provider/skills — list skill folders from a git provider",
+    "GET /api/imports/:provider/repositories — list accessible repositories",
+    "GET /api/integrations — list git integrations (admin+)",
+    "POST /api/integrations — create integration (admin+)",
+    "PATCH /api/integrations/:id — update integration (admin+)",
+    "DELETE /api/integrations/:id — delete integration (admin+)",
+    "GET /api/connections — list connections (writer+)",
+    "GET /api/submissions — list pending submissions (admin+)",
+    "PUT /api/submissions/:kind/:name — submit a resource for approval",
+    "POST /api/submissions/:id/approve — approve a submission (admin+)",
+    "DELETE /api/submissions/:id — reject a submission (admin+)",
+    "skillset login — authenticate CLI against a registry",
+    "skillset publish [path|url] — publish skill(s) to the registry",
+    "skillset install <name|url> — install a skill for a coding agent",
+    "skillset list — show installed skills and their status",
+    "skillset update [names...] — re-download outdated skills",
+    "skillset remove <name> — uninstall a skill",
+    "skillset search [query] — search the registry catalog",
+    "skillset info <name> — read a skill without installing it",
+    "skillset whoami — show current registry and identity",
+    "MCP tool: search_skills — search the registry catalog",
+    "MCP tool: read_skill — read a skill's SKILL.md and file list",
+    "MCP tool: install_skills — install one or more skills",
+    "MCP tool: publish_skill — publish a skill to the registry",
+    "MCP tool: installed_skills — list installed skills with status",
+    "MCP tool: update_skills — re-download outdated skills",
+    "MCP tool: remove_skills — uninstall skills",
+    "MCP resource: skillset://skills/{name} — one skill's SKILL.md body",
+    "MCP resource: skillset://tags/{tag} — skills carrying a tag"
+  ]
+}

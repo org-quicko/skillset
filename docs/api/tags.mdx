@@ -1,0 +1,101 @@
+---
+title: "Tags API: Browse and Manage the Registry Tag Catalog"
+sidebarTitle: "Tags"
+description: "Endpoints for listing all catalog Tags and renaming a Tag. Tag IDs from this API are used to filter Resources in the catalog search."
+---
+
+The Tags API exposes the Registry's Tag catalog — the shared set of short labels that Resources can carry for browsing and filtering. Listing all Tags requires no authentication. Renaming a Tag (which affects every Resource currently carrying it) requires Admin role.
+
+<Note>
+Attaching or removing Tags from a specific Resource is done through [`PUT /api/resources/:id/tags`](/api/resources#set-resource-tags), not here. This API covers the catalog itself: listing Tags and renaming them.
+</Note>
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/tags` | None | List all Tags |
+| PATCH | `/api/tags/:id` | Admin+ | Rename a Tag |
+
+---
+
+## List all Tags
+
+```
+GET /api/tags
+```
+
+Returns every Tag in the Registry catalog. No authentication required. The CLI and MCP server call this endpoint to resolve a Tag name to an id before filtering the resource catalog.
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  All catalog Tags. Each entry has:
+  <Expandable>
+    <ResponseField name="id" type="string">
+      Stable UUID for the Tag. Use this value as `tag_id` when calling `GET /api/resources`.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Tag name — lower-case, URL-safe, max 32 characters.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl https://registry.example.com/api/tags
+```
+
+```json
+{
+  "items": [
+    { "id": "018f1234-abcd-7000-8000-000000000001", "name": "typescript" },
+    { "id": "018f1234-abcd-7000-8000-000000000002", "name": "react" },
+    { "id": "018f1234-abcd-7000-8000-000000000003", "name": "testing" }
+  ]
+}
+```
+
+<Tip>
+To filter the resource catalog by a Tag name (rather than id), call `GET /api/tags` first, find the matching Tag by name, and pass its `id` as the `tag_id` query parameter on `GET /api/resources`. The CLI and MCP server do this resolution automatically.
+</Tip>
+
+---
+
+## Rename a Tag
+
+```
+PATCH /api/tags/:id
+```
+
+Changes the name of an existing Tag. Requires **Admin** role. Because Tags are stored by `id` and every Resource references the `id`, a rename is immediately visible everywhere the Tag is attached — no Resource needs to be republished.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Tag to rename.
+</ParamField>
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  New name for the Tag. Must be lower-case, URL-safe, and no longer than 32 characters. Must not already be the name of another Tag.
+</ParamField>
+
+### Response
+
+Returns the updated Tag object: `{ "id": "...", "name": "..." }`.
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Tag exists with that id. |
+| `tag_name_conflict` | 409 | Another Tag already has that name. |
+| `validation_failed` | 400 | The new name failed the Tag name rules. |
+
+```bash
+curl -X PATCH https://registry.example.com/api/tags/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "react-18" }'
+```

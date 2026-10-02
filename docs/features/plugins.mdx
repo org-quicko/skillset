@@ -1,0 +1,119 @@
+---
+title: "Plugins: Bundle Multiple Resources for an Agent to Load"
+sidebarTitle: "Plugins"
+description: "Plugins bundle Skills, commands, agents, and hooks behind a plugin.json manifest. Learn how Plugins differ from Skills and how to publish and install them."
+---
+
+Plugins are the third Resource Kind in Skillset. Where a Skill is a single `SKILL.md` bundle, a Plugin is a multi-resource bundle for an agent to load together — a repository containing a `.claude-plugin/plugin.json` manifest plus any combination of `skills/`, `commands/`, `agents/`, `hooks/`, and `.mcp.json`. This page covers the Plugin structure, how it differs from a Skill, and the publish and install workflow.
+
+## What is a Plugin?
+
+A Plugin bundles everything an agent needs for a particular workflow or integration: Skills, slash commands, sub-agents, lifecycle hooks, and MCP server configurations can all live together in one repository. The Registry stores the Plugin's files as an Artifact and serves them on demand, exactly as it does for Skills.
+
+**The Registry never inspects a Plugin's contents.** The Skills a Plugin contains are its own business — they are not individual rows in the Registry and do not appear separately in the catalog. This is a deliberate design choice (ADR-0001): the Registry validates the manifest's presence and the Artifact's size and path rules, nothing more.
+
+<Note>
+  A Plugin's internal Skills are not installable or searchable separately through Skillset. If you want individual Skills discoverable in the catalog, publish them as Skill resources alongside the Plugin.
+</Note>
+
+## Repository layout
+
+A Plugin repository must contain `.claude-plugin/plugin.json` at its root. The rest of the layout is flexible, but the conventional structure is:
+
+```
+my-plugin/
+├── .claude-plugin/
+│   └── plugin.json        ← required manifest
+├── skills/
+│   └── code-review.md
+├── commands/
+│   └── review.md
+├── agents/
+│   └── reviewer.md
+├── hooks/
+│   └── pre-commit.md
+└── .mcp.json              ← optional MCP server config
+```
+
+### plugin.json manifest
+
+The `.claude-plugin/plugin.json` manifest is the only file the Registry requires at a specific path. Its schema is defined by the Claude plugin specification. The Registry stores it as part of the Artifact without parsing its contents.
+
+```json
+{
+  "name": "code-review-suite",
+  "description": "A complete code review toolkit with skills, commands, and hooks.",
+  "version": "1.0.0"
+}
+```
+
+## How Plugins differ from Skills
+
+<CardGroup cols={2}>
+  <Card title="Skill" icon="file-lines">
+    A single `SKILL.md` bundle with optional supporting files. The `SKILL.md` frontmatter is the source of truth for `name` and `description`. Individually searchable and installable.
+  </Card>
+  <Card title="Plugin" icon="layer-group">
+    A multi-resource bundle behind a `.claude-plugin/plugin.json` manifest. May contain Skills, commands, agents, hooks, and MCP configs. The internal contents are opaque to the Registry.
+  </Card>
+</CardGroup>
+
+| | Skill | Plugin |
+|---|---|---|
+| Root manifest file | `SKILL.md` | `.claude-plugin/plugin.json` |
+| Registry inspects contents | Frontmatter only | Never |
+| Internal resources as catalog rows | N/A | No |
+| Appears in Marketplace | Yes | Yes |
+| Has Artifact | Yes | Yes |
+| Import from Git | Yes | Yes |
+
+## Publishing a Plugin
+
+Plugins are published the same way as Skills — via the CLI `publish` command or the web interface Import. The same Artifact limits apply (1,000 files, 25 MB uncompressed, 10 MB compressed).
+
+<CodeGroup>
+  ```bash From a local directory
+  # Publish the current directory as a Plugin
+  skillset publish
+
+  # Publish from an explicit path
+  skillset publish ./my-plugin
+  ```
+
+  ```bash From a Git repository
+  # Clone and publish from a remote repository
+  skillset publish https://github.com/acme/plugins --name code-review-suite
+  ```
+</CodeGroup>
+
+The `kind` is inferred from the presence of `.claude-plugin/plugin.json` — a directory containing that file is published as a `plugin`, not a `skill`. A directory containing `SKILL.md` at its root is published as a `skill`.
+
+<Warning>
+  A directory that contains both `SKILL.md` and `.claude-plugin/plugin.json` will be rejected as ambiguous. Use a separate directory for each Resource.
+</Warning>
+
+## Installing a Plugin
+
+Installing a Plugin downloads its Artifact and writes the files to the agent's directory, just as a Skill install does.
+
+```bash
+# Install a Plugin by name
+skillset install code-review-suite
+```
+
+The installed files include everything in the Artifact — the manifest, skills, commands, agents, hooks, and MCP configuration. The agent's own resolution of those contents is outside Skillset's scope.
+
+## Marketplace
+
+Plugins appear in `.claude-plugin/marketplace.json` alongside Skills, as plugin entries with `archive` sources. Agents that support the Claude plugin marketplace format can discover and install Plugins directly from this endpoint without the `skillset` CLI.
+
+MCP Servers are never listed in the Marketplace because the Registry has no bytes to point at for them — only Skills and Plugins appear there.
+
+## Tags
+
+Plugins use the same Tag catalog as Skills and MCP Servers. Writers attach Tags via the web interface or `PUT /api/resources/{id}/tags`. Tag filtering works identically across all Kinds.
+
+```bash
+# Search for Plugins with a specific tag
+GET /api/resources?kind=plugin&tag_id=<id>
+```

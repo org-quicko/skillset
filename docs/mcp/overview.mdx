@@ -1,0 +1,81 @@
+---
+title: "Skillset MCP Server: Registry Access for AI Agents"
+sidebarTitle: "Overview"
+description: "The Skillset MCP server gives any MCP-capable agent direct access to a Skillset Registry — search, install, and publish Skills from within the agent."
+---
+
+The Skillset MCP server (`@in-org-quicko/skillset-mcp`) connects any MCP-capable coding agent directly to a Skillset Registry over stdio. This page explains what the server exposes, how it identifies the running agent, and the naming constraint you must observe when registering it in an MCP host.
+
+## What the server provides
+
+The MCP server gives an agent two groups of tools and two MCP resource templates — all without any local installation step, because it runs directly via `npx`.
+
+### Tool groups
+
+<CardGroup cols={2}>
+  <Card title="Registry Tools" icon="server">
+    Operate on the remote Registry catalog. `search_skills`, `read_skill`, `install_skills`, and `publish_skill` all talk to the configured Registry URL. Catalog reads require no credential; only `publish_skill` requires a Token.
+  </Card>
+  <Card title="Local Tools" icon="folder">
+    Operate on the current project's installed copies. `installed_skills`, `update_skills`, and `remove_skills` read and write the local `skillset-lock.json` Lockfile without contacting the Registry (except to compare versions).
+  </Card>
+</CardGroup>
+
+### MCP resources
+
+Two URI template resources are registered alongside the tools, allowing a host to list, autocomplete, and read catalog content directly — without a tool call:
+
+| URI template | Returns | Autocomplete |
+|---|---|---|
+| `skillset://skills/{name}` | The Skill's `SKILL.md` body | `name` completes against the full catalog |
+| `skillset://tags/{tag}` | All Skills carrying that Tag (name + description) | `tag` completes against the Tag catalog |
+
+## Credential model
+
+The Registry's catalog is public — `search_skills`, `read_skill`, `installed_skills`, and both resource templates send no `Authorization` header. Only `publish_skill` requires a Token, configured separately via `--token` or `SKILLSET_TOKEN`. An agent that has no Token configured can still browse and install freely; it simply cannot publish.
+
+## Agent auto-detection
+
+When an agent calls `install_skills`, `update_skills`, or `remove_skills`, the server needs to know which coding agent is running so it can write Skills to the directory that agent actually reads. The server resolves this automatically through a detection ladder:
+
+1. **`--agent` override** — explicit flag wins
+2. **MCP client identity** — the `clientInfo.name` the host sends during the `initialize` handshake
+3. **Environment variables** — agent-specific env vars set by the host
+4. **Project directory markers** — presence of agent-specific Skills directories on disk
+5. **Canonical fallback** — installs to `.agents/skills/<name>` with no agent-specific symlink
+
+Detection is lazy: it runs on the first tool call that needs an agent identity, once the MCP `initialize` handshake has completed. Use `--agent <id>` to override a wrong or missing detection.
+
+## Server key naming constraint
+
+<Warning>
+  Do **not** use any server key containing the word `skillset` when registering this server in an MCP host config. Some hosts (observed on Claude Code) reserve that string internally and will refuse to start a server registered under it, with the error "Its name collides with a reserved internal server name." This applies to substrings too — `skillset-registry` collides. Use `skill-registry` instead.
+</Warning>
+
+The package's own `manifest.json` uses the name `skill-registry` and the display name "Skill Registry" for exactly this reason.
+
+## Quick start
+
+```sh
+npx @in-org-quicko/skillset-mcp --registry https://your-registry.example
+```
+
+```json
+{
+  "mcpServers": {
+    "skill-registry": {
+      "command": "npx",
+      "args": ["-y", "@in-org-quicko/skillset-mcp", "--registry", "https://your-registry.example"]
+    }
+  }
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/mcp/configuration">
+    All CLI flags, environment variables, and the MCPB bundle option for hosts that require a packaged extension.
+  </Card>
+  <Card title="Tools & Resources" icon="wrench" href="/mcp/tools">
+    Full reference for every tool parameter, return shape, and MCP resource template the server exposes.
+  </Card>
+</CardGroup>

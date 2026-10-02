@@ -1,0 +1,278 @@
+---
+title: "Skillset Concepts: Resources, Kinds, and the Registry"
+sidebarTitle: "Concepts"
+description: "Skillset's data model: Resource Kinds, Namespaces, Artifacts, Lockfiles, roles, provenance, Imports, Submissions, and Tags — all defined precisely."
+---
+
+Skillset has a small, precise vocabulary that everything else builds on. This page defines every core concept — what it means, what it does, and what to avoid calling it. Read this once and the rest of the docs will be unambiguous.
+
+## The Three Resource Kinds
+
+A **Resource** is anything the Registry holds and a coding agent can obtain. Every Resource has a **Kind** — which of the three things it is — and that Kind fixes its payload shape, validation rules, whether it carries an Artifact, and what `skillset install` does.
+
+<CardGroup cols={3}>
+  <Card title="skill" icon="book-open">
+    A directory bundle: a root `SKILL.md` with YAML frontmatter alongside any supporting files. Has an Artifact. Installed to `.agents/skills/<name>/`.
+  </Card>
+  <Card title="mcp-server" icon="server">
+    Pure metadata — a `server.json`-shaped pointer to a package or remote URL. **No Artifact.** Installed by merging config into `.mcp.json`. Never Imported.
+  </Card>
+  <Card title="plugin" icon="puzzle-piece">
+    A `.claude-plugin/plugin.json` bundle grouping skills, commands, agents, and hooks. Has an Artifact. The Registry never inspects its contents.
+  </Card>
+</CardGroup>
+
+---
+
+<Accordion title="Resources and Kinds">
+
+A **Resource** is the unit the Registry holds. Every Resource carries:
+
+- A **Kind** (`skill`, `mcp-server`, or `plugin`)
+- A **Namespace** (publishing identity)
+- A `name` unique within `(kind, namespace)`
+- A `description`
+- A publisher (the User who created it)
+- Optional markdown documentation (`body`)
+- Any number of **Tags**
+
+Everything else lives in the Kind-specific payload. Not every Resource has an Artifact — MCP Servers do not.
+
+**Kind** is stored as plain text rather than a database enum, so a fourth Kind would be an insert rather than a migration.
+
+</Accordion>
+
+<Accordion title="Namespace">
+
+A **Namespace** is the other half of a Resource's publishing identity. Uniqueness is `(kind, namespace, name)` — two Skills may both be named `frontend-design` as long as different parties named them.
+
+Every Resource carries a Namespace, always:
+
+- **Imported** Resources take the `owner/repo` form of the repository they were copied from — e.g. `anthropics/skills`.
+- Resources **published straight to this Registry** take the Registry's own host written forward — e.g. `skills.quicko.com`.
+
+Namespaces are opaque strings: lowercase alphanumerics, dots, hyphens, and at most one slash, compared whole and never split. They confer nothing — no ownership, no permission, no claim on the name — and are never renamed (a rename would re-identify every Resource beneath it).
+
+**Name resolution without a namespace:** a bare name resolves to the only match, or to the one published here when there is one. Only a tie between two outside parties refuses, naming both. This means every name that resolved before still resolves after an Import.
+
+```bash
+skillset install pdf                            # yours, or the only one
+skillset install pdf --namespace anthropics/skills  # explicit when there's a tie
+```
+
+<Note>
+  Namespace is a Registry concept only. Installs stay flat at `.agents/skills/<name>`, so one project holds at most one Skill of a given name however many Namespaces publish it. Two same-named Skills are co-publishable, never co-installable.
+</Note>
+
+</Accordion>
+
+<Accordion title="Artifacts">
+
+An **Artifact** is the files of a Resource of a Kind that has one — Skill and Plugin. Each file is uploaded directly to object storage under a prefix keyed by the Resource's `id`. The Registry assembles a zip on demand for `skillset install`, the web Download control, and Marketplace sources — it stores no zip at rest.
+
+An MCP Server has **no Artifact** at all. It is a pointer, not a bundle.
+
+A **Manifest** travels with an Artifact as the list of its paths and sizes (no content):
+
+- When **publishing**, the client declares a Manifest so the Registry can validate every path and enforce file-count and size limits without reading any bytes.
+- When **reading**, the Registry returns the actual Manifest listed back from storage.
+
+</Accordion>
+
+<Accordion title="Lockfile">
+
+The **Lockfile** is `skillset-lock.json` at a project root (or a User's home directory for `--scope user`). It records every Skill installed there:
+
+- The Resource `id`
+- The Registry's `updated_at` at the moment it was installed
+- A digest of the files that were written
+- When the install happened
+
+The Lockfile is what makes an installed Skill's **Status** answerable — whether the Registry has moved on since install, and whether someone has edited the local copy. Without it, neither question is answerable.
+
+### The four Status values
+
+| Status | Meaning |
+|---|---|
+| `current` | Unchanged on both signals — Registry and disk agree |
+| `outdated` | The Registry's `updated_at` has moved since install |
+| `modified` | The files on disk no longer digest to what was written |
+| `missing` | The Lockfile records a Skill whose directory is gone |
+
+A Skill that is both edited and stale reports `modified`, because that is the state needing a decision before `update` can replace it.
+
+```bash
+skillset list
+# → code-review   current
+# → pdf           outdated
+# → lint-rules    modified
+```
+
+The Lockfile is **advisory**: a missing or corrupt one reads as empty rather than failing an install. Nothing signs it.
+
+</Accordion>
+
+<Accordion title="Roles">
+
+Skillset has four roles, each a strict superset of the one below it.
+
+| Role | Can do |
+|---|---|
+| **Reader** | Browse catalog, search, preview, download, install Resources |
+| **Writer** | Everything a Reader can, plus publish, import, update, and delete own Resources; mint Tokens; grant Connections |
+| **Admin** | Everything a Writer can, plus manage all Users, delete any Resource, approve or reject Submissions |
+| **Superadmin** | Everything an Admin can, plus create and manage Admins |
+
+Reading the catalog needs **no account** — unauthenticated requests can browse, search, preview, and download. A Reader account is created automatically on first SSO login.
+
+There is exactly **one Superadmin**: the first User to sign up. The role is permanent — never transferred, reassigned, or removed.
+
+</Accordion>
+
+<Accordion title="Source and Import">
+
+### Source
+
+Every Resource records a **Source** — where it came from. It is provenance, not a live link: nothing is ever re-read from it.
+
+- An **Imported** Resource's Source is the repository URL it was copied from (without the ref or the folder, so a monorepo's Skills share one Source).
+- Anything published straight to the Registry has this Registry itself as its Source, written as its domain in reverse-DNS notation — e.g. `com.quicko.skills`.
+
+A Source appears in the UI only when it points somewhere the reader cannot already see. A Resource published here shows none.
+
+### Import
+
+An **Import** is a one-time copy of a Skill's or Plugin's files out of a Git Provider and into the Registry. It is **not a sync** — nothing is ever re-read, and nothing updates automatically.
+
+- The web UI imports through the writer's **Connection** (their personal grant of repo access to the Registry).
+- The CLI imports by cloning with the writer's own git credentials — so any repository the writer can clone works, including private ones.
+
+An MCP Server is never Imported — its whole payload is a `server.json` the writer pastes in.
+
+</Accordion>
+
+<Accordion title="Submission">
+
+A **Submission** is a Resource someone installed straight from a repository URL with `skillset install <url>` and put forward for the Registry, waiting for an Admin to approve it.
+
+```bash
+skillset install https://github.com/acme/skills --name pdf
+```
+
+Key properties of Submissions:
+
+- Any signed-in role may submit — submitting publishes nothing to the catalog.
+- A Submission is **not a Resource**: nothing in the catalog reads, searches, or installs one.
+- The CLI records the Skill in `skillset-lock.json` with its source repository and no Registry revision. `skillset update` reports it as `pending` until approved.
+- On approval, the Submission lands in the catalog credited to whoever submitted it, and `update` switches to the Registry's copy.
+
+Submissions appear under **Settings → Submissions** for Admins to review.
+
+</Accordion>
+
+<Accordion title="Tags">
+
+A **Tag** is a short label a Resource can carry for browsing and filtering. Tags are never written into the Resource's payload — they live in a many-to-many relationship to a shared catalog.
+
+That catalog is **shared across Kinds**: a Skill and an MCP Server can carry the same Tag. Renaming a Tag changes it everywhere it is attached, across every Resource.
+
+```bash
+skillset search --tag typescript
+```
+
+</Accordion>
+
+<Accordion title="Integration and Connection">
+
+These two terms are often confused — they are distinct.
+
+### Integration
+
+An **Integration** is the Registry's registration with one Git Provider (GitHub or GitLab). It holds the credential pair that Connections are granted against. There is at most one Integration per Git Provider. Importing is available for exactly those Git Providers that have an Integration — there is no separate enable switch.
+
+An Integration grants nobody an account. It is configured once by a Superadmin under **Settings → Integrations**.
+
+### Connection
+
+A **Connection** is a writer's own personal grant of repository access to the Registry. It is what an Import reads a private repository as. It need not be the same account the writer signs in with.
+
+Revoking a Connection stops the Registry using it for future Imports — it does not withdraw the grant at the Git Provider.
+
+<Note>
+  A GitHub Identity Provider (for signing in) and a GitHub Integration (for Importing) are two completely separate registrations. Neither knows about the other.
+</Note>
+
+</Accordion>
+
+<Accordion title="Identity Provider">
+
+An **Identity Provider** is a configured way for a User to prove who they are without a password. Skillset supports three kinds:
+
+- **Google Workspace** — matched against Permitted Organisations (Workspace domains)
+- **Microsoft Entra** — matched against Permitted Organisations (tenant IDs)
+- **GitHub OAuth** — matched against Permitted Organisations (org logins)
+
+At most one Provider of each kind may be enabled at once. A Provider vouches for an email address only — it grants no special role or permission.
+
+Anyone matching a Provider's Permitted Organisations who signs in for the first time gets a Reader account automatically. Password login stays available whether or not a Provider is configured.
+
+</Accordion>
+
+<Accordion title="Token">
+
+A **Token** is a secret a User mints to let the CLI act as them. It carries whatever role its owner holds. Tokens are:
+
+- Shown exactly once at creation — stored only as a hash afterward
+- Scoped to one Registry
+- Used in place of `skillset login` for CI and automation
+
+```bash
+# Set for CI — these always override stored config:
+SKILLSET_REGISTRY=https://registry.example.com
+SKILLSET_TOKEN=<token>
+```
+
+</Accordion>
+
+<Accordion title="Agent and Scope">
+
+### Agent
+
+An **Agent** is a coding agent that reads Skills from a conventional directory on a developer's machine. `skillset install` writes to the canonical `.agents/skills/<name>/` directory and symlinks the chosen Agent's own skills directory to it. The list of supported Agents is hand-curated and each entry is verified against that Agent's own documentation.
+
+The Agent table covers **Skills only** — an MCP Server is installed by merging a project's `.mcp.json` and names no Agent.
+
+### Scope
+
+**Scope** is where a Resource is installed on a machine — either the current project, or the Agent's user-level directory. Pass `--scope user` to install into the user-level directory instead of the project root.
+
+An MCP Server has project Scope only.
+
+```bash
+skillset install code-review               # project scope (default)
+skillset install code-review --scope user  # user-level directory
+```
+
+</Accordion>
+
+## Quick Reference
+
+| Term | One-line definition |
+|---|---|
+| **Resource** | Anything the Registry holds — Skill, MCP Server, or Plugin |
+| **Kind** | Which of the three a Resource is (`skill`, `mcp-server`, `plugin`) |
+| **Artifact** | The files of a Skill or Plugin (MCP Servers have none) |
+| **Namespace** | Publishing identity: `owner/repo` for Imports, Registry host for direct publishes |
+| **Tag** | Short label for browsing/filtering; shared across all Kinds |
+| **Lockfile** | `skillset-lock.json` tracking installed Skill state |
+| **Status** | How an installed Skill stands: `current`, `outdated`, `modified`, or `missing` |
+| **Source** | Where a Resource came from — repository URL for Imports, reverse-DNS Registry domain for direct publishes |
+| **Import** | One-time copy from a Git Provider into the Registry |
+| **Submission** | URL-installed Skill pending Admin approval |
+| **Integration** | Registry's registration with a Git Provider |
+| **Connection** | A writer's personal grant of repo access to the Registry |
+| **Token** | Secret a User mints for CLI access |
+| **Agent** | A coding agent that reads Skills from a conventional directory on a developer's machine |
+| **Scope** | Where a Skill is installed — current project or the Agent's user-level directory |
+| **Identity Provider** | A configured way for a User to sign in without a password (Google Workspace, Microsoft Entra, or GitHub) |
+| **Superadmin** | The first User; one per Registry, permanent |

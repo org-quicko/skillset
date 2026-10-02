@@ -1,0 +1,169 @@
+---
+title: "Using the Skillset CLI in CI and Automation Pipelines"
+sidebarTitle: "CI & Automation"
+description: "Run Skillset CLI commands non-interactively in CI pipelines using environment variables, --json output, and structured exit codes."
+---
+
+The Skillset CLI is designed for unattended use in CI pipelines and automation scripts. This page covers the two mechanisms that make non-interactive operation reliable: environment variables that replace the login step, and the `--json` flag that makes every command's output machine-parseable and prompt-free.
+
+## Skip `login` with environment variables
+
+In CI, skip the `skillset login` step entirely. Set two environment variables and the CLI picks them up on every command, always overriding the stored config file:
+
+```bash
+SKILLSET_REGISTRY=https://skills.example.com
+SKILLSET_TOKEN=sk_live_…
+```
+
+`SKILLSET_REGISTRY` and `SKILLSET_TOKEN` take precedence over whatever `skillset login` stored on disk. You can mix them: setting only `SKILLSET_REGISTRY` points the CLI at that Registry while leaving Token resolution to the stored config (or omitting auth entirely for read-only commands).
+
+<Note>
+  Catalog reads — `search`, `info`, `list`, `update` — do not require a Token. You only need `SKILLSET_TOKEN` for write operations (`publish`) and for submitting URL-installed Skills.
+</Note>
+
+## Machine-readable output with `--json`
+
+Every command accepts `--json`. In this mode:
+
+- The command's result is written to **stdout** as a JSON object or array.
+- Any failure is written to **stderr** as `{ "error": { "code": "…", "message": "…" } }` — never mixed into stdout, so a caller parsing stdout always gets a well-formed payload.
+- Exit code is `0` on success, non-zero on any failure.
+- **No prompts** are shown, regardless of whether a terminal is attached.
+
+Because `--json` never prompts, some flags that are optional interactively become required:
+
+| Command | Required under `--json` |
+|---|---|
+| `login` | `--token` |
+| `install` | `--scope` |
+| `publish` (batch) | `--yes` |
+
+<Warning>
+  Omitting a required flag under `--json` causes the command to exit with a non-zero code and write a JSON error to stderr — it never hangs waiting for input.
+</Warning>
+
+## Parsing JSON output with `jq`
+
+```bash
+# Extract Skill names from a search
+skillset search code-review --json | jq -r '.items[].name'
+
+# List all outdated Skills
+skillset list --json | jq '[.skills[] | select(.status == "outdated")]'
+
+# Get just the published Skill's id after a publish
+skillset publish ./skills/code-review --json | jq -r '.id'
+
+# Count how many Skills in a batch publish failed
+skillset publish ./skills --yes --json | jq '[.[] | select(.status == "failed")] | length'
+```
+
+## Exit codes
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Command completed successfully |
+| `1` | At least one error occurred |
+
+For batch commands (`publish`, `update`) the exit code is `1` if **any single Skill** in the batch failed, even when others succeeded. Inspect the per-Skill `status` fields in the JSON output to identify which ones need attention.
+
+## GitHub Actions example
+
+The following workflow publishes all Skills under `./skills` on every push to `main`:
+
+```yaml
+name: Publish Skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/**"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Skillset CLI
+        run: npm install -g @in-org-quicko/skillset-cli
+
+      - name: Publish Skills
+        env:
+          SKILLSET_REGISTRY: ${{ secrets.SKILLSET_REGISTRY }}
+          SKILLSET_TOKEN: ${{ secrets.SKILLSET_TOKEN }}
+        run: skillset publish ./skills --yes --json
+```
+
+Store `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` as [encrypted secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets) in your repository settings.
+
+## More CI examples
+
+<CodeGroup>
+```bash Install a Skill non-interactively
+skillset install code-review \
+  --agent claude-code \
+  --scope project \
+  --json
+```
+
+```bash Publish a single Skill
+skillset publish ./skills/code-review --json
+```
+
+```bash Batch publish with error check
+skillset publish ./skills --yes --json
+# exits 1 if any Skill failed; inspect output for details
+```
+
+```bash Update all outdated Skills
+skillset update --json
+```
+</CodeGroup>
+
+## Error format
+
+All failures under `--json` produce a JSON object on stderr:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "No Skill named \"code-review\" on this Registry. Run `skillset search` to see what there is."
+  }
+}
+```
+
+`code` is the Registry's own error code when the failure originated there (e.g. `not_found`, `already_published`, `unauthorized`), and `cli_error` for failures that never reached the Registry. Branching on `code` rather than `message` makes scripts resilient to wording changes.
+
+<Tip>
+  Redirect stderr to a file while capturing stdout for parsing: `skillset publish ./skills --yes --json 2>errors.json`. This lets you inspect failures independently without interrupting your pipeline's stdout processing.
+</Tip>
+
+## Batch publish outcomes
+
+When publishing a directory that contains multiple Skills, `publish --json` returns an array. Each element has a `status` of `"published"` or `"failed"`:
+
+```json
+[
+  {
+    "name": "code-review",
+    "status": "published",
+    "id": "res_01j…",
+    "published_at": "2025-01-15T10:00:00Z"
+  },
+  {
+    "name": "pdf",
+    "status": "failed",
+    "error": "SKILL.md missing required field: description"
+  }
+]
+```
+
+The process exits with code `1` if **any** element has `"status": "failed"`. A partial success is a failure from the pipeline's perspective — check and fix the failing Skills before relying on the batch as a whole.

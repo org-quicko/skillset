@@ -1,0 +1,154 @@
+---
+title: "Search the Skill Catalog with Full-Text and Fuzzy Match"
+sidebarTitle: "Search"
+description: "Skillset search uses Postgres full-text with trigram fallback for typos. Covers query params, Kind and Tag filters, pagination, and CLI and MCP usage."
+---
+
+Skillset's catalog search uses Postgres full-text matching as its primary strategy, with an automatic trigram fallback when full-text finds nothing. The result is that a mistyped query like `angulr` still returns `building-angular-applications` — without any special configuration on the writer's side. This page covers how the two-stage search works, the available filters and sort options, pagination, and how to invoke search from the API, CLI, and MCP server.
+
+## How search works
+
+Search is a two-stage pipeline:
+
+1. **Full-text search** (`tsvector` / `tsquery`) runs first. It tokenises and stems the query against each Resource's indexed fields.
+2. **Trigram fallback** (`pg_trgm`) runs only when full-text returns no results. It matches the raw query string against Resource names and descriptions using character-level similarity, catching typos and partial words.
+
+Because the fallback only activates on a zero-result full-text response, well-formed queries are never penalised by the fuzzier trigram scoring.
+
+<Note>
+  The trigram fallback requires the `pg_trgm` Postgres extension. The baseline migration creates it automatically at startup. On managed Postgres, `CREATE EXTENSION` may require a privileged role — see [Deployment → Database](/deployment/database) if the migration fails.
+</Note>
+
+## API
+
+Search and filtering are controlled by query parameters on `GET /api/resources`. No authentication is required.
+
+```http
+GET /api/resources?q=code+review&kind=skill&tag_id=<id>&page=1&page_size=20
+```
+
+<ParamField query="q" type="string">
+  The search term. Blank or whitespace-only is treated as no query — the full catalog is returned, sorted by recency. When a term is given, results are sorted by relevance unless `sort_by` overrides it.
+</ParamField>
+
+<ParamField query="kind" type="string">
+  Narrow results to one Kind: `skill`, `mcp-server`, or `plugin`. Omit to return all Kinds. An unrecognised value is rejected with a 400.
+</ParamField>
+
+<ParamField query="tag_id" type="string">
+  Filter by Tag id. Repeatable — pass multiple `tag_id` values to require any of them. Malformed UUIDs are silently dropped rather than rejecting the whole request.
+</ParamField>
+
+<ParamField query="page" type="integer">
+  Page number, 1-indexed. Values below 1 or non-numeric values default to page 1.
+</ParamField>
+
+<ParamField query="page_size" type="integer">
+  Results per page. Default: 10. Min: 1. Max: 100. Values outside this range are clamped, not rejected.
+</ParamField>
+
+<ParamField query="sort_by" type="string">
+  One of `relevance`, `updated_at`, or `installs`. When `q` is set, defaults to `relevance`; otherwise defaults to `updated_at`. Passing `relevance` with no query silently falls back to `updated_at`. An unrecognised value is rejected with a 400.
+</ParamField>
+
+<ParamField query="sort_order" type="string">
+  `asc` or `desc`. Defaults to `desc`. An unrecognised value is rejected with a 400.
+</ParamField>
+
+### Response shape
+
+```json
+{
+  "items": [
+    {
+      "id": "01932b4c-...",
+      "kind": "skill",
+      "namespace": "acme/skills",
+      "name": "structured-code-review",
+      "description": "A systematic guide for performing code reviews in four passes.",
+      "published_by_name": "Ada Lovelace",
+      "updated_at": "2025-01-15T10:30:00Z",
+      "allowed_tools": "Bash(git diff:*) Read",
+      "source": "https://github.com/acme/skills",
+      "installs": 42,
+      "tags": [{ "id": "018f...", "name": "engineering" }]
+    }
+  ],
+  "page": 1,
+  "page_size": 20,
+  "total": 7
+}
+```
+
+## CLI
+
+```bash
+# Search by keyword
+skillset search code-review
+
+# Filter by Tag name (resolved to id automatically)
+skillset search --tag engineering
+
+# Combine query and tag
+skillset search code-review --tag engineering
+
+# Limit results
+skillset search --limit 5
+
+# Machine-readable output
+skillset search code-review --json
+```
+
+The `--tag` flag accepts a Tag name; the CLI resolves it to a Tag id by fetching `GET /api/tags` before sending the search request. If the name does not match any Tag, the CLI lists the available Tags in the error message.
+
+<Note>
+  The `skillset search` command always searches **Skills only** — the CLI sends `kind=skill` with every request. To search MCP Servers or Plugins, query the API directly: `GET /api/resources?kind=mcp-server` or `GET /api/resources?kind=plugin`.
+</Note>
+
+## MCP
+
+The `search_skills` tool on the bundled MCP server exposes the same catalog search to any agent using the MCP server.
+
+```json
+{
+  "tool": "search_skills",
+  "arguments": {
+    "query": "code review",
+    "tag": "engineering",
+    "limit": 10,
+    "cursor": null
+  }
+}
+```
+
+<ParamField path="query" type="string">
+  Optional. The search term. Omit to list the full catalog.
+</ParamField>
+
+<ParamField path="tag" type="string">
+  Optional. A Tag name. Resolved to a Tag id automatically.
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Optional. Maximum number of results to return.
+</ParamField>
+
+<ParamField path="cursor" type="string">
+  Optional. A cursor returned by a previous `search_skills` call. Use `next_cursor` from the prior response to page forward.
+</ParamField>
+
+Each result in `search_skills` includes `allowed_tools`, so what a Skill claims the right to access is visible before any install decision — you do not need to call `read_skill` first.
+
+## Sorting behaviour
+
+| Condition | Default `sort_by` |
+|---|---|
+| `q` is set | `relevance` |
+| `q` is absent | `updated_at` |
+| `sort_by=relevance` with no `q` | Falls back to `updated_at` |
+
+This means clearing the search box always shows a sensibly ordered list rather than an error or an empty page.
+
+## No authentication required
+
+All search and catalog read endpoints are public. A Reader, or an unauthenticated visitor, can browse, search, filter, and read any Resource without signing in. Only publishing, deleting, and tag management require authentication.

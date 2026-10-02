@@ -1,0 +1,157 @@
+---
+title: "Tags: Organize and Filter Resources in the Registry"
+sidebarTitle: "Tags"
+description: "Tags are short labels from a shared catalog across all Kinds. Covers attaching, renaming, and managing Tags, and filtering by Tag in the API, CLI, and MCP."
+---
+
+Tags are short labels that writers attach to Resources for browsing and filtering. They are drawn from a single catalog shared across all Kinds and all Resources in the Registry — a Skill and an MCP Server can carry the same Tag. This page explains the Tag catalog, how Tags relate to Resources, and how to use Tag filtering across the API, CLI, and MCP server.
+
+## The Tag catalog
+
+Every Tag has a stable `id` (a UUID) and a human-readable `name`. The `id` is what the Registry stores in its many-to-many join table; the `name` is what writers and agents type. Because every reference is by `id`:
+
+- **Renaming a Tag changes it everywhere it is attached.** A single `PATCH /api/tags/{id}` call updates the name for every Resource that carries that Tag.
+- **Tags are Registry metadata**, not written into a Resource's frontmatter or payload. A `SKILL.md` file never contains a tag; Tags are attached after publish via the web interface or the API.
+- **The catalog is shared across Kinds.** There is one tag named `engineering`, not one per Kind.
+
+<Note>
+  Tag names are the human-facing identifier; Tag ids are internal opaque UUIDs. The CLI and MCP server resolve names to ids automatically — you never need to look up or store a Tag id yourself.
+</Note>
+
+## Tag name rules
+
+Tag names are lowercase, following the same normalisation rule the Registry applies on match. A writer entering `Testing` is matched against `testing`. Tag names may contain lowercase alphanumerics and hyphens.
+
+## Managing Tags
+
+### Attaching Tags to a Resource
+
+Writers attach or replace a Resource's Tags via the web interface or the API. The operation is a full replacement — the body lists every Tag name the Resource should carry after the call; any Tag not in the list is detached.
+
+```http
+PUT /api/resources/{id}/tags
+Content-Type: application/json
+
+{
+  "tags": ["engineering", "code-quality", "testing"]
+}
+```
+
+The server resolves each name to an existing catalog row, or creates a new one if the name is new.
+
+```json
+{
+  "tags": [
+    { "id": "018f4a1b-...", "name": "engineering" },
+    { "id": "018f4a2c-...", "name": "code-quality" },
+    { "id": "018f4a3d-...", "name": "testing" }
+  ]
+}
+```
+
+A `writer` role is required — the same bar as publishing a Resource.
+
+### Renaming a Tag
+
+Admins can rename a Tag via the API. The rename propagates to every Resource carrying that Tag.
+
+```http
+PATCH /api/tags/{id}
+Content-Type: application/json
+
+{
+  "name": "code-review"
+}
+```
+
+An `admin` role is required — stricter than attaching a Tag, because a rename affects every Resource in the catalog.
+
+### Listing all Tags
+
+The full Tag catalog is public — no authentication required. The CLI and MCP server fetch it automatically when resolving a name to an id.
+
+```http
+GET /api/tags
+```
+
+```json
+{
+  "items": [
+    { "id": "018f4a1b-...", "name": "engineering" },
+    { "id": "018f4a2c-...", "name": "code-quality" }
+  ]
+}
+```
+
+## Filtering by Tag
+
+<Tabs>
+  <Tab title="API">
+    Pass one or more `tag_id` query parameters to `GET /api/resources`. Tag ids are UUIDs; malformed values are silently dropped.
+
+    ```http
+    GET /api/resources?tag_id=018f4a1b-...&tag_id=018f4a2c-...
+    ```
+
+    To filter by name, first resolve it via `GET /api/tags`, then pass the `id`.
+  </Tab>
+  <Tab title="CLI">
+    Pass `--tag <name>` to `skillset search`. The CLI fetches the Tag catalog, resolves the name to an id, and sends the id to the API.
+
+    ```bash
+    # Filter search results by tag name
+    skillset search --tag engineering
+
+    # Combine with a query
+    skillset search code-review --tag engineering
+    ```
+
+    If the name is not found, the CLI prints an error listing all available Tags.
+  </Tab>
+  <Tab title="MCP">
+    Pass `tag` (a name) to the `search_skills` tool. The MCP server resolves the name to an id automatically before calling the API.
+
+    ```json
+    {
+      "tool": "search_skills",
+      "arguments": {
+        "query": "code review",
+        "tag": "engineering"
+      }
+    }
+    ```
+
+    The `skillset://tags/{tag}` resource template lists all Skills carrying a given Tag by name. The `{tag}` variable completes against the Tag catalog.
+
+    ```
+    skillset://tags/engineering
+    ```
+  </Tab>
+</Tabs>
+
+## Tag reference
+
+<CardGroup cols={2}>
+  <Card title="GET /api/tags" icon="list">
+    Returns the full Tag catalog. Public — no authentication required. Used by the CLI and MCP to resolve names to ids.
+  </Card>
+  <Card title="PUT /api/resources/{id}/tags" icon="tag">
+    Replaces a Resource's full Tag set. Requires `writer` role. Creates new catalog entries for names not yet in the catalog.
+  </Card>
+  <Card title="PATCH /api/tags/{id}" icon="pen">
+    Renames a Tag across the entire catalog. Requires `admin` role.
+  </Card>
+  <Card title="skillset://tags/{tag}" icon="server">
+    MCP resource template. Lists all Skills carrying a Tag, by Tag name.
+  </Card>
+</CardGroup>
+
+## Roles and permissions
+
+| Action | Required role |
+|---|---|
+| Browse the Tag catalog | None (public) |
+| Filter Resources by Tag | None (public) |
+| Attach Tags to a Resource | Writer |
+| Rename a Tag | Admin |
+| Create a new Tag (via attach) | Writer |

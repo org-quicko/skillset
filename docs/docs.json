@@ -1,0 +1,114 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Skillset",
+  "theme": "luma",
+  "colors": {
+    "primary": "#6366f1",
+    "light": "#818cf8",
+    "dark": "#4338ca"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/org-quicko/skillset"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/org-quicko/skillset"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/configuration",
+              "deployment/database",
+              "deployment/storage"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "auth/overview",
+              "auth/identity-providers",
+              "auth/tokens"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/installation",
+              "cli/commands",
+              "cli/ci-automation"
+            ]
+          },
+          {
+            "group": "MCP Server",
+            "pages": [
+              "mcp/overview",
+              "mcp/configuration",
+              "mcp/tools"
+            ]
+          },
+          {
+            "group": "Registry Features",
+            "pages": [
+              "features/skills",
+              "features/mcp-servers",
+              "features/plugins",
+              "features/import",
+              "features/search",
+              "features/tags"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/users",
+              "admin/integrations",
+              "admin/submissions"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/resources",
+              "api/tags",
+              "api/users",
+              "api/auth",
+              "api/imports",
+              "api/integrations",
+              "api/connections",
+              "api/submissions"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
