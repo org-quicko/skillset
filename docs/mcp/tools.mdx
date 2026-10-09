@@ -1,0 +1,303 @@
+---
+title: "Skillset MCP Server: Tools and Resources Reference"
+sidebarTitle: "Tools"
+description: "Complete parameter and return-shape reference for all seven MCP tools and two resource templates the Skillset MCP server exposes to coding agents."
+---
+
+The Skillset MCP server exposes seven tools split across two groups — Registry tools that talk to the remote catalog, and Local tools that manage the current project's installed copies — plus two URI-template MCP resources. Every tool declares an `outputSchema` and returns `structuredContent` matching that schema, so a host can validate results rather than only trust the loose JSON in `content[0].text`.
+
+## Registry tools
+
+These tools communicate with the remote Registry. Catalog reads (`search_skills`, `read_skill`) require no Token and send no `Authorization` header. `install_skills` also requires no credential. Only `publish_skill` requires a writer Token.
+
+---
+
+### `search_skills`
+
+Search the Registry's Skill catalog, or list the entire catalog by omitting the query. This is the entry point for any agent interaction with the Registry — always call it before `install_skills` so you have exact Registry names.
+
+Each result includes `allowed_tools` — what a Skill claims the right to reach once loaded. This field is surfaced on the search result (not only on `read_skill`) because `install_skills` can be called straight from a search, and reviewing what a Skill claims before installing is more meaningful than discovering it after.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="query" type="string">
+      A task description or exact Skill name. Examples: `adapter`, `write-adapters`, `review pull requests`, `write changelogs`. Omit entirely to list the whole catalog — this is how you answer "what Skills do we have?"
+    </ParamField>
+    <ParamField path="tag" type="string">
+      A Tag **name** (not an id) to narrow the search — e.g. `testing`. The server resolves the name to its internal id before querying the Registry.
+    </ParamField>
+    <ParamField path="limit" type="number">
+      Maximum number of Skills to return per page. The Registry applies its own default when omitted.
+    </ParamField>
+    <ParamField path="cursor" type="string">
+      Opaque pagination token from a previous call's `next_cursor`. Omit for the first page. Without this, a catalog larger than one page is unreachable past the first `page_size` Skills.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="results" type="array">
+      The matching Skills on this page.
+      <Expandable title="Result fields">
+        <ResponseField name="name" type="string">The Skill's name, exactly as it appears in the Registry.</ResponseField>
+        <ResponseField name="description" type="string">One-line description of what the Skill does.</ResponseField>
+        <ResponseField name="tags" type="string[]">Tag names associated with the Skill.</ResponseField>
+        <ResponseField name="updated_at" type="string">ISO 8601 timestamp of the last publish. Useful for comparing two similar Skills.</ResponseField>
+        <ResponseField name="installs" type="number">Total install count recorded against this Skill.</ResponseField>
+        <ResponseField name="allowed_tools" type="string | null">The Skill's `allowed-tools` frontmatter value, or `null` if not set. States what the Skill claims the right to reach once loaded — review this before installing.</ResponseField>
+        <ResponseField name="namespace" type="string">The publishing identity: `owner/repo` for a Skill Imported from a Git repository, or the Registry's own reverse-DNS domain for a Skill published directly to it.</ResponseField>
+        <ResponseField name="source" type="string">Where the Skill came from: a repository URL, or the Registry's own reverse-DNS domain.</ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="total" type="number">Total number of Skills matching the query, which may exceed `results.length`.</ResponseField>
+    <ResponseField name="truncated" type="boolean">`true` when there is at least one further page.</ResponseField>
+    <ResponseField name="page" type="number">Current page number.</ResponseField>
+    <ResponseField name="page_size" type="number">Number of results per page.</ResponseField>
+    <ResponseField name="next_cursor" type="string | null">Pass this as `cursor` in the next call to fetch the following page. `null` once all results have been returned.</ResponseField>
+  </Tab>
+</Tabs>
+
+**Pagination example**
+
+```ts
+// First page
+const first = await search_skills({ limit: 20 });
+// Next page (if available)
+if (first.next_cursor) {
+  const second = await search_skills({ limit: 20, cursor: first.next_cursor });
+}
+```
+
+---
+
+### `read_skill`
+
+Read one Skill's full `SKILL.md` body and file list from the Registry **without installing it**. Use this to review a Skill before installing, answer a question about what it does, or compare two candidates. Never call `install_skills` merely to inspect content — this tool exists precisely to separate reading from adopting.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="name" type="string" required>
+      The Skill's name, exactly as `search_skills` reported it.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="skill" type="object">
+      <Expandable title="Skill fields">
+        <ResponseField name="name" type="string">The Skill's name.</ResponseField>
+        <ResponseField name="description" type="string">One-line description.</ResponseField>
+        <ResponseField name="body" type="string">The full `SKILL.md` body — everything below the frontmatter. This is the content an agent reads once a Skill is installed.</ResponseField>
+        <ResponseField name="tags" type="string[]">Tag names.</ResponseField>
+        <ResponseField name="updated_at" type="string">ISO 8601 timestamp of the last publish.</ResponseField>
+        <ResponseField name="installs" type="number">Total install count.</ResponseField>
+        <ResponseField name="license" type="string | null">License identifier, or `null` if not declared.</ResponseField>
+        <ResponseField name="compatibility" type="string | null">Compatibility note, or `null` if not declared.</ResponseField>
+        <ResponseField name="allowed_tools" type="string | null">What the Skill claims the right to reach once loaded, or `null` if not set.</ResponseField>
+        <ResponseField name="source" type="string">Repository URL or Registry reverse-DNS domain.</ResponseField>
+        <ResponseField name="files" type="array">Every file the Skill ships, with `path` and `size` in bytes. Reflects what storage actually holds rather than what was declared at publish time.</ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+<Note>
+  `read_skill` records no install. Listing a Skill's files does not count as obtaining it. Only the Artifact download that `install_skills` performs increments the install counter.
+</Note>
+
+---
+
+### `install_skills`
+
+Download and install one or more Skills from the Registry into the directory the detected agent reads. Installs are recorded in the project's `skillset-lock.json` Lockfile so that `installed_skills` and `update_skills` can later distinguish a stale copy from an edited one.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="names" type="string[]" required>
+      The Skill names to install, exactly as `search_skills` reported them. One bad name does not stop the rest of the batch.
+    </ParamField>
+    <ParamField path="overwrite" type="boolean">
+      Replace an already-installed Skill completely. Only set this when the user has explicitly asked to update or replace an existing install — never on a routine install.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="detection" type="object">
+      The agent detection that governed this batch. Includes `agentId` (the resolved agent, or `null` for the canonical fallback) and `step` (which rung of the detection ladder resolved it: `override`, `client-identity`, `environment`, `project-directory`, or `canonical-fallback`).
+    </ResponseField>
+    <ResponseField name="outcomes" type="array">
+      One outcome per name in the request, in the same order. Possible statuses:
+
+      - **`installed`** — Skill was written successfully. Includes `skillDirectory`, `link` (canonical / symlink / copy), `alsoServes` (other agents now served by this install), and `skillMdBody`. Note: active from the agent's next session, not this one.
+      - **`refused`** — A Skill with that name is already installed and `overwrite` was not set. Includes `installed`: what the existing copy's Status is (`current`, `outdated`, `modified`, or `untracked`). Use this to decide the right next step before retrying.
+      - **`fallback`** — The detected agent has no Skills directory at this scope. Includes `artifactLocation` (where to fetch the zip), `manifest` (file list), `intendedDirectory`, and `skillMdBody`. Nothing was written to disk.
+      - **`error`** — An individual Skill failed (unknown name, download error, Artifact validation failure). The rest of the batch continues.
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+<Info>
+  Skills are installed to the canonical `.agents/skills/<name>` directory. If the detected agent uses a different directory (e.g. `.claude/skills/<name>`), the server creates a symlink there pointing back to the canonical location, so both the agent and the canonical layout are satisfied.
+</Info>
+
+**Handling a refused install**
+
+When a Skill comes back `refused`, check the `installed` field to decide what to do:
+
+| `installed` value | Meaning | Recommended action |
+|---|---|---|
+| `current` | Already matches the Registry | Nothing to do |
+| `outdated` | Registry has moved on | Call `update_skills` |
+| `modified` | Installed copy has local edits | Tell the user; only pass `overwrite` if they consent to losing edits |
+| `untracked` | No Lockfile entry — unknown state | Tell the user; confirm before passing `overwrite` |
+
+---
+
+### `publish_skill`
+
+Publish a Skill to the Registry. Accepts either a directory inside the current project, or a GitHub/GitLab URL with a Skill name. Republishing an existing name overwrites it completely — there is no versioning. Requires a writer Token configured on the server via `--token` or `SKILLSET_TOKEN`.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="path" type="string">
+      Directory inside the project holding the Skill's own `SKILL.md`, relative to the project root. Defaults to the project root itself when omitted. Must point at the Skill's own directory, not a folder containing multiple Skills. Do not combine with `url`.
+    </ParamField>
+    <ParamField path="url" type="string">
+      A GitHub or GitLab repository URL — or a folder inside one — to publish from instead of this project. Cloned using the user's own git credentials, so private repositories they can clone work. Requires `name`.
+    </ParamField>
+    <ParamField path="name" type="string">
+      Required with `url`. The name the Skill declares in its `SKILL.md` frontmatter. If it matches no Skill in the repository, the error lists every Skill found there.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="name" type="string">The published Skill's name, as the Registry recorded it.</ResponseField>
+    <ResponseField name="id" type="string">The Registry's internal ID for this Skill.</ResponseField>
+    <ResponseField name="published_at" type="string">ISO 8601 publish timestamp.</ResponseField>
+    <ResponseField name="source" type="string | null">The repository it was published from, or `null` for a directory in this project.</ResponseField>
+    <ResponseField name="files" type="array">Every file that was uploaded, with `path` and `size` in bytes. Provides a verifiable record of what left this machine.</ResponseField>
+    <ResponseField name="total_bytes" type="number">Total bytes uploaded across all files.</ResponseField>
+  </Tab>
+</Tabs>
+
+<Warning>
+  `publish_skill` confines `path` strictly to the project directory. Absolute paths and traversals (`../../`) are refused. This prevents prompt injection inside an installed Skill from publishing arbitrary directories (such as `~/.ssh`) to a publicly readable Registry.
+</Warning>
+
+<Note>
+  If no Token is configured, the tool returns an `isError` result with a message instructing the user to set `--token` or `SKILLSET_TOKEN` and restart the MCP server. This is a user action — no chat message can configure the server at runtime.
+</Note>
+
+---
+
+## Local tools
+
+These tools operate on the project's installed Skills, reading and writing the local `skillset-lock.json` Lockfile. They consult the Registry only to compare versions.
+
+---
+
+### `installed_skills`
+
+List the Skills installed in the current project and report each one's Status. This is the local inventory — not the Registry's catalog. Call this before `update_skills` or `remove_skills`, and whenever the user asks what Skills a project uses or whether anything is out of date.
+
+<Tabs>
+  <Tab title="Parameters">
+    No parameters required.
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="skills" type="array">
+      One entry per Skill recorded in the Lockfile, sorted alphabetically by name.
+      <Expandable title="Skill fields">
+        <ResponseField name="name" type="string">The Skill's name.</ResponseField>
+        <ResponseField name="status" type="string">
+          One of four Status values:
+          - `current` — matches the Registry's latest version
+          - `outdated` — the Registry has a newer version
+          - `modified` — the installed copy has local edits
+          - `missing` — the Lockfile has an entry but the files are gone
+        </ResponseField>
+        <ResponseField name="directory" type="string">Absolute path to the installed Skill's directory on disk.</ResponseField>
+        <ResponseField name="installed_at" type="string">ISO 8601 timestamp of when this Skill was installed.</ResponseField>
+        <ResponseField name="registry_updated_at" type="string | null">What the Registry holds now, or `null` if the Registry no longer has this Skill.</ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+---
+
+### `update_skills`
+
+Re-download installed Skills that the Registry has moved on from, replacing the local copies. A locally-modified Skill is **skipped** and reported as `refused` unless `force` is set — an update cannot be undone, and silently discarding local edits is not acceptable without user confirmation.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="names" type="string[]">
+      The installed Skills to update. Omit to update every Skill this project has fallen behind on (Status `outdated` or `missing`).
+    </ParamField>
+    <ParamField path="force" type="boolean">
+      Update a Skill even though its installed copy has local edits, discarding them. Only set this when the user has been told about the edits and has explicitly asked for them to be discarded.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    Returns the same shape as `install_skills`: a `detection` object and an `outcomes` array with per-Skill statuses. A Skill skipped due to local edits comes back as `refused` with `installed: "modified"`.
+  </Tab>
+</Tabs>
+
+---
+
+### `remove_skills`
+
+Uninstall Skills from the current project: their files, the agent's symlink to each, and their Lockfile entries. Nothing is removed from the Registry — the team keeps the Skill, this project stops using it. Removing a Skill that is not installed is harmless and reported as `not-installed`.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="names" type="string[]" required>
+      The installed Skills to uninstall. At least one name is required.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="outcomes" type="array">
+      One outcome per name. Possible statuses:
+      - **`removed`** — Skill was uninstalled. Includes `skillDirectory` (or `null` if already gone) and `link` (path of the removed symlink, or `null`).
+      - **`not-installed`** — Nothing with that name was found in the Lockfile or on disk. Harmless.
+      - **`error`** — Removal failed for this Skill. One failure does not stop the rest.
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+---
+
+## MCP resources
+
+Two URI template resources are registered directly on the server. They are accessible to any MCP host that supports the `resources/list` and `resources/read` primitives — no tool call required.
+
+### `skillset://skills/{name}`
+
+Returns one Skill's `SKILL.md` body as `text/markdown`. The `name` variable autocompletes against the full Registry catalog via MCP's `completion/complete` protocol.
+
+```
+skillset://skills/code-review
+skillset://skills/write-adapters
+```
+
+### `skillset://tags/{tag}`
+
+Returns the name and description of every Skill carrying the specified Tag, as `application/json`. The `tag` variable autocompletes against the Registry's Tag catalog.
+
+```
+skillset://tags/testing
+skillset://tags/documentation
+```
+
+<Note>
+  MCP completions attach to resource template variables, not to a tool's `inputSchema`. That is why `name` and `tag` autocomplete here but not inside `search_skills`'s parameters — the two systems are distinct. The resources and the tools return the same underlying data; the resources exist so a host can attach Skill content directly without constructing a tool call.
+</Note>
+
+---
+
+## Tool annotations summary
+
+| Tool | Read-only | Idempotent | Open world |
+|---|---|---|---|
+| `search_skills` | ✅ | ✅ | ✅ |
+| `read_skill` | ✅ | ✅ | ✅ |
+| `install_skills` | ❌ | ❌ | ✅ |
+| `publish_skill` | ❌ | — | ✅ |
+| `installed_skills` | ✅ | ✅ | ✅ |
+| `update_skills` | ❌ | ❌ | ✅ |
+| `remove_skills` | ❌ | ✅ | ❌ |

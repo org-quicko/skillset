@@ -1,0 +1,157 @@
+---
+title: "Configure Identity Providers for Single Sign-On in Skillset"
+sidebarTitle: "Identity Providers"
+description: "Add Google Workspace, Microsoft Entra, or GitHub OAuth so Users can sign in through their existing corporate or developer identity alongside a password."
+---
+
+Identity Providers let Users sign in through a trusted third party instead of (or in addition to) a locally-managed password. Skillset supports three kinds — Google Workspace, Microsoft Entra, and GitHub OAuth — and you can enable any combination of them simultaneously. Each kind may appear at most once in a Registry. Providers are configured from **Settings → Login** in the web interface and require the Superadmin role.
+
+<Note>
+  Password login is always available, even when Identity Providers are configured. It is the fallback path if a provider's credentials expire or the upstream service is unreachable.
+</Note>
+
+## Prerequisites
+
+Set `PUBLIC_URL` in your environment before configuring any provider. The Registry builds every OAuth redirect URI from this value, and it refuses to start without one.
+
+```bash
+# .env
+PUBLIC_URL=https://skills.example.com
+```
+
+The redirect URI registered in each provider's console follows the same pattern:
+
+```
+<PUBLIC_URL>/api/auth/callback/<kind>
+```
+
+Where `<kind>` is one of `google`, `microsoft`, or `github` — one URI per provider, registered separately in each console.
+
+## Supported providers
+
+<Tabs>
+  <Tab title="Google Workspace">
+    ### Google Workspace
+
+    The Registry checks the `hd` (hosted domain) claim in the Google ID token against your list of Permitted Organisations. Only accounts belonging to one of your configured Workspace domains are admitted; personal Gmail accounts are always refused when any Permitted Organisation is set.
+
+    **Set up an OAuth app in Google Cloud Console:**
+
+    <Steps>
+      <Step title="Create an OAuth client">
+        In the [Google Cloud Console](https://console.cloud.google.com/), navigate to **APIs & Services → Credentials** and create an OAuth 2.0 Client ID of type **Web application**.
+      </Step>
+      <Step title="Add the redirect URI">
+        Under **Authorised redirect URIs**, add:
+        ```
+        <PUBLIC_URL>/api/auth/callback/google
+        ```
+      </Step>
+      <Step title="Copy the credentials">
+        Note the **Client ID** and **Client secret** — you will paste them into Settings → Login.
+      </Step>
+      <Step title="Add the provider in Skillset">
+        Open **Settings → Login**, click **Add Provider**, select **Google**, and fill in:
+        - **Client ID** and **Client Secret** from the previous step
+        - **Permitted Organisations**: one or more Workspace domain suffixes (e.g. `example.com`). A sign-in is admitted only if its `hd` claim matches one of these values.
+        - **Enabled**: toggle on when ready.
+      </Step>
+    </Steps>
+
+    <Warning>
+      An account whose email domain matches a Permitted Organisation but was authenticated by a Google account type that does not issue an `hd` claim will be refused. Always test with a real Workspace account from your domain before enabling in production.
+    </Warning>
+  </Tab>
+  <Tab title="Microsoft Entra">
+    ### Microsoft Entra (Azure AD)
+
+    The Registry checks the `tid` (tenant ID) claim in the Entra ID token against your list of Permitted Organisations. Only accounts belonging to one of your configured tenant IDs are admitted.
+
+    **Register an app in the Azure portal:**
+
+    <Steps>
+      <Step title="Create an app registration">
+        In the [Azure portal](https://portal.azure.com/), navigate to **Microsoft Entra ID → App registrations** and click **New registration**.
+      </Step>
+      <Step title="Add the redirect URI">
+        Under **Authentication → Redirect URIs**, add a **Web** redirect URI:
+        ```
+        <PUBLIC_URL>/api/auth/callback/microsoft
+        ```
+      </Step>
+      <Step title="Create a client secret">
+        Navigate to **Certificates & secrets → New client secret** and note the generated value. Also note the **Application (client) ID** from the **Overview** page.
+      </Step>
+      <Step title="Add the provider in Skillset">
+        Open **Settings → Login**, click **Add Provider**, select **Microsoft**, and fill in:
+        - **Client ID** and **Client Secret** from the previous step
+        - **Permitted Organisations**: one or more Entra tenant IDs (GUIDs, e.g. `11111111-2222-3333-4444-555555555555`). A sign-in is admitted only if its `tid` claim matches one.
+        - **Enabled**: toggle on when ready.
+      </Step>
+    </Steps>
+
+    <Info>
+      When exactly one tenant ID is configured, the Registry pins the OAuth endpoint to that tenant, which additionally excludes personal Microsoft accounts at the protocol level. Multiple tenant IDs fall back to the `organizations` multi-tenant endpoint. An empty Permitted Organisations list uses the `common` endpoint and admits any Microsoft account — see [Ungated providers](#ungated-providers) before doing this intentionally.
+    </Info>
+  </Tab>
+  <Tab title="GitHub OAuth">
+    ### GitHub OAuth
+
+    The Registry checks live organisation membership (via the GitHub API's `/user/orgs` endpoint) against your list of Permitted Organisations. Only GitHub accounts that belong to at least one of your configured GitHub organisation logins are admitted.
+
+    **Create an OAuth app on GitHub:**
+
+    <Steps>
+      <Step title="Create an OAuth App">
+        Navigate to **GitHub → Settings → Developer settings → OAuth Apps** and click **New OAuth App** (or create one under your organisation at **Organisation Settings → Developer settings → OAuth Apps**).
+      </Step>
+      <Step title="Set the callback URL">
+        Set the **Authorization callback URL** to:
+        ```
+        <PUBLIC_URL>/api/auth/callback/github
+        ```
+      </Step>
+      <Step title="Copy the credentials">
+        Note the **Client ID** and generate a **Client secret**.
+      </Step>
+      <Step title="Add the provider in Skillset">
+        Open **Settings → Login**, click **Add Provider**, select **GitHub**, and fill in:
+        - **Client ID** and **Client Secret**
+        - **Permitted Organisations**: one or more GitHub organisation login names (e.g. `acme-corp`). A sign-in is admitted only if the authenticating account is a member of at least one.
+        - **Enabled**: toggle on when ready.
+      </Step>
+    </Steps>
+
+    <Warning>
+      If your GitHub organisation restricts third-party application access, every member will receive an empty organisation list from the GitHub API and be refused — even if they are genuine members. An organisation owner must approve the OAuth App at **Organisation Settings → Third-party Access → OAuth App access** before any member can sign in.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Permitted Organisations
+
+Each provider holds a list of Permitted Organisations. A sign-in is admitted when the identity the provider asserts belongs to **any one** of the values on the list:
+
+| Provider | Value stored | What the Registry checks |
+|---|---|---|
+| Google Workspace | Workspace domain (e.g. `example.com`) | `hd` claim in the ID token |
+| Microsoft Entra | Tenant ID (GUID) | `tid` claim in the ID token |
+| GitHub OAuth | Organisation login (e.g. `acme-corp`) | Live `/user/orgs` membership |
+
+Permitted Organisations are matched case-insensitively. Duplicate entries (same value, different casing) are merged when the provider is saved.
+
+## Ungated providers
+
+A provider with an **empty** Permitted Organisations list is called an ungated provider. It admits every account the provider can authenticate, with no further check. This is a deliberate, supported configuration — for example, a company running its own GitHub Enterprise with all employees already inside it. The Registry logs a warning every time an ungated login succeeds, so the audit trail reflects the configuration.
+
+<Warning>
+  An ungated provider means anyone who can authenticate with that service gets a reader account on your Registry. Enable this only when your Identity Provider already enforces the membership boundary you need.
+</Warning>
+
+## Disabling a provider
+
+There is no delete action for Identity Providers. To take a provider out of service, edit it and set **Enabled** to off. This prevents new sign-ins through that provider while leaving existing accounts intact. Deleting a provider would lock out every User whose only sign-in path ran through it.
+
+## Relationship to the GitHub Integration
+
+The GitHub Identity Provider (used for sign-in) and the GitHub Integration (used for importing Resources from repositories) are completely separate registrations. They are registered independently, granted different scopes, and neither knows about the other. Configuring one does not affect or imply the other.

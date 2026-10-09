@@ -1,0 +1,125 @@
+---
+title: "Configuring the Skillset MCP Server: Flags and Options"
+sidebarTitle: "Configuration"
+description: "Every flag and environment variable for the Skillset MCP server, plus the MCPB bundle path for hosts that require a packaged extension instead of npx."
+---
+
+The Skillset MCP server is configured entirely through command-line flags and environment variables. This page covers every option, the recommended MCP client config block, and the MCPB bundle path for hosts that cannot run arbitrary commands.
+
+## Running with npx
+
+No installation is required. Pass `--registry` with your Registry's URL and the server is ready:
+
+```sh
+npx @in-org-quicko/skillset-mcp --registry https://your-registry.example
+```
+
+For hosts where the Token is needed (i.e. you want `publish_skill` to work), pass it through the environment rather than the flag:
+
+```sh
+SKILLSET_TOKEN=<token> npx @in-org-quicko/skillset-mcp --registry https://your-registry.example
+```
+
+<Warning>
+  Avoid `--token <secret>` in practice. It places the Token in this machine's process list and in the `.mcp.json` that configures the server — which is typically checked in to version control. Use the `SKILLSET_TOKEN` environment variable instead.
+</Warning>
+
+## MCP client config
+
+Add the server to your MCP host's config file using `skill-registry` (or any key that does not contain the word `skillset`) as the server key:
+
+```json
+{
+  "mcpServers": {
+    "skill-registry": {
+      "command": "npx",
+      "args": ["-y", "@in-org-quicko/skillset-mcp", "--registry", "https://your-registry.example"]
+    }
+  }
+}
+```
+
+To enable publishing, pass the Token through `env` rather than `args`:
+
+```json
+{
+  "mcpServers": {
+    "skill-registry": {
+      "command": "npx",
+      "args": ["-y", "@in-org-quicko/skillset-mcp", "--registry", "https://your-registry.example"],
+      "env": {
+        "SKILLSET_TOKEN": "<token>"
+      }
+    }
+  }
+}
+```
+
+<Warning>
+  **Naming collision.** Never use a server key that contains the substring `skillset` — not `skillset`, not `skillset-registry`, not `my-skillset`. Some hosts (observed on Claude Code / Cowork) reserve that string internally and refuse to start any server registered under it, logging "Its name collides with a reserved internal server name." Use `skill-registry` or any other name that avoids the substring entirely.
+</Warning>
+
+## All options
+
+<ParamField path="--registry <url>" type="string" required>
+  The base URL of the Skillset Registry this server talks to. Every tool call is routed here. Can also be set via the `SKILLSET_REGISTRY` environment variable; the flag takes precedence when both are present.
+</ParamField>
+
+<ParamField path="--token <secret>" type="string">
+  A writer Token minted in the Registry. Required only for `publish_skill` — all read and install operations send no `Authorization` header and work without a Token. Can also be set via `SKILLSET_TOKEN`; the flag takes precedence. Prefer the environment variable to avoid exposing the secret in the process list and in `.mcp.json`.
+</ParamField>
+
+<ParamField path="--scope <project|user>" type="string" default="project">
+  Controls where `install_skills` and `update_skills` write Skills and maintain the Lockfile. `project` installs to the current working directory's `.agents/skills/` tree and writes `skillset-lock.json` at the project root. `user` installs to the home directory instead.
+</ParamField>
+
+<ParamField path="--agent <id>" type="string">
+  Overrides the server's automatic agent detection for `install_skills`, `update_skills`, and `remove_skills`. Use this when detection produces a wrong result or no result for your host. Valid values are the agent IDs the shared package recognises (e.g. `claude-code`). Omit this in normal setups — auto-detection handles the common hosts.
+</ParamField>
+
+<ParamField path="--log-level <debug|info|warn|error>" type="string" default="warn">
+  Controls the verbosity of diagnostic output written to stderr. Never written to stdout, which is the JSON-RPC stream. Set to `debug` when troubleshooting tool behaviour or detection issues.
+</ParamField>
+
+### Environment variable summary
+
+| Environment variable | Equivalent flag | Notes |
+|---|---|---|
+| `SKILLSET_REGISTRY` | `--registry <url>` | Required if flag is not set |
+| `SKILLSET_TOKEN` | `--token <secret>` | Preferred over the flag; avoids process-list exposure |
+
+## MCPB bundle
+
+Some hosts — including Claude Desktop's Extensions UI — only accept a self-contained bundle file rather than running an arbitrary `npx` command. The Skillset MCP server can be packaged as a `.mcpb` file for these hosts.
+
+### Building the bundle
+
+```sh
+bun run package:mcpb
+```
+
+This compiles `dist/cli.js` with every dependency inlined and packs it into a single `skillset-mcp.mcpb` file with no `node_modules`. The bundle's `manifest.json` is generated at pack time from `package.json` and the live server, so there is no manifest to keep in sync manually.
+
+### Installing the bundle
+
+Open the resulting `.mcpb` file with your host's extension installer. The installer will prompt for two settings declared in the manifest:
+
+- **Registry URL** (required) — the Skillset Registry the server should talk to
+- **Token** (optional) — a writer Token, needed only if you want `publish_skill` to work
+
+<Note>
+  **The extension will not activate until you fill in the Registry URL.** A host that requires configuration (Claude Desktop, at least) installs the bundle but leaves it disabled until its required settings are supplied. If the model never sees the tools, check the host's logs for "has missing required configuration, not enabling automatically" — then open the extension's own settings panel (not the chat) and enter the Registry URL there. No chat message can enable a disabled extension.
+</Note>
+
+### Bundle vs npx
+
+| | `npx` | MCPB bundle |
+|---|---|---|
+| Updates automatically | ✅ (fresh fetch each cold start) | ❌ (reinstall to upgrade) |
+| Works without internet at startup | ❌ | ✅ |
+| Supported by all MCP hosts | ✅ | Only hosts with bundle support |
+| Requires Registry URL in config | Via flag or env | Via host's extension settings UI |
+
+<Info>
+  Because a bundle does not self-update, reinstall it each time you want to pick up a new version of `@in-org-quicko/skillset-mcp`.
+</Info>

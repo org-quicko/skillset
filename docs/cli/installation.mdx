@@ -1,0 +1,96 @@
+---
+title: "Install the Skillset CLI and Connect to a Registry"
+sidebarTitle: "Installation"
+description: "Install the Skillset CLI globally or run it with npx, authenticate against a Registry with a Token, and confirm the session with whoami."
+---
+
+The Skillset CLI (`skillset`) is the primary tool for publishing, searching, and installing Skills from any Skillset Registry. This page walks through installing the CLI, connecting it to a Registry, and confirming the connection is working.
+
+## Install the CLI
+
+The CLI is published to npm as `@in-org-quicko/skillset-cli`. Install it globally to get the `skillset` binary on your `PATH`, or invoke it without installing via `npx`.
+
+<CodeGroup>
+```bash npm (global install)
+npm install -g @in-org-quicko/skillset-cli
+```
+
+```bash npx (no install)
+npx @in-org-quicko/skillset-cli <command>
+```
+</CodeGroup>
+
+<Note>
+  All examples on this page and throughout the CLI documentation assume a global install. If you are using `npx`, replace every `skillset` with `npx @in-org-quicko/skillset-cli`.
+</Note>
+
+## Authenticate against a Registry
+
+Every Registry requires a Token for write operations (publishing). Read operations — searching, browsing, and installing — work without a Token, but you still need to tell the CLI which Registry to talk to.
+
+Mint a Token from the Registry's web interface (your profile → **Tokens**), then run:
+
+<Steps>
+  <Step title="Run the login command">
+    ```bash
+    skillset login --registry <url>
+    ```
+    The CLI prompts you for your Token interactively. The Token is masked so it never appears in your shell history or process table.
+  </Step>
+  <Step title="Verify the session">
+    ```bash
+    skillset whoami
+    ```
+    The CLI prints your email address, role, and the Registry URL it is authenticated against.
+  </Step>
+</Steps>
+
+### Pass the Token on the command line
+
+If you need to suppress the interactive prompt — for example, in a script that still uses the stored config file — pass `--token` directly:
+
+```bash
+skillset login --registry https://skills.example.com --token <secret>
+```
+
+<Warning>
+  Passing a Token as a CLI flag exposes it in your shell history and the OS process table. For unattended environments prefer environment variables — see [CI & Automation](/cli/ci-automation).
+</Warning>
+
+### Plain-HTTP Registries
+
+By default the CLI refuses to send a Token over a plain `http` connection to any host that is not on your local machine, because the Token would travel unencrypted on every subsequent call. Loopback addresses (`localhost`, `127.0.0.1`, `::1`) are exempt.
+
+If your Registry is genuinely deployed on plain HTTP (not recommended for production), pass `--insecure`:
+
+```bash
+skillset login --registry http://registry.internal --token <secret> --insecure
+```
+
+## Stored configuration
+
+After a successful login the CLI writes the Registry URL and Token to a per-user config file. The path follows OS conventions:
+
+| Platform | Default path |
+|---|---|
+| **Linux / macOS** | `$XDG_CONFIG_HOME/skillset/config.json` (or `~/.config/skillset/config.json`) |
+| **Windows** | `%APPDATA%\skillset\config.json` |
+
+The file is written with mode `0600` (owner-read/write only) to protect the stored Token. You can override the path with the `SKILLSET_CONFIG_PATH` environment variable.
+
+<Info>
+  Environment variables `SKILLSET_REGISTRY` and `SKILLSET_TOKEN` always override the stored config file. This is the recommended approach for CI and automation — no login step required. See [CI & Automation](/cli/ci-automation) for details.
+</Info>
+
+## Verify your session
+
+```bash
+skillset whoami
+```
+
+The CLI resolves your identity from the Registry and prints:
+
+- Your email address and role
+- The Registry URL the session is authenticated against
+
+If no Registry is configured at all, `whoami` exits with an error directing you to run `skillset login` or set `SKILLSET_REGISTRY`.

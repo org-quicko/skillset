@@ -1,0 +1,197 @@
+---
+title: "Skills: Publish and Install Agent SKILL.md Bundles"
+sidebarTitle: "Skills"
+description: "Skills are directory bundles anchored by SKILL.md. Covers SKILL.md frontmatter, publish and install workflow, Artifact size limits, and Lockfile statuses."
+---
+
+Skills are the core Resource Kind in Skillset. Each Skill is a directory bundle with a mandatory `SKILL.md` at its root, optionally accompanied by supporting files — reference documents, code snippets, or configuration — that a coding agent loads together. This page covers the `SKILL.md` frontmatter schema, the publish and install workflow, how the Artifact is stored, and how the Lockfile tracks every installed copy.
+
+## What is a Skill?
+
+A Skill is a directory where `SKILL.md` is the source of truth. Its YAML frontmatter supplies the metadata the Registry indexes; everything below the frontmatter becomes the `body` displayed in the web interface and returned by `GET /resources/{id}`.
+
+The Registry stores a Skill as an **Artifact** — one object in S3 per file, under a prefix keyed by the Resource's `id`. When a client requests a download, the Registry assembles a zip on demand from those stored objects; no pre-built archive is ever stored.
+
+## SKILL.md frontmatter
+
+`SKILL.md` must open with a YAML frontmatter block fenced by `---`. Two frontmatter fields are required; four are optional. The content below the frontmatter fence (the `body`) is also required — a `SKILL.md` with no body is rejected.
+
+<ParamField path="name" type="string" required>
+  Lowercase alphanumerics and hyphens; no leading, trailing, or doubled hyphen. Maximum 64 characters. Must match `SKILL_NAME_PATTERN`: `/^[a-z0-9]+(-[a-z0-9]+)*$/`.
+</ParamField>
+
+<ParamField path="description" type="string" required>
+  A plain-text summary, 1–1024 characters. Shown in search results and the catalog listing.
+</ParamField>
+
+<ParamField path="license" type="string">
+  Optional. A non-empty string identifying the Skill's license (e.g. `MIT`, `Apache-2.0`).
+</ParamField>
+
+<ParamField path="compatibility" type="string">
+  Optional. A free-form note describing which agents or environments the Skill targets. Maximum 500 characters.
+</ParamField>
+
+<ParamField path="metadata" type="object">
+  Optional. A flat mapping of string keys to string values for custom author-defined fields.
+</ParamField>
+
+<ParamField path="allowed-tools" type="string">
+  Optional. Declares which tools the Skill may access once loaded by an agent. The internal grammar is treated as experimental by the Agent Skills spec — only the type is validated, not the tool patterns.
+</ParamField>
+
+<Note>
+  `allowed-tools` (hyphenated in `SKILL.md`) is stored as `allowed_tools` (underscored) in the Registry and returned that way by the API. The CLI and web interface handle the translation automatically.
+</Note>
+
+### Example SKILL.md
+
+```markdown
+---
+name: structured-code-review
+description: >
+  A systematic guide for performing structured code reviews: checks coverage,
+  clarity, performance, and security in four passes.
+license: MIT
+compatibility: Claude 3.5+ / GPT-4o
+allowed-tools: Bash(git diff:*) Read
+metadata:
+  category: engineering
+  maturity: stable
+---
+
+## Overview
+
+This Skill walks a coding agent through four review passes on any diff or file
+selection. Load it before asking for a code review to get consistent, thorough
+feedback across every submission.
+
+## Passes
+
+1. **Coverage** — are tests present and meaningful?
+2. **Clarity** — are names, comments, and structure readable?
+3. **Performance** — are there obvious algorithmic or I/O concerns?
+4. **Security** — are inputs validated, secrets absent, and permissions minimal?
+```
+
+## Publishing a Skill
+
+Writers publish Skills from the CLI or the web interface. Both surfaces apply the same shared validation rules before anything reaches the server.
+
+<Steps>
+  <Step title="Prepare the directory">
+    Place `SKILL.md` at the root of your directory. Add any supporting files (references, examples) alongside it. Hidden directories, `node_modules`, `__pycache__`, and OS cruft files are automatically excluded.
+  </Step>
+  <Step title="Publish">
+    Run `skillset publish` from inside the directory, or pass a path explicitly. For a Skill hosted in a remote repository, pass the URL and the `--name` flag instead.
+
+    <CodeGroup>
+      ```bash From a local directory
+      # From the current directory
+      skillset publish
+
+      # From an explicit path
+      skillset publish ./my-skills/code-review
+      ```
+
+      ```bash From a Git repository
+      # Clone with your own git credentials and publish
+      skillset publish https://github.com/acme/skills --name pdf
+      ```
+    </CodeGroup>
+  </Step>
+  <Step title="Confirm">
+    The CLI prints the published Skill's name and Registry URL. The web interface shows the Skill in the catalog immediately.
+  </Step>
+</Steps>
+
+<Warning>
+  A Skill published from a local path records no Source and is placed under the Registry's own Namespace. A Skill published from a repository URL records the repository as its Source and takes its Namespace from `owner/repo`. The two can coexist — a republish from disk does not overwrite an imported copy; it creates a separate entry under the Registry's own Namespace.
+</Warning>
+
+### Artifact limits
+
+The shared validation rules enforce the following limits on every Skill's files, checked locally before upload and again by the API:
+
+| Limit | Value |
+|---|---|
+| Maximum files | 1,000 entries |
+| Maximum total size (uncompressed) | 25 MB |
+| Maximum archive size (compressed) | 10 MB |
+
+Any path with a `..` segment, a leading `/`, a backslash, or a null byte is rejected. Duplicate paths and symlinks are also refused.
+
+## Installing a Skill
+
+`skillset install` downloads the Skill's Artifact, writes the files to `.agents/skills/<name>`, and creates a symlink from the chosen agent's own skills directory to that canonical location.
+
+<CodeGroup>
+  ```bash Install from the Registry
+  # Install by name (resolves to your Registry's copy, or the only match)
+  skillset install structured-code-review
+
+  # Qualify by Namespace when two parties publish the same name
+  skillset install pdf --namespace anthropics/skills
+  ```
+
+  ```bash Install from a URL
+  # Clone the repository with your own git and install
+  skillset install https://github.com/acme/skills --name pdf
+
+  # Point at a specific folder in the repo
+  skillset install https://github.com/acme/skills/tree/main/pdf --name pdf
+  ```
+</CodeGroup>
+
+<Note>
+  Installing from a URL clones the repository using your own git credentials — private repositories you can clone work without any Registry Integration or Connection. If you are logged in, the installed Skill is also submitted to the Registry as a Submission, pending Admin approval.
+</Note>
+
+### Install scope
+
+By default, `skillset install` operates at project scope — the Skill is written relative to the current working directory. Pass `--scope user` to install to your home directory instead, making the Skill available to all projects.
+
+## The Lockfile
+
+Every install records an entry in `skillset-lock.json` at the project root (or home directory for user scope). The Lockfile stores:
+
+- The Resource's `id`
+- The Registry's `updated_at` at the time of install
+- A digest of the files written to disk
+- The install timestamp
+
+This lets `skillset list` report one of four **Statuses** for each installed Skill:
+
+| Status | Meaning |
+|---|---|
+| `current` | Unchanged on disk; the Registry has not moved on |
+| `outdated` | The Registry's `updated_at` has advanced since install |
+| `modified` | The files on disk no longer match the install digest |
+| `missing` | The Lockfile records a Skill whose directory is gone |
+
+<Note>
+  A Skill that is both edited locally and stale in the Registry reports `modified`, not `outdated` — that is the state requiring a decision before `update` will proceed. Pass `--force` to overwrite local edits.
+</Note>
+
+```bash
+# Show what is installed and each Skill's status
+skillset list
+
+# Re-download everything the Registry has moved on from
+skillset update
+
+# Update a specific Skill
+skillset update structured-code-review
+```
+
+## Namespace resolution
+
+A Skill's Namespace is `owner/repo` when imported from a Git repository, and this Registry's own host (e.g. `skills.example.com`) when published directly. Two Skills may share the same `name` as long as different Namespaces published them.
+
+The CLI resolves a bare name to the only match, or to the one published directly to your Registry if there is a tie between that and an imported copy. Only a tie between two imported Skills from different parties forces you to qualify with `--namespace`.
+
+```bash
+skillset search pdf                              # imported rows show their namespace
+skillset install pdf                             # yours, or the only one
+skillset install pdf --namespace anthropics/skills  # explicit namespace
+```

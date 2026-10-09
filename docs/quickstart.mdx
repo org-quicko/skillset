@@ -1,0 +1,223 @@
+---
+title: "Get Started with Skillset: Deploy, Publish, and Install"
+sidebarTitle: "Quickstart"
+description: "Deploy a Skillset Registry with Docker, publish your first Skill from the CLI, and install it into a coding agent — start to finish in five minutes."
+---
+
+This guide walks you through deploying a Skillset Registry on your own machine, creating a Superadmin account, publishing your first Skill, and installing it into a coding agent. By the end you will have a working Registry and a Skill ready to use.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- **Docker** (with the `compose` plugin) — to run the app and Postgres
+- **Node.js 18+** and **npm** — to install and run the CLI
+- **git** — required by the CLI when installing or publishing from repository URLs
+
+<Steps>
+
+<Step title="Clone the repository and configure your environment">
+
+Clone Skillset and copy the example environment file:
+
+```bash
+git clone https://github.com/org-quicko/skillset.git
+cd skillset
+cp .env.example .env
+```
+
+Open `.env` and fill in the required values. The defaults for `DATABASE_URL` and Postgres credentials already match what `docker-compose.yml` provisions. If you are using a local MinIO instance for object storage, the `STORAGE_*` defaults point to it; otherwise update them to your S3 bucket. The two variables you must set regardless are:
+
+<CodeGroup>
+
+```bash Required variables
+# Signing secret for sessions — generate a fresh one:
+BETTER_AUTH_SECRET=   # openssl rand -base64 32
+
+# Absolute URL this Registry is reached at (no trailing slash):
+PUBLIC_URL=http://localhost:3000
+```
+
+```bash Full .env reference
+DATABASE_URL=postgres://postgres:postgres@postgres:5432/skill_registry
+
+# Session signing secret — required; the app refuses to start without it.
+# Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Absolute base URL this Registry is reached at, with no trailing slash.
+# Required: every session cookie and OAuth redirect URI is built from it.
+PUBLIC_URL=
+
+# Object storage — values below target a local MinIO instance; update for S3 in production.
+STORAGE_BUCKET=skill-registry
+STORAGE_REGION=us-east-1
+STORAGE_ACCESS_KEY_ID=minioadmin
+STORAGE_SECRET_ACCESS_KEY=minioadmin123
+STORAGE_ENDPOINT=http://minio:9000
+STORAGE_PUBLIC_ENDPOINT=http://localhost:9000
+
+PORT=3000
+LOG_LEVEL=info
+```
+
+</CodeGroup>
+
+<Tip>
+  Generate a secure `BETTER_AUTH_SECRET` in one command:
+
+  ```bash
+  openssl rand -base64 32
+  ```
+</Tip>
+
+</Step>
+
+<Step title="Start the Registry">
+
+```bash
+docker compose up
+```
+
+This starts two containers:
+
+| Container | What it does |
+|---|---|
+| `app` | Runs the API and serves the web UI at `http://localhost:3000` |
+| `postgres` | Stores all Resource metadata; migrations run automatically on startup |
+
+Wait for the log line `Listening on http://0.0.0.0:3000` before continuing. The app waits for Postgres to be ready and runs all migrations before it starts serving traffic.
+
+<Note>
+  The first startup creates the `pg_trgm` Postgres extension, which powers fuzzy search. On most managed Postgres instances this requires a privileged role. If the migration fails, have a DBA run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` against your database once, then restart.
+</Note>
+
+</Step>
+
+<Step title="Create your Superadmin account">
+
+Open [http://localhost:3000](http://localhost:3000) in your browser. You will be prompted to create the Superadmin account — the first User to sign up is the permanent Superadmin, with full control over the Registry.
+
+Fill in your email address, name, and a password, then submit the form. You will be logged in immediately.
+
+<Warning>
+  There is exactly one Superadmin per Registry. The role is permanent and cannot be transferred. Use an email address you control long-term.
+</Warning>
+
+</Step>
+
+<Step title="Install the CLI">
+
+In a new terminal, install the `skillset` CLI globally:
+
+```bash
+npm install -g @in-org-quicko/skillset-cli
+```
+
+Verify the install:
+
+```bash
+skillset --version
+```
+
+</Step>
+
+<Step title="Log in to your Registry">
+
+```bash
+skillset login --registry http://localhost:3000
+```
+
+The CLI will prompt for your email and password (the Superadmin credentials you just created). On success it stores a Token for that Registry in your local config.
+
+```bash
+skillset whoami
+# → Logged in as you@example.com (superadmin) on http://localhost:3000
+```
+
+</Step>
+
+<Step title="Create and publish your first Skill">
+
+Create a new directory for your Skill. Every Skill must have a `SKILL.md` at its root — the `name` and `description` in its frontmatter are the source of truth for the Resource.
+
+```bash
+mkdir code-review
+cd code-review
+```
+
+Create `SKILL.md`:
+
+```yaml
+---
+name: code-review
+description: Reviews code for common issues and best practices
+---
+
+## Overview
+
+This skill reviews a code diff or file for common issues including:
+
+- Logic errors and off-by-one mistakes
+- Missing error handling
+- Security concerns (injections, exposed secrets, over-broad permissions)
+- Style and readability problems
+
+## Usage
+
+Pass the code to review as context. Ask the agent to review it for issues,
+suggest improvements, or check it against a specific standard.
+```
+
+Publish the Skill from the current directory:
+
+```bash
+skillset publish .
+# → Published code-review (1 file) to http://localhost:3000
+```
+
+</Step>
+
+<Step title="Install the Skill into a coding agent">
+
+From any project directory, install the Skill you just published:
+
+```bash
+skillset install code-review
+```
+
+The CLI downloads the Skill's Artifact, writes it to `.agents/skills/code-review/`, creates or updates `skillset-lock.json` at the project root, and symlinks the chosen agent's own skills directory to `.agents/skills/`.
+
+Check that the install is current:
+
+```bash
+skillset list
+# → code-review   current
+```
+
+<Tip>
+  `skillset list` reads the **Lockfile** (`skillset-lock.json`) to compare what's on disk against the Registry's latest version. A Skill you've edited locally shows `modified`; one the Registry has updated since you installed it shows `outdated`.
+</Tip>
+
+</Step>
+
+</Steps>
+
+## What just happened
+
+You deployed a full Skillset Registry (app + Postgres), created a Superadmin account, published a Skill with the CLI, and installed it into your project. Your Registry is now ready for your team.
+
+<CardGroup cols={2}>
+  <Card title="CLI Commands" icon="terminal" href="cli/commands">
+    Every `skillset` command with all its flags — search, info, update, remove, and more.
+  </Card>
+  <Card title="MCP Server" icon="robot" href="mcp/overview">
+    Let your coding agent search and install Skills directly, without the CLI.
+  </Card>
+  <Card title="Deployment" icon="server" href="deployment/docker">
+    Configure Postgres schemas, swap MinIO for S3, and harden for production.
+  </Card>
+  <Card title="Concepts" icon="lightbulb" href="concepts">
+    Namespaces, Lockfiles, Imports, Submissions, and the rest of the data model.
+  </Card>
+</CardGroup>

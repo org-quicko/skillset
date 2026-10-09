@@ -1,0 +1,124 @@
+---
+title: "Postgres Database Setup and Schema Configuration Guide"
+sidebarTitle: "Database"
+description: "Postgres 14+ setup for Skillset: enable pg_trgm for fuzzy search, isolate tables with DB_SCHEMA, and how migrations apply automatically on every startup."
+---
+
+Skillset stores all Registry metadata — Resources, Users, Tags, Tokens, Sessions, and analytics — in a Postgres database. This page covers the minimum Postgres version, the `pg_trgm` extension required for fuzzy search, the `DB_SCHEMA` variable for schema isolation, and how migrations run automatically on startup.
+
+## Postgres version
+
+Skillset requires **Postgres 14 or later**. The official Docker Compose stack uses `postgres:18-alpine`.
+
+If you are using a managed database service (Amazon RDS, Google Cloud SQL, Azure Database for PostgreSQL, Supabase, Neon, etc.), choose Postgres 14 or above and note the `pg_trgm` requirement below before creating the database user.
+
+## The `pg_trgm` extension
+
+Skillset's search performs a Postgres full-text query first and falls back to trigram similarity only when full-text finds nothing — so a mistyped query like `angulr` still finds `building-angular-applications`. The trigram fallback requires the `pg_trgm` extension.
+
+The baseline migration (`apps/api/src/db/migrations/0000_baseline.ts`) creates the extension on startup:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+```
+
+The extension installs into `public` regardless of the `DB_SCHEMA` setting, so trigram functions resolve from any schema without further configuration.
+
+### When the database role lacks `CREATE EXTENSION` privileges
+
+On most managed Postgres services, only a superuser or a role with the `rds_superuser` / equivalent grant may create extensions. If the role named in `DATABASE_URL` does not have this privilege, the migration fails and the app will not start.
+
+Have a database administrator create the extension once against the same database, then the migration will succeed (the `IF NOT EXISTS` clause makes it a no-op on subsequent runs):
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+```
+
+Run this command as a privileged role in the target database — for example using the RDS master user, or `psql -U postgres` on a self-managed server:
+
+```bash
+psql -U postgres -d skill_registry -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+```
+
+After that, the application role can continue without any superuser privileges.
+
+## Schema isolation with `DB_SCHEMA`
+
+By default, every Skillset table, enum, view, and index is created in the `public` schema. Set `DB_SCHEMA` to place everything in a different schema — useful when the same Postgres database is shared with other applications:
+
+```bash
+DB_SCHEMA=skillset_prod
+```
+
+### Rules for valid schema names
+
+The `DB_SCHEMA` value is validated at startup. It must be:
+
+- A **plain lowercase** Postgres identifier — matching `[a-z_][a-z0-9_$]*`
+- At most **63 characters** (Postgres silently truncates longer identifiers, which would cause a silent schema mismatch)
+- Not prefixed with **`pg_`** (reserved by Postgres for system catalogs)
+
+Uppercase letters are rejected intentionally. Kysely quotes the schema identifier, meaning `DB_SCHEMA=Skillset` would create a schema named `"Skillset"` — a different schema from `skillset` that any unquoted reference would resolve to.
+
+<Warning>
+Changing `DB_SCHEMA` after first boot points the app at an empty schema and re-runs all migrations against it from scratch. Existing data in the old schema is not moved. Treat this variable as immutable once the Registry is in use.
+</Warning>
+
+### How schema qualification works
+
+Every query and every migration statement is qualified with the schema name at runtime — there is no need to set a `search_path` parameter in `DATABASE_URL`. The `schemaName.ts` module reads `DB_SCHEMA` once at startup and every Kysely query builder receives it via `withSchema`. The result is that one container image runs correctly against any schema name without any SQL changes.
+
+The `pg_trgm` extension is the only object that lives in `public` unconditionally, because extensions install into the first schema on the search path. Trigram functions remain resolvable from any schema because `public` is always on the default search path.
+
+## Automatic migrations
+
+Migrations run automatically when the app starts. There is no separate migration command to run manually.
+
+The migration runner uses Postgres advisory locks so that concurrent restarts — common during a rolling deploy — do not race. Only one instance runs the migration at a time; others wait and then verify the schema is up to date before serving requests.
+
+The migrations live in `apps/api/src/db/migrations/`. The first migration (`0000_baseline.ts`) creates the complete schema as it stood when the Registry moved to Kysely, including all tables, indexes, enums, and views. Subsequent migrations are applied in filename order.
+
+<Note>
+Migrations are always forward-only and additive where possible. There is no rollback mechanism — take a database snapshot before upgrading in production.
+</Note>
+
+## Connecting an external Postgres
+
+To use a managed or externally hosted Postgres instead of the Docker Compose-managed container:
+
+<Steps>
+
+### Create a database and role
+
+```sql
+CREATE DATABASE skill_registry;
+CREATE USER skillset_app WITH PASSWORD 'your-strong-password';
+GRANT ALL PRIVILEGES ON DATABASE skill_registry TO skillset_app;
+```
+
+If you are using a non-public schema, also grant schema creation:
+
+```sql
+GRANT CREATE ON DATABASE skill_registry TO skillset_app;
+```
+
+### Pre-create `pg_trgm` if needed
+
+If the `skillset_app` role cannot create extensions (typical on managed services), run this once as a privileged user:
+
+```sql
+\c skill_registry
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+```
+
+### Set `DATABASE_URL`
+
+```bash
+DATABASE_URL=postgres://skillset_app:your-strong-password@your-db-host:5432/skill_registry
+```
+
+### Remove or comment out the `postgres` service
+
+If using an external database, the `postgres` service in `docker-compose.yml` is no longer needed. Remove or comment it out, and remove it from the `app` service's `depends_on` block.
+
+</Steps>

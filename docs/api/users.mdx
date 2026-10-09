@@ -1,0 +1,353 @@
+---
+title: "Users API: Manage User Accounts, Roles, and Tokens"
+sidebarTitle: "Users"
+description: "All /api/users endpoints for listing users, creating accounts, managing your profile, changing passwords, and minting or revoking API Tokens."
+---
+
+The Users API covers account management for the Registry. Admins can list all users, create new accounts, update roles, and remove accounts. Every signed-in user can read and update their own profile, change their password, and manage their personal Tokens — the secrets used to authenticate CLI and API requests.
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/users` | Admin+ | List all users |
+| POST | `/api/users` | Admin+ | Create a user |
+| GET | `/api/users/me` | Any signed-in | Current user profile |
+| PATCH | `/api/users/me` | Any signed-in | Update own name |
+| PUT | `/api/users/me/password` | Any signed-in\* | Change own password |
+| GET | `/api/users/me/tokens` | Any signed-in | List own Tokens |
+| POST | `/api/users/me/tokens` | Any signed-in | Mint a Token |
+| DELETE | `/api/users/me/tokens/:token_id` | Any signed-in | Revoke a Token |
+| PATCH | `/api/users/:user_id` | Admin+ | Update a user's role |
+| DELETE | `/api/users/:user_id` | Admin+ | Remove a user |
+
+\* Also reachable while `must_change_password` is set.
+
+---
+
+## List users
+
+```
+GET /api/users
+```
+
+Returns a paginated list of all users in the Registry, most recently created first. Requires **Admin** role.
+
+### Query parameters
+
+<ParamField query="page" type="integer" default="1">
+  Page number (1-based). Page size is fixed at 50.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  User records for this page. Each entry has:
+  <Expandable>
+    <ResponseField name="id" type="string">UUID.</ResponseField>
+    <ResponseField name="email" type="string">Email address.</ResponseField>
+    <ResponseField name="first_name" type="string">First name.</ResponseField>
+    <ResponseField name="last_name" type="string">Last name.</ResponseField>
+    <ResponseField name="role" type="string">One of `reader`, `writer`, `admin`, or `superadmin`.</ResponseField>
+    <ResponseField name="must_change_password" type="boolean">Whether the user must replace their generated password before doing anything else.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="page" type="integer">Current page.</ResponseField>
+<ResponseField name="page_size" type="integer">Always 50.</ResponseField>
+<ResponseField name="total" type="integer">Total users in the Registry.</ResponseField>
+
+```bash
+curl https://registry.example.com/api/users?page=1 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Create a user
+
+```
+POST /api/users
+```
+
+Creates a new user account and returns a one-time `initial_password`. The new user must change this password on first sign-in — `must_change_password` is set to `true` on the created account. Requires **Admin** role.
+
+### Request body
+
+<ParamField body="first_name" type="string" required>
+  First name (non-empty after trimming).
+</ParamField>
+
+<ParamField body="last_name" type="string" required>
+  Last name (non-empty after trimming).
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Email address. Must not already be used by another user.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  Role to assign. One of `reader`, `writer`, or `admin`. Cannot be `superadmin` — the Superadmin is set once at setup and cannot be created via this endpoint.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="user" type="object">
+  The created user record (same shape as the list item above).
+</ResponseField>
+
+<ResponseField name="initial_password" type="string">
+  The generated one-time password. **This is shown exactly once and is not recoverable.** Deliver it securely to the new user.
+</ResponseField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `email_taken` | 409 | A user with that email already exists. |
+| `validation_failed` | 400 | A required field is missing or invalid. |
+
+```bash
+curl -X POST https://registry.example.com/api/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@example.com",
+    "role": "writer"
+  }'
+```
+
+<Warning>
+Store or deliver the `initial_password` immediately. It is not stored in the Registry and cannot be retrieved later — only reset by creating the user again or having the user go through a password reset flow.
+</Warning>
+
+---
+
+## Get current user
+
+```
+GET /api/users/me
+```
+
+Returns the profile of the currently authenticated user. This endpoint is reachable even when `must_change_password` is set, so the web interface and CLI can check that flag and redirect the user to the password change screen.
+
+```bash
+curl https://registry.example.com/api/users/me \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Update own name
+
+```
+PATCH /api/users/me
+```
+
+Updates the authenticated user's own first or last name (or both). At least one field is required.
+
+### Request body
+
+<ParamField body="first_name" type="string">
+  New first name (non-empty after trimming). Omit to leave unchanged.
+</ParamField>
+
+<ParamField body="last_name" type="string">
+  New last name (non-empty after trimming). Omit to leave unchanged.
+</ParamField>
+
+Returns the updated user record.
+
+```bash
+curl -X PATCH https://registry.example.com/api/users/me \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "first_name": "Ada" }'
+```
+
+---
+
+## Change own password
+
+```
+PUT /api/users/me/password
+```
+
+Replaces the authenticated user's password. Also reachable when `must_change_password` is set — this is the endpoint that clears that flag. On success, returns `204 No Content` and invalidates all other active sessions (any session that did not make this request).
+
+### Request body
+
+<ParamField body="current_password" type="string" required>
+  The current password (or the generated `initial_password`).
+</ParamField>
+
+<ParamField body="new_password" type="string" required>
+  The replacement password. Must be at least 12 characters.
+</ParamField>
+
+```bash
+curl -X PUT https://registry.example.com/api/users/me/password \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "current_password": "generated-one-time-password",
+    "new_password": "my-new-secure-passphrase"
+  }'
+```
+
+---
+
+## List own Tokens
+
+```
+GET /api/users/me/tokens
+```
+
+Returns all Tokens belonging to the authenticated user. The secret value is **never** returned after minting — only the Token id, name, and creation timestamp are shown.
+
+### Response
+
+An array of Token objects:
+
+<ResponseField name="[].id" type="string">Token UUID.</ResponseField>
+<ResponseField name="[].name" type="string">Human-readable label for the Token.</ResponseField>
+<ResponseField name="[].created_at" type="string">ISO 8601 timestamp of when the Token was minted.</ResponseField>
+
+```bash
+curl https://registry.example.com/api/users/me/tokens \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Mint a Token
+
+```
+POST /api/users/me/tokens
+```
+
+Creates a new API Token. Returns the Token record plus the `secret` — the value to pass in `Authorization: Bearer`. **The secret is shown exactly once and is not stored in the Registry.**
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  A label that identifies what this Token is for (e.g. `"ci-pipeline"` or `"laptop-cli"`).
+</ParamField>
+
+### Response fields
+
+<ResponseField name="id" type="string">Token UUID (use this to revoke the Token).</ResponseField>
+<ResponseField name="name" type="string">The label you provided.</ResponseField>
+<ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="secret" type="string">
+  The bearer secret. Store this now — it is not retrievable later.
+</ResponseField>
+
+```bash
+curl -X POST https://registry.example.com/api/users/me/tokens \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "ci-pipeline" }'
+```
+
+<Warning>
+Copy and store the `secret` immediately. Once this response is gone, the secret cannot be recovered. To restore access, revoke the old Token and mint a new one.
+</Warning>
+
+---
+
+## Revoke a Token
+
+```
+DELETE /api/users/me/tokens/:token_id
+```
+
+Immediately revokes a Token. Any in-flight request already authenticated with this Token will fail after revocation. Returns `204 No Content`.
+
+### Path parameters
+
+<ParamField path="token_id" type="string" required>
+  UUID of the Token to revoke (from the `id` field in the list or mint response).
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Token with that id exists under your account. |
+
+```bash
+curl -X DELETE https://registry.example.com/api/users/me/tokens/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Update a user's role
+
+```
+PATCH /api/users/:user_id
+```
+
+Changes the role of any non-Superadmin user. Requires **Admin** role.
+
+### Path parameters
+
+<ParamField path="user_id" type="string" required>
+  UUID of the user to update.
+</ParamField>
+
+### Request body
+
+<ParamField body="role" type="string" required>
+  New role: `reader`, `writer`, or `admin`.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No user with that id. |
+| `superadmin_protected` | 409 | You cannot change the Superadmin's role. |
+
+```bash
+curl -X PATCH https://registry.example.com/api/users/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "role": "admin" }'
+```
+
+---
+
+## Remove a user
+
+```
+DELETE /api/users/:user_id
+```
+
+Permanently removes a user account. Requires **Admin** role. Returns `204 No Content`.
+
+<Warning>
+Removing a user does not remove the Resources they published. Publisher information is snapshotted at publish time — the `email` is preserved in every Resource's `published_by` even after the account is deleted.
+</Warning>
+
+### Path parameters
+
+<ParamField path="user_id" type="string" required>
+  UUID of the user to remove.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No user with that id. |
+| `superadmin_protected` | 409 | The Superadmin cannot be removed. |
+
+```bash
+curl -X DELETE https://registry.example.com/api/users/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>"
+```

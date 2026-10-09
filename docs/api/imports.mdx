@@ -1,0 +1,173 @@
+---
+title: "Imports API: Fetch and Browse Skills from Git Repos"
+sidebarTitle: "Imports"
+description: "The /api/imports endpoints for fetching Skill files, listing Skill folders, and browsing repositories via Git Provider Integrations and Connections."
+---
+
+The Imports API lets a Writer read Skills from a Git repository before publishing them. It has three endpoints: one to fetch the files of a single Skill, one to discover all Skill folders at a location, and one to list the repositories a writer's Connection can access. All three require **Writer** role.
+
+<Note>
+These endpoints exist to support the import-then-publish workflow. A writer pastes a repository URL in the web interface, the UI sends the parsed parts as `{ project, ref, path }`, and the API fetches the content from the Git Provider using the writer's Connection. There is intentionally no URL field in the request body — the server builds every provider request from structured parts to prevent SSRF.
+</Note>
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/imports/:provider/skill-files` | Writer+ | Fetch files for a single Skill |
+| POST | `/api/imports/:provider/skills` | Writer+ | List Skill folders at a location |
+| GET | `/api/imports/:provider/repositories` | Writer+ | List accessible repositories |
+
+---
+
+## Fetch Skill files
+
+```
+POST /api/imports/:provider/skill-files
+```
+
+Downloads the files at a specific path in a Git repository and returns them as base64-encoded content. The writer must have a Connection for the provider (or the project must be public). Returns the complete set of files needed to publish the Skill.
+
+### Path parameters
+
+<ParamField path="provider" type="string" required>
+  Git Provider to import from. Accepted values: `github`, `gitlab`.
+</ParamField>
+
+### Request body
+
+<ParamField body="project" type="string" required>
+  Repository identifier in the format the provider expects (e.g. `"acme/my-skills"` for GitHub, `"acme/my-skills"` for GitLab).
+</ParamField>
+
+<ParamField body="ref" type="string" required>
+  Branch, tag, or commit SHA to read from (e.g. `"main"`, `"v1.2.0"`).
+</ParamField>
+
+<ParamField body="path" type="string" required>
+  Path within the repository to the Skill directory (e.g. `"skills/build-react-app"`).
+</ParamField>
+
+<Warning>
+Do not include a URL field. The body must contain only `project`, `ref`, and `path`. The provider is taken from the URL path — anything else is overwritten. This prevents the request from being redirected to an arbitrary host.
+</Warning>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  One entry per file found at the location.
+  <Expandable>
+    <ResponseField name="path" type="string">
+      File path relative to the Skill root (e.g. `"SKILL.md"`, `"references/api.md"`).
+    </ResponseField>
+    <ResponseField name="content_base64" type="string">
+      Base64-encoded file bytes.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://registry.example.com/api/imports/github/skill-files \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project": "acme/skills",
+    "ref": "main",
+    "path": "skills/build-react-app"
+  }'
+```
+
+---
+
+## List Skill folders
+
+```
+POST /api/imports/:provider/skills
+```
+
+Scans a location in a Git repository and returns every subdirectory that looks like a Skill (i.e. contains a `SKILL.md`). Use this endpoint when a repository may contain multiple Skills at different paths — the writer picks which ones to import, and each pick becomes its own `skill-files` request.
+
+### Path parameters
+
+<ParamField path="provider" type="string" required>
+  Git Provider to scan. Accepted values: `github`, `gitlab`.
+</ParamField>
+
+### Request body
+
+Same shape as `skill-files`: `{ project, ref, path }`.
+
+<ParamField body="project" type="string" required>
+  Repository identifier (e.g. `"acme/skills"`).
+</ParamField>
+
+<ParamField body="ref" type="string" required>
+  Branch, tag, or commit SHA to scan.
+</ParamField>
+
+<ParamField body="path" type="string" required>
+  Root path to search under (e.g. `"skills"` or `""` for the repository root).
+</ParamField>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  One entry per Skill folder found.
+  <Expandable>
+    <ResponseField name="provider" type="string">The Git Provider (`github` or `gitlab`).</ResponseField>
+    <ResponseField name="project" type="string">Repository identifier.</ResponseField>
+    <ResponseField name="ref" type="string">Branch or commit used.</ResponseField>
+    <ResponseField name="path" type="string">Path to the Skill folder within the repository.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://registry.example.com/api/imports/github/skills \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project": "acme/skills",
+    "ref": "main",
+    "path": ""
+  }'
+```
+
+---
+
+## List accessible repositories
+
+```
+GET /api/imports/:provider/repositories
+```
+
+Returns the repositories the writer's Connection can see, including private ones. Requires the writer to have an active Connection for the provider. Useful for populating a repository picker in the import UI.
+
+### Path parameters
+
+<ParamField path="provider" type="string" required>
+  Git Provider to query. Must be a recognised provider (`github` or `gitlab`). Returns `400` immediately for unrecognised values — before any lookup — to distinguish "not a provider" from "not configured".
+</ParamField>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  List of repositories the writer can read.
+</ResponseField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `validation_failed` | 400 | The `:provider` path segment is not a recognised Git Provider. |
+| `integration_not_configured` | 409 | No Integration exists for the given provider. Ask an Admin to configure one. |
+| `not_connected` | 409 | The writer has no Connection for the given provider. Connect from Settings first. |
+| `connection_expired` | 409 | The existing Connection's grant was revoked or expired. Reconnect from Settings. |
+
+```bash
+curl https://registry.example.com/api/imports/github/repositories \
+  -H "Authorization: Bearer <token>"
+```
+
+<Tip>
+Public repositories on GitHub or GitLab can be imported without a Connection, using the anonymous rate-limited path. A Connection upgrades you to authenticated API access with a much higher request quota.
+</Tip>

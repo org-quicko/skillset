@@ -1,0 +1,162 @@
+---
+title: "Configuring S3-Compatible Object Storage for Skillset"
+sidebarTitle: "Storage"
+description: "Configure S3 or S3-compatible storage for Skill and Plugin Artifacts: AWS IAM roles, MinIO for local dev, presigned uploads, and on-demand zip assembly."
+---
+
+Skillset stores the files that make up a Skill or Plugin — collectively called an **Artifact** — in S3-compatible object storage. MCP Servers are pure-metadata pointers and have no stored bytes; only Skills and Plugins write to storage. This page explains how to configure storage for production AWS S3 and for a local MinIO instance, and describes how Artifacts flow through the system.
+
+## Why object storage
+
+When a Writer publishes a Skill or Plugin, the API generates a presigned upload URL and returns it to the CLI or web client. The client uploads Artifact files **directly to storage** — bytes never pass through the API server. This keeps the API stateless and avoids memory pressure from large uploads.
+
+When a Reader installs a Skill or downloads a Plugin, the API reads the individual Artifact files from storage, assembles them into a zip in memory, and streams the zip to the client. **Artifacts are stored as individual files, never pre-zipped** — the zip is assembled on demand per request.
+
+## Required configuration
+
+Only one variable is mandatory:
+
+| Variable | Purpose |
+|---|---|
+| `STORAGE_BUCKET` | Name of the S3 bucket Artifact files are stored in |
+
+The app refuses to start if `STORAGE_BUCKET` is unset, because publishing presigns against a bucket at startup rather than at request time.
+
+## AWS S3 (production)
+
+<CodeGroup>
+
+```bash IAM Role (recommended)
+# Use the AWS default credential chain — instance profile, ECS task role, etc.
+# Do NOT set STORAGE_ACCESS_KEY_ID or STORAGE_SECRET_ACCESS_KEY.
+STORAGE_BUCKET=my-skillset-artifacts
+STORAGE_REGION=us-east-1
+# STORAGE_ENDPOINT — leave unset for AWS S3
+# STORAGE_PUBLIC_ENDPOINT — leave unset for AWS S3
+```
+
+```bash IAM User (long-lived key)
+# Only use this if instance/task roles are not available.
+STORAGE_BUCKET=my-skillset-artifacts
+STORAGE_REGION=us-east-1
+STORAGE_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+STORAGE_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+# STORAGE_ENDPOINT — leave unset for AWS S3
+# STORAGE_PUBLIC_ENDPOINT — leave unset for AWS S3
+```
+
+</CodeGroup>
+
+<Tip>
+Prefer an IAM role over a long-lived access key. Leave `STORAGE_ACCESS_KEY_ID` and `STORAGE_SECRET_ACCESS_KEY` unset — Skillset uses Bun's built-in S3 client, which falls through to the AWS default credential chain (instance profile, ECS task role, EKS service account, etc.) when no explicit key is provided.
+</Tip>
+
+### IAM policy
+
+The Registry needs the following S3 actions on the bucket:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-skillset-artifacts",
+        "arn:aws:s3:::my-skillset-artifacts/*"
+      ]
+    }
+  ]
+}
+```
+
+## Self-hosted MinIO (local development)
+
+The `.env.example` ships pre-configured for a local MinIO instance. The two-endpoint split handles the Docker network/localhost boundary:
+
+- **`STORAGE_ENDPOINT`** — the address the API server uses to sign requests and read Artifacts. Resolves over the Docker network (`http://minio:9000`).
+- **`STORAGE_PUBLIC_ENDPOINT`** — the endpoint embedded in presigned upload URLs that are returned to the browser. Must be resolvable by the browser, not by the API container (`http://localhost:9000`).
+
+<CodeGroup>
+
+```bash MinIO (Docker Compose dev)
+STORAGE_BUCKET=skill-registry
+STORAGE_REGION=us-east-1
+STORAGE_ACCESS_KEY_ID=minioadmin
+STORAGE_SECRET_ACCESS_KEY=minioadmin123
+STORAGE_ENDPOINT=http://minio:9000
+STORAGE_PUBLIC_ENDPOINT=http://localhost:9000
+```
+
+```bash MinIO (single-host, no network split)
+STORAGE_BUCKET=skill-registry
+STORAGE_REGION=us-east-1
+STORAGE_ACCESS_KEY_ID=minioadmin
+STORAGE_SECRET_ACCESS_KEY=minioadmin123
+STORAGE_ENDPOINT=http://localhost:9000
+# STORAGE_PUBLIC_ENDPOINT — leave unset; defaults to STORAGE_ENDPOINT
+```
+
+</CodeGroup>
+
+<Note>
+`STORAGE_PUBLIC_ENDPOINT` defaults to `STORAGE_ENDPOINT` when unset. Only set it when the API and the browser reach storage at different hostnames — such as when the API is inside a Docker network and the browser is on the host machine.
+</Note>
+
+## How presigned uploads work
+
+The publish flow never routes Artifact bytes through the API:
+
+<Steps>
+
+### Client requests an upload URL
+
+The CLI or web client calls the Registry API with the list of files to publish. The API calls `presignUpload` on the S3 adapter, signing a `PUT` URL with a 60-second expiry against the configured bucket, using `STORAGE_PUBLIC_ENDPOINT` (or `STORAGE_ENDPOINT` if unset) as the URL base.
+
+### Client uploads directly to storage
+
+The signed `PUT` URL is returned to the client, which uploads the file bytes directly to S3 or MinIO. The API server never sees the file bytes.
+
+### API records the Artifact
+
+Once the client reports the upload complete, the API verifies the object exists in storage and records the Resource metadata in Postgres.
+
+</Steps>
+
+## How downloads and installs work
+
+When `skillset install` or the web Download button is triggered:
+
+1. The API reads the list of Artifact files for the Skill or Plugin from storage using `list(prefix)`.
+2. It fetches each file in turn with `get(key)`, streaming bytes from S3 into memory.
+3. It assembles all files into a zip archive in memory.
+4. It streams the zip to the client in a single HTTP response.
+
+Artifacts are never stored pre-zipped — the zip is assembled on demand. This means every individual file is directly accessible for preview in the web interface without unpacking an archive.
+
+## Storage adapter reference
+
+The `S3StorageAdapter` in `apps/api/src/storage/s3.ts` is built on Bun's native S3 client — no AWS SDK dependency. It surfaces the following operations used internally by the API:
+
+| Method | S3 operation | Used for |
+|---|---|---|
+| `presignUpload` | `PUT` presign | Generating upload URLs during publish |
+| `presignDownload` | `GET` presign | Generating download links for individual files |
+| `put` | `PutObject` | Writing individual Artifact files |
+| `get` | `GetObject` | Reading files for zip assembly and preview |
+| `open` | `HeadObject` + stream | Size-checked streaming for large file reads |
+| `list` | `ListObjectsV2` | Enumerating all files in an Artifact prefix |
+| `exists` | `HeadObject` | Checking whether a file is present |
+| `delete` | `DeleteObject` | Removing files when a Resource is deleted |
+
+The `list` method handles S3's paginated listing automatically — a prefix with many files is fetched in pages until `isTruncated` is false, so callers always receive the complete set.
+
+## S3 error handling
+
+The adapter distinguishes "object not found" (`NoSuchKey`, `NotFound`) from other S3 errors. A bucket misconfiguration or expired credential is re-thrown rather than reported as a missing file, so a wrong bucket name does not silently serve 404s indefinitely.

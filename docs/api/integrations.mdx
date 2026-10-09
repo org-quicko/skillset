@@ -1,0 +1,196 @@
+---
+title: "Integrations API: Manage Git Provider Registrations"
+sidebarTitle: "Integrations"
+description: "All /api/integrations endpoints for listing, creating, updating, and deleting Git Provider app registrations on the Registry. Requires Admin role."
+---
+
+The Integrations API manages the Registry's registrations with Git Providers — the OAuth app credentials that allow the Registry to import Skills from GitHub and GitLab on behalf of writers. All endpoints require **Admin** role.
+
+An Integration stores the OAuth `client_id`, `client_secret`, and optional `app_slug` for one Git Provider app. Writers then create personal Connections against an Integration to grant the Registry access to their repositories.
+
+<Note>
+The `client_secret` is write-only. It is accepted on create and update but is never returned in any response — not even to the Admin who set it. If you need to rotate a secret, send a new one via `PATCH /api/integrations/:id`.
+</Note>
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/integrations` | Admin+ | List all Integrations |
+| POST | `/api/integrations` | Admin+ | Create an Integration |
+| PATCH | `/api/integrations/:id` | Admin+ | Update an Integration |
+| DELETE | `/api/integrations/:id` | Admin+ | Delete an Integration |
+
+---
+
+## List Integrations
+
+```
+GET /api/integrations
+```
+
+Returns all configured Integrations. `client_secret` is never included.
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  All Integration records. Each entry has:
+  <Expandable>
+    <ResponseField name="id" type="string">UUID of the Integration.</ResponseField>
+    <ResponseField name="provider" type="string">Git Provider name (e.g. `github`, `gitlab`).</ResponseField>
+    <ResponseField name="display_name" type="string">Admin-chosen label for the Integration.</ResponseField>
+    <ResponseField name="description" type="string | null">Optional note about what this Integration is for (max 180 characters).</ResponseField>
+    <ResponseField name="client_id" type="string">OAuth app client id.</ResponseField>
+    <ResponseField name="app_slug" type="string | null">GitHub App slug used to build the installation URL. `null` for providers with no installation step.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl https://registry.example.com/api/integrations \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Create an Integration
+
+```
+POST /api/integrations
+```
+
+Registers a new Git Provider app with the Registry. More than one Integration can be created for the same provider — for example, two GitHub Apps for two different organisations.
+
+### Request body
+
+<ParamField body="provider" type="string" required>
+  Git Provider name. Must be a recognised provider (`github` or `gitlab`).
+</ParamField>
+
+<ParamField body="display_name" type="string" required>
+  Human-readable label (max 100 characters). Shown to writers in the Connect flow.
+</ParamField>
+
+<ParamField body="client_id" type="string" required>
+  OAuth app client id from the provider's console.
+</ParamField>
+
+<ParamField body="client_secret" type="string" required>
+  OAuth app client secret. Stored encrypted; never returned in responses.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional note (max 180 characters). Useful when multiple Integrations exist for the same provider.
+</ParamField>
+
+<ParamField body="app_slug" type="string">
+  GitHub App slug (letters, digits, and hyphens only; max 100 characters). Used to build the repository access management URL. Set to `null` or omit for providers with no installation step.
+</ParamField>
+
+Returns the created Integration record (without `client_secret`) with `201 Created`.
+
+```bash
+curl -X POST https://registry.example.com/api/integrations \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "github",
+    "display_name": "Acme GitHub App",
+    "description": "Imports Skills from the acme-corp GitHub organisation.",
+    "client_id": "Iv1.abc1234567890abc",
+    "client_secret": "secret_abc123...",
+    "app_slug": "acme-skillset"
+  }'
+```
+
+---
+
+## Update an Integration
+
+```
+PATCH /api/integrations/:id
+```
+
+Updates one or more fields of an existing Integration. All fields are optional — omit any field to leave it unchanged.
+
+<Note>
+`provider` cannot be changed after creation. Omitting `client_secret` leaves the stored secret untouched — you do not need to re-enter the secret to update only the display name. Sending `app_slug: null` explicitly clears the slug; omitting `app_slug` leaves whatever is stored.
+</Note>
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Integration to update.
+</ParamField>
+
+### Request body
+
+<ParamField body="display_name" type="string">
+  New display name (max 100 characters).
+</ParamField>
+
+<ParamField body="description" type="string | null">
+  New description (max 180 characters), or `null` to clear it.
+</ParamField>
+
+<ParamField body="client_id" type="string">
+  Updated OAuth client id.
+</ParamField>
+
+<ParamField body="client_secret" type="string">
+  Replacement client secret. Omit to keep the stored one.
+</ParamField>
+
+<ParamField body="app_slug" type="string | null">
+  Updated app slug, or `null` to clear it. Omit to leave unchanged.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Integration with that id. |
+| `validation_failed` | 400 | A field failed validation (e.g. `app_slug` has invalid characters). |
+
+```bash
+curl -X PATCH https://registry.example.com/api/integrations/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "display_name": "Acme GitHub App (updated)",
+    "client_secret": "new_secret_xyz..."
+  }'
+```
+
+---
+
+## Delete an Integration
+
+```
+DELETE /api/integrations/:id
+```
+
+Removes an Integration. Returns `204 No Content` on success.
+
+<Warning>
+Deletion is refused with `409 integration_in_use` if any writer still holds a Connection that references this Integration. Disconnect those writers first, or update the Integration to point at a different OAuth app instead.
+</Warning>
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Integration to delete.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Integration with that id. |
+| `integration_in_use` | 409 | One or more Connections still reference this Integration. |
+
+```bash
+curl -X DELETE https://registry.example.com/api/integrations/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>"
+```

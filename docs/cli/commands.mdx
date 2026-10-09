@@ -1,0 +1,539 @@
+---
+title: "Skillset CLI Command Reference: All Flags and Options"
+sidebarTitle: "Commands"
+description: "Full reference for every Skillset CLI command: login, search, install, publish, and more — with all flags, defaults, and examples."
+---
+
+The Skillset CLI exposes ten commands that cover the full lifecycle of a Skill: authenticating against a Registry, searching and reading the catalog, installing and managing Skills locally, and publishing new ones. Every command accepts `--json` for machine-readable output; see [CI & Automation](/cli/ci-automation) for non-interactive usage.
+
+<Note>
+  **`--json` mode** replaces all formatted output with a structured JSON payload on stdout. Errors go to stderr as `{"error": {"code", "message"}}` with a non-zero exit code. `--json` never prompts — see each command for which flags become required.
+</Note>
+
+---
+
+<Accordion title="login — Authenticate the CLI against a Registry">
+
+Stores a Token for a Registry so subsequent commands can authenticate. The Token is verified before being stored; a rejected Token leaves the existing config untouched.
+
+```bash
+skillset login --registry <url> [--token <secret>] [--insecure] [--json]
+```
+
+**Flags**
+
+<ParamField path="--registry" type="string" required>
+  The Registry's URL. Required.
+</ParamField>
+
+<ParamField path="--token" type="string">
+  A Token minted from the Registry's web interface. If omitted when a terminal is attached, the CLI prompts for it interactively (masked). Required under `--json` — there is no terminal to prompt.
+</ParamField>
+
+<ParamField path="--insecure" type="boolean">
+  Permit a plain-`http` Registry whose host is not on this machine. Without this flag, the CLI refuses to send a Token over an unencrypted connection to a remote host.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout. Requires `--token`.
+</ParamField>
+
+**Examples**
+
+```bash
+# Interactive token prompt
+skillset login --registry https://skills.example.com
+
+# Non-interactive (CI, scripting)
+skillset login --registry https://skills.example.com --token sk_live_… --json
+
+# Plain-HTTP Registry not on localhost
+skillset login --registry http://registry.internal --token sk_… --insecure
+```
+
+**`--json` output**
+
+```json
+{
+  "registry": "https://skills.example.com",
+  "email": "alice@example.com",
+  "role": "writer"
+}
+```
+
+</Accordion>
+
+<Accordion title="whoami — Show the active session">
+
+Confirms which Registry the CLI is authenticated against and as whom.
+
+```bash
+skillset whoami [--json]
+```
+
+**Flags**
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout.
+</ParamField>
+
+**Examples**
+
+```bash
+skillset whoami
+skillset whoami --json
+```
+
+**`--json` output**
+
+```json
+{
+  "registry": "https://skills.example.com",
+  "email": "alice@example.com",
+  "role": "writer"
+}
+```
+
+</Accordion>
+
+<Accordion title="search — Search the Registry catalog">
+
+Searches the Registry's catalog of published Skills. When no query is given, lists the entire catalog. Reads need no Token — this works against a Registry you have never logged in to.
+
+```bash
+skillset search [query] [--tag <name>] [--limit <n>] [--json]
+```
+
+**Flags**
+
+<ParamField path="query" type="string">
+  A term to match against Skill names and descriptions. Omit to list everything. When a term is given, results are sorted by relevance; without one, by recency.
+</ParamField>
+
+<ParamField path="--tag" type="string">
+  Narrow results to Skills carrying this Tag. The value is the Tag's display name, not an id.
+</ParamField>
+
+<ParamField path="--limit" type="number">
+  Maximum number of results to return. Must be a positive whole number.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout.
+</ParamField>
+
+**Examples**
+
+```bash
+# List the whole catalog
+skillset search
+
+# Full-text search
+skillset search code-review
+
+# Filter by tag
+skillset search --tag python
+
+# Search and cap results
+skillset search data --limit 5 --json
+```
+
+**`--json` output**
+
+```json
+{
+  "items": [
+    {
+      "name": "code-review",
+      "description": "Reviews pull requests for correctness and style.",
+      "namespace": "acme/skills"
+    }
+  ],
+  "total": 12,
+  "truncated": false
+}
+```
+
+Imported Skills include their `namespace` in results — this is the value to pass to `install --namespace` when a name matches more than one publisher.
+
+</Accordion>
+
+<Accordion title="info — Read a Skill without installing it">
+
+Shows a Skill's full `SKILL.md` body, metadata (install count, tags, allowed tools, source), and optionally its artifact file listing. No Token required.
+
+```bash
+skillset info <name> [--files] [--json]
+```
+
+**Flags**
+
+<ParamField path="name" type="string" required>
+  The Skill's name in the Registry.
+</ParamField>
+
+<ParamField path="--files" type="boolean">
+  Also list every file the Skill ships. This costs a second round-trip to the Registry and reports what storage actually holds rather than what was declared at publish time.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout.
+</ParamField>
+
+**Examples**
+
+```bash
+skillset info code-review
+
+# Include the artifact file listing
+skillset info code-review --files
+
+skillset info code-review --json
+```
+
+**`--json` output**
+
+```json
+{
+  "skill": {
+    "name": "code-review",
+    "description": "Reviews pull requests for correctness and style.",
+    "body": "# code-review\n…",
+    "tags": [{ "name": "review" }],
+    "allowed_tools": "Bash(git diff:*), Read",
+    "installs": 42,
+    "namespace": "acme/skills",
+    "source": "https://github.com/acme/skills",
+    "published_by": { "email": "alice@example.com" },
+    "updated_at": "2025-01-15T10:00:00Z"
+  },
+  "files": null
+}
+```
+
+When `--files` is passed, `files` is an array of `{ "path": string, "size": number }` objects instead of `null`.
+
+</Accordion>
+
+<Accordion title="install — Install a Skill for a coding agent">
+
+Installs a Skill by name from the Registry, or directly from a GitHub or GitLab URL. Skills are written into `.agents/skills/<name>` and linked (or copied) into the chosen agent's own directory. The Lockfile (`skillset-lock.json`) is updated to record the installed state.
+
+```bash
+skillset install <name|url> [--name <skill>] [--namespace <ns>] [--agent <id>] [--scope <scope>] [--copy] [--force] [--json]
+```
+
+**Flags**
+
+<ParamField path="name|url" type="string" required>
+  A Skill's name in the Registry, or a GitHub or GitLab URL (a repository, or a folder within one).
+</ParamField>
+
+<ParamField path="--name" type="string">
+  Required when the target is a URL: the Skill to install, identified by the `name` field in its `SKILL.md`. Refused when the target is a plain name.
+</ParamField>
+
+<ParamField path="--namespace" type="string">
+  Which party named the Skill, when a bare name matches more than one publisher. Refused with a URL — the URL already identifies the source.
+</ParamField>
+
+<ParamField path="--agent" type="string">
+  Which coding agent to install for. If omitted and a terminal is attached, the CLI presents an interactive picker. If omitted with no terminal (including `--json` mode), the agent is detected from the environment and the project's agent directories.
+</ParamField>
+
+<ParamField path="--scope" type="string">
+  Install scope: `project` or `user`. If omitted and a terminal is attached, the CLI prompts. Required when no terminal is attached (including `--json` mode).
+</ParamField>
+
+<ParamField path="--copy" type="boolean">
+  Copy the Skill into the agent's own directory instead of creating a symlink to `.agents/skills`. Useful on systems where symlinks are unavailable or unwanted.
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Replace a Skill that has local changes since installation, or one that was installed by a different publisher under the same name. Without `--force`, both cases are refused with a descriptive error.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout. Requires `--scope` — if `--agent` is omitted, the agent is auto-detected rather than prompted for.
+</ParamField>
+
+**Examples**
+
+```bash
+# Install by name (prompts for agent and scope)
+skillset install code-review
+
+# Install a Skill from a specific namespace
+skillset install pdf --namespace anthropics/skills
+
+# Install directly from a GitHub repository
+skillset install https://github.com/acme/skills --name pdf
+
+# Install a specific folder in a repository
+skillset install https://github.com/acme/skills/tree/main/pdf --name pdf
+
+# Non-interactive install for CI
+skillset install code-review --agent claude-code --scope project --json
+```
+
+**URL installs and Submissions**
+
+When you install from a URL, the CLI clones the repository using your own `git` credentials. Any repository you can clone works — private ones included, over HTTPS or SSH. After installation, if you are logged in, the Skill is automatically submitted to the Registry for Admin approval (Settings → Submissions).
+
+Until approved, `skillset update` reports the Skill as `pending`. Once approved, `update` switches it to the Registry's copy.
+
+**Namespace collisions**
+
+A project holds one `.agents/skills/<name>` directory regardless of how many publishers use that name. Installing a Skill over one installed from a *different* namespace is refused — pass `--force` to replace it explicitly.
+
+</Accordion>
+
+<Accordion title="list — Show installed Skills and their status">
+
+Lists every Skill recorded in the Lockfile at the given scope, and whether each is `current`, `outdated`, `modified`, or `missing` against the Registry.
+
+```bash
+skillset list [--scope <scope>] [--offline] [--json]
+```
+
+**Flags**
+
+<ParamField path="--scope" type="string">
+  Which scope to list: `project` or `user`. Defaults to `project`.
+</ParamField>
+
+<ParamField path="--offline" type="boolean">
+  Skip the Registry entirely. Nothing can be reported as `outdated` when offline; `current`, `modified`, and `missing` are determined from the local filesystem and Lockfile alone.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout.
+</ParamField>
+
+**Status values**
+
+| Status | Meaning |
+|---|---|
+| `current` | Installed files match the Registry's latest version |
+| `outdated` | The Registry has a newer version |
+| `modified` | Files have been edited since installation |
+| `missing` | Recorded in the Lockfile but the directory is gone |
+
+**Examples**
+
+```bash
+skillset list
+skillset list --scope user
+skillset list --offline
+skillset list --json
+```
+
+**`--json` output**
+
+```json
+{
+  "scope": "project",
+  "lockfilePath": "/home/alice/myproject/skillset-lock.json",
+  "skills": [
+    { "name": "code-review", "status": "current" },
+    { "name": "pdf", "status": "outdated" }
+  ],
+  "offline": false
+}
+```
+
+<Note>
+  If the Registry is unreachable, `list` degrades gracefully: it still reports what is installed and whether files have been locally modified. Only `outdated` becomes unknowable — the command does not fail.
+</Note>
+
+</Accordion>
+
+<Accordion title="update — Re-download outdated Skills">
+
+Brings installed Skills back in line with the Registry. When no names are given, every Skill in the Lockfile is considered.
+
+```bash
+skillset update [names...] [--scope <scope>] [--force] [--json]
+```
+
+**Flags**
+
+<ParamField path="names" type="string[]">
+  One or more Skill names to update. When omitted, every installed Skill is considered.
+</ParamField>
+
+<ParamField path="--scope" type="string">
+  Which scope to update: `project` or `user`. Defaults to `project`.
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Update a Skill that has local changes, discarding them. Without `--force`, modified Skills are skipped with a warning.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout. Exit code is `1` if any Skill's outcome is `error`.
+</ParamField>
+
+**Outcomes per Skill**
+
+| Outcome | Meaning |
+|---|---|
+| `updated` | Re-downloaded and written successfully |
+| `restored` | Was `missing` (directory gone); re-downloaded |
+| `up-to-date` | Already at the Registry's latest version |
+| `skipped` | Has local changes — pass `--force` to replace |
+| `gone` | No longer on the Registry; left installed |
+| `pending` | Installed from a URL, Submission not yet approved |
+| `error` | An error occurred; see `message` for details |
+
+**Examples**
+
+```bash
+# Update everything outdated
+skillset update
+
+# Update specific Skills
+skillset update code-review pdf
+
+# Update and discard local changes
+skillset update code-review --force
+
+skillset update --json
+```
+
+**`--json` output**
+
+```json
+[
+  { "name": "code-review", "status": "updated", "from": "2025-01-10T08:00:00Z", "to": "2025-01-15T10:00:00Z" },
+  { "name": "pdf", "status": "up-to-date" }
+]
+```
+
+<Warning>
+  A `modified` Skill is never overwritten unless `--force` is passed. Without versioning, an update is a one-way door — local edits are not recoverable once replaced.
+</Warning>
+
+</Accordion>
+
+<Accordion title="remove — Uninstall a Skill">
+
+Removes a Skill's canonical directory, the agent's link to it, and its entry in the Lockfile. All three steps are independent — a Skill in partial state (files present but no Lockfile entry, or vice versa) is cleaned up cleanly either way.
+
+```bash
+skillset remove <name> [--scope <scope>] [--json]
+```
+
+**Flags**
+
+<ParamField path="name" type="string" required>
+  The Skill's name.
+</ParamField>
+
+<ParamField path="--scope" type="string">
+  Which scope to remove from: `project` or `user`. Defaults to `project`.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout.
+</ParamField>
+
+**Examples**
+
+```bash
+skillset remove code-review
+skillset remove code-review --scope user
+skillset remove code-review --json
+```
+
+**`--json` output**
+
+```json
+{
+  "name": "code-review",
+  "scope": "project",
+  "skillDirectory": "/home/alice/myproject/.agents/skills/code-review",
+  "link": "/home/alice/myproject/.claude/skills/code-review",
+  "forgotten": true
+}
+```
+
+Fields are `null` or `false` when there was nothing to remove (e.g. `skillDirectory: null` if the files were already gone).
+
+</Accordion>
+
+<Accordion title="publish — Publish a Skill to the Registry">
+
+Publishes a Skill from a local path or directly from a GitHub or GitLab URL. When the target is a directory that contains multiple Skills, all are discovered (up to maximum depth) and published as a batch. Requires Writer role or higher.
+
+```bash
+skillset publish [target] [--name <skill>] [--yes] [--json]
+```
+
+**Flags**
+
+<ParamField path="target" type="string">
+  A path (defaults to the current directory) or a GitHub or GitLab URL. A path may be a single Skill's directory or a parent directory holding several.
+</ParamField>
+
+<ParamField path="--name" type="string">
+  Required when `target` is a URL: which Skill to publish, by the `name` in its `SKILL.md`. Refused with a path target.
+</ParamField>
+
+<ParamField path="--yes" type="boolean">
+  Skip the confirmation prompt when publishing more than one Skill. Required under `--json` for a batch publish.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Emit the result as JSON on stdout. Exit code is `1` if any Skill in a batch failed.
+</ParamField>
+
+**Examples**
+
+```bash
+# Publish whatever is in the current directory
+skillset publish
+
+# Publish a specific directory
+skillset publish ./skills/code-review
+
+# Publish all Skills under a directory (prompts for confirmation)
+skillset publish ./skills
+
+# Publish all Skills without prompting (CI)
+skillset publish ./skills --yes
+
+# Publish from a GitHub repository
+skillset publish https://github.com/acme/skills --name pdf
+```
+
+**Single-Skill `--json` output**
+
+```json
+{
+  "name": "code-review",
+  "id": "res_01j…",
+  "published_at": "2025-01-15T10:00:00Z"
+}
+```
+
+**Batch `--json` output**
+
+```json
+[
+  { "name": "code-review", "status": "published", "id": "res_01j…", "published_at": "2025-01-15T10:00:00Z" },
+  { "name": "pdf", "status": "failed", "error": "SKILL.md missing required field: description" }
+]
+```
+
+**URL publishes**
+
+When `target` is a URL, the CLI clones the repository using your own `git` credentials. The repository is recorded as the Skill's Source and, through it, its Namespace. A Skill published from a path records no Source and is treated as published directly to your Registry.
+
+Every Skill is validated locally against the same rules the API enforces before the Registry is contacted — a bad Skill in a batch stops the entire publish before any changes reach the Registry.
+
+<Tip>
+  A batch publish reports per-Skill outcomes rather than aborting on the first failure: a validation error in one Skill does not prevent the others from being published.
+</Tip>
+
+</Accordion>

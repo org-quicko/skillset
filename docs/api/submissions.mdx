@@ -1,0 +1,225 @@
+---
+title: "Submissions API: Approve Community-Sourced Resources"
+sidebarTitle: "Submissions"
+description: "All /api/submissions endpoints for submitting Resources from public repositories, reviewing pending Submissions, and approving or rejecting them (admin)."
+---
+
+The Submissions API supports a community workflow for getting Resources into the Registry without requiring a Writer account. Any signed-in user — including Readers — can submit a Resource sourced from a public repository. An Admin then reviews the pending Submissions and either approves (converting the Submission into a live Resource) or rejects it.
+
+Submitting puts nothing in the public catalog. Only approval makes a Resource discoverable and installable.
+
+## Lifecycle
+
+<Steps>
+  <Step title="Install from a URL">
+    A user installs a Skill directly from a Git repository URL with `skillset install --url`. The CLI downloads the files and stores them locally.
+  </Step>
+  <Step title="Submit">
+    The user submits the Skill to the Registry via `skillset submit` or `PUT /api/submissions/:kind/:name`. The Skill's files are uploaded to object storage, but the record is held in a pending state — invisible to catalog readers.
+  </Step>
+  <Step title="Admin reviews">
+    An Admin lists pending Submissions via `GET /api/submissions`, reviews the content, and either approves or rejects each one.
+  </Step>
+  <Step title="Approved → Resource">
+    On approval, the Submission becomes a full Resource under the same `(kind, namespace, name)`. It is now discoverable, searchable, and installable from the catalog.
+  </Step>
+</Steps>
+
+<Note>
+A Submission must include a `source` field — the repository URL where the files came from. This is enforced at submission time: a Submission with no source is rejected with `400 source_required`.
+</Note>
+
+## Endpoints at a glance
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/submissions` | Admin+ | List pending Submissions |
+| PUT | `/api/submissions/:kind/:name` | Any signed-in | Submit a Resource |
+| POST | `/api/submissions/:id/approve` | Admin+ | Approve and publish |
+| DELETE | `/api/submissions/:id` | Admin+ | Reject and delete |
+
+---
+
+## List pending Submissions
+
+```
+GET /api/submissions
+```
+
+Returns all Submissions that are waiting for Admin review, ordered newest first. Requires **Admin** role.
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  Pending Submission records. Each entry has:
+  <Expandable>
+    <ResponseField name="id" type="string">UUID of the Submission.</ResponseField>
+    <ResponseField name="kind" type="string">Resource Kind (e.g. `skill`).</ResponseField>
+    <ResponseField name="namespace" type="string">Namespace the Resource will be published under if approved.</ResponseField>
+    <ResponseField name="name" type="string">Resource name.</ResponseField>
+    <ResponseField name="description" type="string">Short description.</ResponseField>
+    <ResponseField name="body" type="string">Full Skill document body.</ResponseField>
+    <ResponseField name="source" type="string">Repository URL the files were sourced from.</ResponseField>
+    <ResponseField name="allowed_tools" type="string | null">Tools the Skill claims access to, or `null`.</ResponseField>
+    <ResponseField name="submitted_by_email" type="string">Email of the submitter.</ResponseField>
+    <ResponseField name="submitted_by_name" type="string">Display name of the submitter.</ResponseField>
+    <ResponseField name="submitted_at" type="string">ISO 8601 timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl https://registry.example.com/api/submissions \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Submit a Resource
+
+```
+PUT /api/submissions/:kind/:name
+```
+
+Creates or replaces a pending Submission. Open to **any signed-in user** — Reader role is sufficient. Returns the Submission record and presigned upload destinations for the Artifact files.
+
+This endpoint accepts the same body as `PUT /api/resources/:kind/:name` (the publish endpoint), but the `source` field is required — a Submission must record where it came from.
+
+### Path parameters
+
+<ParamField path="kind" type="string" required>
+  Resource Kind. Currently `skill`.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Resource name.
+</ParamField>
+
+### Request body
+
+<ParamField body="description" type="string" required>
+  Short description.
+</ParamField>
+
+<ParamField body="body" type="string" required>
+  Full `SKILL.md` content.
+</ParamField>
+
+<ParamField body="source" type="string" required>
+  Repository URL where these files came from. Required for Submissions — rejected with `400 source_required` if absent.
+</ParamField>
+
+<ParamField body="files" type="array" required>
+  Artifact manifest — path and byte size for each file to upload.
+</ParamField>
+
+<ParamField body="license" type="string">
+  SPDX license identifier.
+</ParamField>
+
+<ParamField body="compatibility" type="string">
+  Compatible agents or environments.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Free-form string-to-string key/value pairs.
+</ParamField>
+
+<ParamField body="allowed_tools" type="string">
+  Comma-separated list of tools the Skill may invoke.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="submission" type="object">
+  The Submission as stored — full `ResourceSubmissionSchema` shape.
+</ResponseField>
+
+<ResponseField name="upload" type="object">
+  Presigned upload destinations for the Artifact files (same shape as the publish response).
+  <Expandable>
+    <ResponseField name="files" type="array">One entry per file — `path`, `url`, `method` (`PUT`), and `headers`.</ResponseField>
+    <ResponseField name="expires_in_seconds" type="integer">Validity window for the presigned URLs.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `source_required` | 400 | The `source` field was absent. |
+| `already_published` | 409 | A Resource with the same `(kind, namespace, name)` already exists in the Registry. |
+| `validation_failed` | 400 | A field failed validation rules. |
+
+```bash
+curl -X PUT https://registry.example.com/api/submissions/skill/build-react-app \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "A Skill for scaffolding React applications.",
+    "body": "# Build React App\n\n...",
+    "source": "https://github.com/community/skills",
+    "files": [
+      { "path": "SKILL.md", "size": 1024 }
+    ]
+  }'
+```
+
+---
+
+## Approve a Submission
+
+```
+POST /api/submissions/:id/approve
+```
+
+Converts a pending Submission into a live Resource in the Registry. Requires **Admin** role. Returns the newly created Resource record (full `SkillSchema` shape).
+
+<Warning>
+Approval is refused with `409 already_published` if a Resource with the same `(kind, namespace, name)` was published while the Submission was pending. Approval is also refused with `409 submission_incomplete` if the submitter's Artifact upload never completed.
+</Warning>
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Submission to approve.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Submission with that id. |
+| `already_published` | 409 | The target `(kind, namespace, name)` is already in the Registry. |
+| `submission_incomplete` | 409 | The Submission's Artifact files were never uploaded. |
+
+```bash
+curl -X POST https://registry.example.com/api/submissions/018f1234-abcd-7000-8000-000000000001/approve \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Reject a Submission
+
+```
+DELETE /api/submissions/:id
+```
+
+Permanently removes a pending Submission without publishing anything. Requires **Admin** role. Returns `204 No Content`.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Submission to reject.
+</ParamField>
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Submission with that id. |
+
+```bash
+curl -X DELETE https://registry.example.com/api/submissions/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>"
+```

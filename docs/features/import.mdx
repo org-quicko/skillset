@@ -1,0 +1,117 @@
+---
+title: "Import Resources from GitHub or GitLab into the Registry"
+sidebarTitle: "Import"
+description: "Import copies Skills and Plugins from Git into the Registry once — not a sync. Covers the web and CLI paths, Namespace assignment, and Submission workflow."
+---
+
+Import is how you bring Skills and Plugins that already live in a Git repository into the Skillset Registry without moving them to disk first. An Import is a one-time copy — the Registry reads the files at the moment of import and stores them as an Artifact, then records the repository URL as the Resource's Source. Nothing is ever re-read from that URL; the Source is provenance, not a live link. This page covers the two import paths, what they can each reach, and how the Submission workflow applies when installing directly from a URL.
+
+## Import vs. publish from disk
+
+| | Import | Publish from disk |
+|---|---|---|
+| Source | Repository URL (recorded) | This Registry (no external source) |
+| Namespace | `owner/repo` from the repository | This Registry's own host |
+| Private repos | Web: via Connection; CLI: your own git | N/A |
+| Requires Integration | Web: yes; CLI: no | No |
+| Supported Kinds | Skill, Plugin | Skill, Plugin |
+| MCP Servers | Not supported | Not supported (web only) |
+
+## Two import paths
+
+Skillset provides two surfaces for importing from a Git repository. They reach different repositories because they read as different parties.
+
+### Web Import
+
+The web interface imports through the writer's **Connection** to the Registry's **Integration**. This means:
+
+- An Admin must have configured an Integration for the Git Provider (GitHub or GitLab)
+- The writer must have granted a Connection — their own personal grant of repository access
+- The web interface then shows the repositories that Connection can see, including private ones within the app's installation scope
+
+<Steps>
+  <Step title="Ensure an Integration is configured">
+    An Admin configures the Integration under **Settings → Integrations**. This is a one-time step per Git Provider. Without it, the Import screen will not offer that provider.
+  </Step>
+  <Step title="Grant a Connection">
+    Navigate to **Settings → Connections** and authorise the Registry to read your repositories through the provider's OAuth flow. This grants access to the repositories the app is installed on — not everything you can read personally.
+  </Step>
+  <Step title="Paste the repository URL">
+    On the publish screen, paste a repository URL. The interface discovers every Skill or Plugin folder within it and shows you a picker.
+  </Step>
+  <Step title="Select a folder and publish">
+    Choose the folder to import. The Registry reads its files through your Connection and stores them as an Artifact.
+  </Step>
+</Steps>
+
+<Note>
+  Public repositories can be read client-side without a Connection using the anonymous GitHub API (60 requests/hour). A writer with a Connection gets thousands of requests/hour instead. A Registry with no Integration configured can still import public Skills this way.
+</Note>
+
+### CLI Import
+
+The CLI imports by cloning the repository with **your own git** — the same credentials `git clone` would use. This means:
+
+- No Integration or Connection is needed
+- Any repository you can clone works, including private ones over HTTPS or SSH
+- Your existing git credential store (SSH keys, HTTPS tokens, credential helpers) is used
+
+```bash
+# Import a Skill from a public or private repository
+skillset publish https://github.com/acme/skills --name pdf
+
+# Point at a specific folder
+skillset publish https://github.com/acme/skills/tree/main/pdf --name pdf
+```
+
+`--name` is required: it picks the Skill by matching the `name` field in `SKILL.md`.
+
+## Source and Namespace
+
+When a Resource is imported from a repository, the Registry records:
+
+- **Source**: the repository URL, without the ref or the folder path — so all Skills from a monorepo share one Source value. This is provenance, not a link.
+- **Namespace**: `owner/repo` derived from the repository URL. This is the Resource's publishing identity.
+
+A republish from disk clears the earlier Import's Source and moves the Skill into the Registry's own Namespace. The two entries coexist — the imported copy and the directly-published copy are separate Resources, each with its own Namespace.
+
+```
+Imported from github.com/acme/skills  →  Namespace: acme/skills
+Published directly to this Registry   →  Namespace: skills.example.com
+```
+
+## The Submission workflow
+
+When you install a Skill directly from a repository URL using the CLI, and you are logged in, the Skill is **submitted** to the Registry for Admin review:
+
+```bash
+skillset install https://github.com/acme/skills --name pdf
+```
+
+A Submission is not a Resource — it does not appear in the catalog, cannot be searched, and cannot be installed by others until an Admin approves it. Your Lockfile records the Skill with its repository Source and no Registry revision.
+
+```
+skillset list
+# → pdf  pending  (submitted from https://github.com/acme/skills)
+```
+
+Once an Admin approves the Submission under **Settings → Submissions**, `skillset update` detects that the Registry now holds an approved copy and switches your install from the local clone to the Registry's copy.
+
+<Note>
+  If you are not logged in when you run `skillset install <url>`, the Skill is installed locally but no Submission is created. The Lockfile records the Source URL, and the Skill remains at `pending` status indefinitely until you are logged in and submit it.
+</Note>
+
+## Supported providers
+
+| Provider | Web Import | CLI Import |
+|---|---|---|
+| GitHub | ✓ (requires Integration + Connection for private) | ✓ (any repo you can clone) |
+| GitLab | ✓ (requires Integration + Connection for private) | ✓ (any repo you can clone) |
+
+A GitHub Identity Provider (for login) and a GitHub Integration (for Import) are two separate registrations. Configuring one does not affect the other.
+
+## What Import does not do
+
+- **Import is not a sync.** The Registry never re-reads the Source URL after import. If the upstream repository changes, the Registry's copy does not update.
+- **Import does not support MCP Servers.** An MCP Server's entire payload is a `server.json` record a writer pastes — there are no files to copy.
+- **A Connection does not grant permission beyond what the app installation covers.** The app must be installed on the repository's owner account; access to your personal account does not extend automatically.
