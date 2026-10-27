@@ -35,8 +35,8 @@ COPY --from=deps /app/node_modules node_modules
 COPY --from=deps /app/apps/api/node_modules apps/api/node_modules
 COPY --from=deps /app/packages/shared/node_modules packages/shared/node_modules
 COPY tsconfig.base.json ./
-COPY docs/openapi.json docs/openapi.json
-COPY docs/mcp.json docs/mcp.json
+COPY resources/openapi.json resources/openapi.json
+COPY resources/mcp.json resources/mcp.json
 COPY packages/shared packages/shared
 COPY apps/api/package.json apps/api/package.json
 COPY apps/api/src apps/api/src

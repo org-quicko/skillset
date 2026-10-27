@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { buildDiscoveryDocument, DISCOVERY_PATH, formatDiscoveryDocument } from "../src/discovery.js";
 
-describe("docs/mcp.json, the discovery document GET /mcp serves", () => {
+describe("resources/mcp.json, the discovery document GET /mcp serves", () => {
   it("matches what the server itself reports — regenerate it with `bun run --filter @in-org-quicko/skillset-mcp discovery`", async () => {
     const committed = (await readFile(DISCOVERY_PATH, "utf8")).replaceAll("\r\n", "\n");
     expect(committed).toBe(formatDiscoveryDocument(await buildDiscoveryDocument()));

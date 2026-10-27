@@ -4,8 +4,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import pkg from "../package.json" with { type: "json" };
 import { createServer } from "./server.js";
 
-/** Where `docs/mcp.json` lives, relative to this package — what the Registry serves at `GET /mcp`. */
-export const DISCOVERY_PATH = new URL("../../../docs/mcp.json", import.meta.url);
+/** Where `resources/mcp.json` lives, relative to this package — what the Registry serves at `GET /mcp`. */
+export const DISCOVERY_PATH = new URL("../../../resources/mcp.json", import.meta.url);
 
 /** The discovery document `GET /mcp` serves: how to run this server, and what it offers. */
 export interface DiscoveryDocument {
@@ -98,7 +98,7 @@ export async function buildDiscoveryDocument(): Promise<DiscoveryDocument> {
   }
 }
 
-/** The document as `docs/mcp.json` stores it: two-space JSON with a trailing newline, so a rewrite diffs cleanly. */
+/** The document as `resources/mcp.json` stores it: two-space JSON with a trailing newline, so a rewrite diffs cleanly. */
 export function formatDiscoveryDocument(document: DiscoveryDocument): string {
   return `${JSON.stringify(document, null, 2)}\n`;
 }

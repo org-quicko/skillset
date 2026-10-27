@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Logger } from "./logger.js";
 
-/** Every error body is `{ error: { code, message, field? } }` — docs/openapi.json's Error schema. */
+/** Every error body is `{ error: { code, message, field? } }` — resources/openapi.json's Error schema. */
 function errorResponse(c: Context, status: ContentfulStatusCode, code: string, message: string, field?: string) {
   return c.json({ error: { code, message, ...(field ? { field } : {}) } }, status);
 }
