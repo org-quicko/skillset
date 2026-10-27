@@ -180,6 +180,39 @@ describe("Artifact layout (ticket 03)", () => {
     });
   });
 
+  it("accepts allowed-tools written as a YAML list and sends it as a comma-separated string", () => {
+    const bundle = buildSkillBundle([
+      file(
+        "SKILL.md",
+        skillMd(
+          [
+            "name: vuln-scan",
+            "description: Scans for vulnerabilities.",
+            "allowed-tools:",
+            "  - Read",
+            "  - Grep",
+            "  - Bash(rg:*)",
+          ].join("\n"),
+        ),
+      ),
+    ]);
+
+    expect(bundle.request.allowed_tools).toBe("Read, Grep, Bash(rg:*)");
+  });
+
+  it("still rejects allowed-tools that is a list containing a non-string", () => {
+    expect(() =>
+      buildSkillBundle([
+        file(
+          "SKILL.md",
+          skillMd(
+            ["name: vuln-scan", "description: Scans.", "allowed-tools:", "  - Read", "  - 1"].join("\n"),
+          ),
+        ),
+      ]),
+    ).toThrow("allowed-tools");
+  });
+
   it("omits a frontmatter field the SKILL.md never set, rather than sending it null", () => {
     const bundle = buildSkillBundle(validSkill());
 
