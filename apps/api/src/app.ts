@@ -3,8 +3,8 @@ import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { csrf } from "hono/csrf";
 import { requestId } from "hono/request-id";
-import mcpDiscovery from "../../../docs/mcp.json" with { type: "json" };
-import openapiSpec from "../../../docs/openapi.json" with { type: "json" };
+import mcpDiscovery from "../../../resources/mcp.json" with { type: "json" };
+import openapiSpec from "../../../resources/openapi.json" with { type: "json" };
 import { sql } from "kysely";
 import type { Database } from "./db/client.js";
 import { authRoutes } from "./features/auth/auth.routes.js";
@@ -151,9 +151,9 @@ export type ApiType = ReturnType<typeof createApi>;
  * @returns `Hono`
  *
  * @remarks
- * `GET /openapi.json` serves `docs/openapi.json` verbatim — that file is the
+ * `GET /openapi.json` serves `resources/openapi.json` verbatim — that file is the
  * hand-written wire contract, not generated from the routes below, so it and
- * the routes must be kept in sync by hand. `GET /mcp` serves `docs/mcp.json`,
+ * the routes must be kept in sync by hand. `GET /mcp` serves `resources/mcp.json`,
  * a discovery document for the separate `@in-org-quicko/skillset-mcp` server
  * that is generated from that server itself (`apps/mcp/src/discovery.ts`) and
  * held to it by a test there. It is descriptive only: this app never speaks

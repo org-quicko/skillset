@@ -86,7 +86,7 @@ The Registry:
   `outdated`, `modified`, or `untracked` — saying what overwriting it would cost
 - `publish_skill` — publish a Skill to the Registry (requires a Token): the one at a directory in this project (`path`), or one from a GitHub or GitLab repository (`url` with `name`), cloned with your own git credentials
 
-The Registry describes this server at `GET /mcp` using `docs/mcp.json`, generated from the server
+The Registry describes this server at `GET /mcp` using `resources/mcp.json`, generated from the server
 itself. After changing a tool, regenerate it with `bun run --filter @in-org-quicko/skillset-mcp discovery`;
 a test fails while it is stale.
 

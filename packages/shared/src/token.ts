@@ -2,7 +2,7 @@ import { z } from "zod";
 import { timestamp } from "./timestamp.js";
 
 /**
- * The Token shape carried on the wire (docs/openapi.json's `Token` schema).
+ * The Token shape carried on the wire (resources/openapi.json's `Token` schema).
  * `token_hash` and the secret are never part of it — a Token is listed by
  * its display name and usage times only.
  */

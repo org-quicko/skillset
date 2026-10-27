@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** The shape every non-2xx response takes (docs/openapi.json's `Error` schema). */
+/** The shape every non-2xx response takes (resources/openapi.json's `Error` schema). */
 export const ErrorResponseSchema = z.object({
   error: z.object({
     code: z.string(),
