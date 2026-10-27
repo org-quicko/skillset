@@ -3,15 +3,13 @@ import pkg from "../package.json" with { type: "json" };
 import type { DiscoveryDocument } from "./discovery.js";
 
 /**
- * The bundle's name, which is deliberately not `skillset-mcp`.
+ * The bundle's name.
  *
  * @remarks
- * Claude Code and Cowork refuse to start a bundle whose name contains the
- * substring `skillset` anywhere, as a reserved internal server name — so
- * neither the package name nor any qualified form of the word will do
- * (ADR-0037). A test holds this.
+ * A host keys the installed extension off this name, so a change to it makes
+ * a new extension and loses the settings entered under the old name.
  */
-export const MCPB_NAME = "skill-registry";
+export const MCPB_NAME = "skillset";
 
 /**
  * Builds the MCPB `manifest.json` the `.mcpb` bundle is packed with.

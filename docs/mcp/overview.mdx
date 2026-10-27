@@ -52,7 +52,7 @@ Detection is lazy: it runs on the first tool call that needs an agent identity, 
   Do **not** use any server key containing the word `skillset` when registering this server in an MCP host config. Some hosts (observed on Claude Code) reserve that string internally and will refuse to start a server registered under it, with the error "Its name collides with a reserved internal server name." This applies to substrings too — `skillset-registry` collides. Use `skill-registry` instead.
 </Warning>
 
-The package's own `manifest.json` uses the name `skill-registry` for exactly this reason. Its display name is "Skillset by Labs@Quicko".
+The MCPB bundle's own `manifest.json` uses the name `skillset` and the display name "Skillset by Labs@Quicko".
 
 ## Quick start
 
