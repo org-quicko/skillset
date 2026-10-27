@@ -29,6 +29,9 @@ export const MCPB_NAME = "skill-registry";
  * and a writer `token` marked `sensitive` so a host keeps it out of plain
  * config (ADR-0035).
  *
+ * The server runs with `--scope user`: a bundle is installed once per host,
+ * not per project, so its Skills go to the home directory.
+ *
  * Tools carry their full descriptions, the same ones an Agent sees, so a host
  * showing them before install shows what the server actually does.
  *
@@ -41,7 +44,7 @@ export function buildMcpbManifest(discovery: DiscoveryDocument): McpbManifestAny
   return {
     manifest_version: "0.3",
     name: MCPB_NAME,
-    display_name: "Skill Registry",
+    display_name: "Skillset by Labs@Quicko",
     version: pkg.version,
     description: pkg.description,
     long_description:
@@ -56,7 +59,7 @@ export function buildMcpbManifest(discovery: DiscoveryDocument): McpbManifestAny
       entry_point: "dist/cli.js",
       mcp_config: {
         command: "node",
-        args: ["${__dirname}/dist/cli.js", "--registry", "${user_config.registry}"],
+        args: ["${__dirname}/dist/cli.js", "--registry", "${user_config.registry}", "--scope", "user"],
         env: { SKILLSET_TOKEN: "${user_config.token}" },
       },
     },

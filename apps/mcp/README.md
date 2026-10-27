@@ -26,8 +26,8 @@ Or configure it in an MCP client's config, e.g.:
 The server key is yours to pick, but avoid any name containing `skillset` — some hosts (observed on
 Claude Code / Cowork) reserve it internally and refuse to start a server registered under it, with
 "Its name collides with a reserved internal server name". Not just the bare word: `skillset-registry`
-collided too. `manifest.json`'s `name`/`display_name` were renamed to `skill-registry` / "Skill
-Registry" for the same reason — no `skillset` substring at all.
+collided too. `manifest.json`'s `name` is `skill-registry` for the same reason — no `skillset`
+substring at all. Its `display_name` is "Skillset by Labs@Quicko".
 
 ### Installing as an MCPB extension
 
@@ -43,7 +43,8 @@ into one `.mcpb` file with no `node_modules` inside it. The bundle's `manifest.j
 at pack time (`src/mcpb.ts`): its version and description come from `package.json`, and its tools
 from the server itself, so there is no manifest in the repository to keep in step. Open the
 resulting file with the host's extension installer, which will prompt for the two settings the
-manifest declares: the Registry URL, and, optionally, a writer Token for `publish_skill`.
+manifest declares: the Registry URL, and, optionally, a writer Token for `publish_skill`. The
+bundle runs the server with `--scope user`, so `install_skills` installs to the home directory.
 
 Unlike `npx`, an installed bundle does **not** update itself — reinstall it to pick up a new
 version (see `docs/adr/0037-mcpb-packaging-is-an-additional-pinned-channel.md`).
