@@ -9,7 +9,7 @@ import type { DiscoveryDocument } from "./discovery.js";
  * A host keys the installed extension off this name, so a change to it makes
  * a new extension and loses the settings entered under the old name.
  */
-export const MCPB_NAME = "skillset";
+export const MCPB_NAME = "skillset-by-labs-at-quicko";
 
 /**
  * Builds the MCPB `manifest.json` the `.mcpb` bundle is packed with.

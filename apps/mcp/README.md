@@ -26,7 +26,7 @@ Or configure it in an MCP client's config, e.g.:
 The server key is yours to pick, but avoid any name containing `skillset` — some hosts (observed on
 Claude Code / Cowork) reserve it internally and refuse to start a server registered under it, with
 "Its name collides with a reserved internal server name". Not just the bare word: `skillset-registry`
-collided too. The MCPB bundle's own `manifest.json` uses the name `skillset` and the display name
+collided too. The MCPB bundle's own `manifest.json` uses the name `skillset-by-labs-at-quicko` and the display name
 "Skillset by Labs@Quicko" (#65).
 
 ### Installing as an MCPB extension

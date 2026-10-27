@@ -19,7 +19,7 @@ rather than re-litigated. What ADR-0033 still holds: no tool writes without a To
 
 ## Decision
 
-> **Amended (#65):** the bundle's `name` is now `skillset` and its `display_name` is "Skillset by
+> **Amended (#65):** the bundle's `name` is now `skillset-by-labs-at-quicko` and its `display_name` is "Skillset by
 > Labs@Quicko". This reverses the naming in Consequences below; that collision must be checked again
 > on Claude Code / Cowork. `mcp_config` now passes `--scope user`: a bundle is installed once per
 > host, not per project, so its Skills go to the home directory.
