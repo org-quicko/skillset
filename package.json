@@ -17,7 +17,7 @@
     "build:cli": "bun --filter @in-org-quicko/skillset-cli build",
     "build:mcp": "bun --filter @in-org-quicko/skillset-mcp build",
     "build": "bun run build:web && bun run build:api && bun run build:cli && bun run build:mcp",
-    "test": "bun run --filter @in-org-quicko/skillset-shared --filter @in-org-quicko/skillset-installer --filter @in-org-quicko/skillset-api --filter @in-org-quicko/skillset-cli --filter @in-org-quicko/skillset-mcp test",
+    "test": "bun run --filter @in-org-quicko/skillset-shared --filter @in-org-quicko/skillset-installer --filter @in-org-quicko/skillset-api --filter @in-org-quicko/skillset-cli --filter @in-org-quicko/skillset-mcp --filter @in-org-quicko/skillset-web test",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint .",
     "audit": "bun audit --audit-level=high"
