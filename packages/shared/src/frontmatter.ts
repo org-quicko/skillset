@@ -64,6 +64,33 @@ export function splitFrontmatter(source: string): { frontmatter: string | null; 
 }
 
 /**
+ * Folds a YAML list of tool names into the comma-separated string the
+ * Registry stores, leaving any other value for the validator to judge.
+ *
+ * @remarks
+ * Claude Code accepts `allowed-tools` as either a string or a YAML list, so a
+ * SKILL.md written the list way must publish. The stored form stays a string
+ * (ADR-0009), which is why the list is folded here, at the frontmatter
+ * boundary, rather than loosening the API's type.
+ *
+ * @param value - The raw `allowed-tools` frontmatter value.
+ * @returns A comma-joined string when `value` is an array of strings;
+ * otherwise `value` unchanged, so a non-string element still fails
+ * `validateSkillAllowedTools`.
+ * @example
+ * ```ts
+ * normalizeAllowedTools(["Read", "Bash(rg:*)"]); // -> "Read, Bash(rg:*)"
+ * normalizeAllowedTools("Read, Grep");           // -> "Read, Grep"
+ * ```
+ */
+function normalizeAllowedTools(value: unknown): unknown {
+  if (Array.isArray(value) && value.every((tool) => typeof tool === "string")) {
+    return value.join(", ");
+  }
+  return value;
+}
+
+/**
  * Parses a SKILL.md's YAML frontmatter and body.
  *
  * @param source - The raw contents of a SKILL.md file.
@@ -108,7 +135,7 @@ export function parseSkillDocument(source: string): SkillDocument {
   const license = validateSkillLicense(fields.license);
   const compatibility = validateSkillCompatibility(fields.compatibility);
   const metadata = validateSkillMetadata(fields.metadata);
-  const allowed_tools = validateSkillAllowedTools(fields["allowed-tools"]);
+  const allowed_tools = validateSkillAllowedTools(normalizeAllowedTools(fields["allowed-tools"]));
 
   return {
     name: validateSkillName(fields.name),
