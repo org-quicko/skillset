@@ -32,14 +32,24 @@ function sentenceCase(value: string): string {
 }
 
 /**
- * A moment as a short "3d ago" style string, in the viewer's locale — what the
- * Skill list's Updated column shows. Falls back to "Just now" under a minute
- * and "Never" for a null value.
+ * A moment as a spelled-out relative string ("3 days ago", "Last week"), in the
+ * viewer's locale — what the Skill list's Updated column shows.
+ *
+ * @param value - An ISO timestamp, or null when the moment never happened.
+ * @returns The largest whole unit that fits, sentence-cased; "Just now" under
+ * a minute and "Never" for a null value.
+ *
+ * @example
+ * ```ts
+ * formatRelativeTime(isoOneWeekAgo) // -> "Last week"
+ * formatRelativeTime(isoThreeDaysAgo) // -> "3 days ago"
+ * formatRelativeTime(null) // -> "Never"
+ * ```
  */
 export function formatRelativeTime(value: string | null): string {
   if (value === null) return "Never"
   const deltaSeconds = (Date.now() - new Date(value).getTime()) / 1000
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" })
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "long" })
   for (const { unit, seconds } of RELATIVE_UNITS) {
     if (deltaSeconds >= seconds) return sentenceCase(formatter.format(-Math.floor(deltaSeconds / seconds), unit))
   }
