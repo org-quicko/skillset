@@ -1429,8 +1429,8 @@ describe("Falling back to fuzzy matching (ADR-0040)", () => {
     expect(page.items.map((s) => s.name)).toContain("building-angular-applications");
   });
 
-  // A shared database where another app installed pg_trgm first, in a schema
-  // not on this app's search_path: `CREATE EXTENSION IF NOT EXISTS` skips it.
+  // pg_trgm already installed in a schema that is not on this app's
+  // search_path: `CREATE EXTENSION IF NOT EXISTS` skips it.
   it("still finds the Skill when pg_trgm lives in another schema", async () => {
     await sql`CREATE SCHEMA other_app`.execute(context.db);
     await sql`ALTER EXTENSION pg_trgm SET SCHEMA other_app`.execute(context.db);

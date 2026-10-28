@@ -323,9 +323,9 @@ const FUZZY_MATCH_THRESHOLD = 0.4;
  * A Registry where this shows up in practice wants the `<%` operator, the GUC,
  * and a `gin_trgm_ops` index, together.
  *
- * `word_similarity` is qualified by the schema pg_trgm lives in, because on a
- * shared database another app may have installed it first, in a schema that is
- * not on this app's search_path.
+ * `word_similarity` is qualified by the schema pg_trgm lives in, because the
+ * extension may already be installed in a schema that is not on this app's
+ * search_path, and then `CREATE EXTENSION IF NOT EXISTS` does not move it.
  *
  * @param query - A trimmed, non-empty search term.
  * @param trigramSchema - The schema pg_trgm is installed in.
