@@ -322,9 +322,17 @@ const FUZZY_MATCH_THRESHOLD = 0.4;
  * indexed search already returned nothing, over a catalog one team publishes.
  * A Registry where this shows up in practice wants the `<%` operator, the GUC,
  * and a `gin_trgm_ops` index, together.
+ *
+ * `word_similarity` is qualified by the schema pg_trgm lives in, because on a
+ * shared database another app may have installed it first, in a schema that is
+ * not on this app's search_path.
+ *
+ * @param query - A trimmed, non-empty search term.
+ * @param trigramSchema - The schema pg_trgm is installed in.
  */
-function buildFuzzyMatcher(query: string): SearchMatcher {
-  const best = sql<number>`GREATEST(word_similarity(${query}, ${sql.ref("resource_directory.name")}), word_similarity(${query}, ${sql.ref("resource_directory.description")}))`;
+function buildFuzzyMatcher(query: string, trigramSchema: string): SearchMatcher {
+  const wordSimilarity = sql.id(trigramSchema, "word_similarity");
+  const best = sql<number>`GREATEST(${wordSimilarity}(${query}, ${sql.ref("resource_directory.name")}), ${wordSimilarity}(${query}, ${sql.ref("resource_directory.description")}))`;
   return { condition: sql<SqlBool>`${best} >= ${FUZZY_MATCH_THRESHOLD}`, rank: best };
 }
 
@@ -401,7 +409,16 @@ export class ResourcesService {
     // The fallback rescues a search that matched nothing at all; it never
     // reorders or pads one that matched something (ADR-0040).
     if (!query.q || exact.total > 0) return exact;
-    return this.runDirectoryPage(query, buildFuzzyMatcher(query.q));
+    return this.runDirectoryPage(query, buildFuzzyMatcher(query.q, await this.trigramSchema()));
+  }
+
+  /** Read on each fuzzy search, not once at start-up, so a DBA can move the extension without a restart. */
+  private async trigramSchema(): Promise<string> {
+    const { rows } = await sql<{ schema: string }>`
+      SELECT n.nspname AS schema FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
+      WHERE e.extname = 'pg_trgm'`.execute(this.db);
+    if (!rows[0]) throw new Error("The pg_trgm extension is not installed. See README, \"Fuzzy search\".");
+    return rows[0].schema;
   }
 
   /**

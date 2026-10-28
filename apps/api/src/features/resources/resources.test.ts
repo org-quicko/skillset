@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { sql } from "kysely";
 import { ARTIFACT_MAX_UNCOMPRESSED_BYTES, extractSkillFiles, registryNamespace, type Role } from "@in-org-quicko/skillset-shared";
 import {
   refreshInstallCounts,
@@ -1426,6 +1427,20 @@ describe("Falling back to fuzzy matching (ADR-0040)", () => {
   it("honours an explicit sort over the fuzzy ranking", async () => {
     const page = await search({ q: "angulr", sort_by: "updated_at" });
     expect(page.items.map((s) => s.name)).toContain("building-angular-applications");
+  });
+
+  // A shared database where another app installed pg_trgm first, in a schema
+  // not on this app's search_path: `CREATE EXTENSION IF NOT EXISTS` skips it.
+  it("still finds the Skill when pg_trgm lives in another schema", async () => {
+    await sql`CREATE SCHEMA other_app`.execute(context.db);
+    await sql`ALTER EXTENSION pg_trgm SET SCHEMA other_app`.execute(context.db);
+    try {
+      const page = await search({ q: "angulr" });
+      expect(page.items.map((s) => s.name)).toContain("building-angular-applications");
+    } finally {
+      await sql`ALTER EXTENSION pg_trgm SET SCHEMA public`.execute(context.db);
+      await sql`DROP SCHEMA other_app`.execute(context.db);
+    }
   });
 });
 
