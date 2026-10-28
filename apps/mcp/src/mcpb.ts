@@ -3,15 +3,13 @@ import pkg from "../package.json" with { type: "json" };
 import type { DiscoveryDocument } from "./discovery.js";
 
 /**
- * The bundle's name, which is deliberately not `skillset-mcp`.
+ * The bundle's name.
  *
  * @remarks
- * Claude Code and Cowork refuse to start a bundle whose name contains the
- * substring `skillset` anywhere, as a reserved internal server name — so
- * neither the package name nor any qualified form of the word will do
- * (ADR-0037). A test holds this.
+ * A host keys the installed extension off this name, so a change to it makes
+ * a new extension and loses the settings entered under the old name.
  */
-export const MCPB_NAME = "skill-registry";
+export const MCPB_NAME = "skillset-by-labs-at-quicko";
 
 /**
  * Builds the MCPB `manifest.json` the `.mcpb` bundle is packed with.
@@ -29,6 +27,9 @@ export const MCPB_NAME = "skill-registry";
  * and a writer `token` marked `sensitive` so a host keeps it out of plain
  * config (ADR-0035).
  *
+ * The server runs with `--scope user`: a bundle is installed once per host,
+ * not per project, so its Skills go to the home directory.
+ *
  * Tools carry their full descriptions, the same ones an Agent sees, so a host
  * showing them before install shows what the server actually does.
  *
@@ -41,7 +42,7 @@ export function buildMcpbManifest(discovery: DiscoveryDocument): McpbManifestAny
   return {
     manifest_version: "0.3",
     name: MCPB_NAME,
-    display_name: "Skill Registry",
+    display_name: "Skillset by Labs@Quicko",
     version: pkg.version,
     description: pkg.description,
     long_description:
@@ -56,7 +57,7 @@ export function buildMcpbManifest(discovery: DiscoveryDocument): McpbManifestAny
       entry_point: "dist/cli.js",
       mcp_config: {
         command: "node",
-        args: ["${__dirname}/dist/cli.js", "--registry", "${user_config.registry}"],
+        args: ["${__dirname}/dist/cli.js", "--registry", "${user_config.registry}", "--scope", "user"],
         env: { SKILLSET_TOKEN: "${user_config.token}" },
       },
     },
