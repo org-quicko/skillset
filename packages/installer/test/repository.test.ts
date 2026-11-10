@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { walkSkillDirectory } from "../src/index.js";
 
 describe("walkSkillDirectory", () => {
-  it("returns the kept files in name order, whatever order the filesystem lists them in", async () => {
+  it("returns the kept files in path order, whatever order the filesystem lists them in", async () => {
     const root = await mkdtemp(join(tmpdir(), "skillset-walk-"));
     try {
       // Written out of order, so a filesystem that lists by creation would not happen to agree.
@@ -15,6 +15,7 @@ describe("walkSkillDirectory", () => {
         "scripts/a.sh",
         "references/java.md",
         "SKILL.md",
+        "references.md",
         "README.md",
       ]) {
         await mkdir(dirname(join(root, path)), { recursive: true });
@@ -26,6 +27,7 @@ describe("walkSkillDirectory", () => {
       expect(files.map((file) => file.path)).toEqual([
         "README.md",
         "SKILL.md",
+        "references.md",
         "references/java.md",
         "scripts/a.sh",
         "scripts/b.sh",

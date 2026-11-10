@@ -37,10 +37,11 @@ import {
  * directory, or a file under it cannot be read.
  *
  * @remarks
- * Each directory's entries are visited in name order, compared by code unit,
- * so the result is the same on every filesystem and in every locale —
- * `readdir` alone promises no order, and this order reaches the publish
- * manifest and the list of files a publish reports back.
+ * The files come back in path order, compared by code unit — the order the
+ * Registry lists an Artifact's files in — so the result is the same on every
+ * filesystem and in every locale. `readdir` alone promises no order, and this
+ * order reaches the publish manifest and the list of files a publish reports
+ * back.
  *
  * @example
  * ```ts
@@ -49,9 +50,7 @@ import {
  * ```
  */
 export async function walkSkillDirectory(root: string, dir: string = root): Promise<SkillFile[]> {
-  const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-  );
+  const entries = await readdir(dir, { withFileTypes: true });
   const files: SkillFile[] = [];
 
   for (const entry of entries) {
@@ -66,7 +65,7 @@ export async function walkSkillDirectory(root: string, dir: string = root): Prom
     }
   }
 
-  return files;
+  return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 /**
