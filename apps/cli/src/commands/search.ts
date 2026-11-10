@@ -6,6 +6,7 @@ import {
 } from "@in-org-quicko/skillset-shared";
 import { registryFetch } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
+import { parseKind } from "./install.js";
 
 export interface SearchOptions {
   /** The term to match. Omitted, the whole catalog is listed. */
@@ -14,6 +15,8 @@ export interface SearchOptions {
   tag?: string;
   /** `--limit`, as the flag arrives: a string, or absent. */
   limit?: string;
+  /** `--kind`: `skill` (the default) or `subagent`. */
+  kind?: string;
 }
 
 /** What `skillset search` found, and how much of the catalog that is. */
@@ -75,7 +78,7 @@ export async function runSearch(deps: SessionDeps, options: SearchOptions): Prom
   const limit = parseLimit(options.limit);
   const client = await openReadClient(deps);
 
-  const params = new URLSearchParams({ kind: "skill" });
+  const params = new URLSearchParams({ kind: parseKind(options.kind) });
   const query = options.query?.trim();
   if (query) params.set("q", query);
   if (limit !== undefined) params.set("page_size", String(limit));

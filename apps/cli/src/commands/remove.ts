@@ -1,10 +1,13 @@
 import type { Scope } from "@in-org-quicko/skillset-shared";
-import { removeSkill } from "@in-org-quicko/skillset-installer";
+import { removeSkill, removeSubagent } from "@in-org-quicko/skillset-installer";
+import { parseKind } from "./install.js";
 import { detectAgentId, forgetInstall, parseScopeFlag, type InstalledDeps } from "./installed.js";
 
 export interface RemoveOptions {
   name: string;
   scope?: string;
+  /** `--kind`: `skill` (the default) or `subagent`. */
+  kind?: string;
 }
 
 /** What `skillset remove` deleted. */
@@ -53,6 +56,12 @@ export interface RemoveCommandReport {
  */
 export async function runRemove(deps: InstalledDeps, options: RemoveOptions): Promise<RemoveCommandReport> {
   const scope = parseScopeFlag(options.scope);
+
+  if (parseKind(options.kind) === "subagent") {
+    const removed = await removeSubagent({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, options.name, scope);
+    const forgotten = await forgetInstall(deps, scope, options.name, "subagent");
+    return { name: options.name, scope, skillDirectory: removed, link: null, forgotten };
+  }
 
   const report = await removeSkill(
     { cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir },

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { detectAgent, nonUniversalProjectSkillsDirs, SkillSchema, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
+import { detectAgent, nonUniversalProjectSkillsDirs, ResourceDetailSchema, type AgentId, type Scope } from "@in-org-quicko/skillset-shared";
 import {
   readInstalled as readInstalledAt,
   type InstalledSkill,
@@ -60,10 +60,10 @@ export function detectAgentId(deps: Pick<InstalledDeps, "env" | "cwd" | "homeDir
  * reading it as one would hide a broken Registry behind a clean listing.
  */
 function lookupThrough(client: RegistryClient): RegistryLookup {
-  return async (name, namespace) => {
+  return async (name, namespace, kind) => {
     try {
       const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
-      const skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(name)}${query}`, SkillSchema);
+      const skill = await registryFetch(client, `/resources/${kind}/by-name/${encodeURIComponent(name)}${query}`, ResourceDetailSchema);
       return skill.updated_at;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return undefined;

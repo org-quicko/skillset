@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import type { Scope, SkillFile } from "@in-org-quicko/skillset-shared";
-import { resolveInstallTarget, type InstallContext } from "./index.js";
+import { subagentFileName } from "@in-org-quicko/skillset-shared";
+import { resolveInstallTarget, resolveSubagentTarget, type InstallContext } from "./index.js";
 
 /** The lockfile's own format version, bumped only when an older reader could misread a newer file. */
 export const LOCKFILE_VERSION = 1;
@@ -58,7 +59,20 @@ export interface Lockfile {
   /** The Registry every entry was resolved against; a later install from a different one replaces it. */
   registry: string;
   skills: Record<string, LockfileEntry>;
+  /**
+   * Every Subagent installed at this Scope (ADR-0047). A map of its own
+   * rather than a `kind` on each entry of `skills`: a Skill and a Subagent may
+   * share a name, and a CLI released before Subagents existed reads `skills`
+   * alone, so it never mistakes one for a Skill whose directory is missing.
+   * Absent when there are none.
+   */
+  subagents?: Record<string, LockfileEntry>;
 }
+
+/** Which of a lockfile's records an install belongs to. */
+export type InstalledKind = "skill" | "subagent";
+
+const SECTION = { skill: "skills", subagent: "subagents" } as const;
 
 /** How an installed Skill stands against the Registry and against what was written. */
 export type SkillStatus = "current" | "outdated" | "modified" | "missing";
@@ -131,6 +145,7 @@ export async function readLockfile(path: string, registry: string): Promise<Lock
       version: parsed.version,
       registry: typeof parsed.registry === "string" ? parsed.registry : registry,
       skills: parsed.skills,
+      ...(typeof parsed.subagents === "object" && parsed.subagents !== null ? { subagents: parsed.subagents } : {}),
     };
   } catch {
     return emptyLockfile(registry);
@@ -150,16 +165,21 @@ export async function readLockfile(path: string, registry: string): Promise<Lock
  * @throws Error when the file cannot be written or removed.
  */
 export async function writeLockfile(path: string, lockfile: Lockfile): Promise<void> {
-  if (Object.keys(lockfile.skills).length === 0) {
+  // Sorted so the file is stable across installs and reviews as a small
+  // diff rather than a reordering.
+  const sorted = (entries: Record<string, LockfileEntry>): Record<string, LockfileEntry> =>
+    Object.fromEntries(Object.entries(entries).sort(([a], [b]) => a.localeCompare(b)));
+  const subagents = lockfile.subagents ?? {};
+  const hasSubagents = Object.keys(subagents).length > 0;
+  if (Object.keys(lockfile.skills).length === 0 && !hasSubagents) {
     await rm(path, { force: true });
     return;
   }
   const ordered: Lockfile = {
     version: lockfile.version,
     registry: lockfile.registry,
-    // Sorted so the file is stable across installs and reviews as a small
-    // diff rather than a reordering.
-    skills: Object.fromEntries(Object.entries(lockfile.skills).sort(([a], [b]) => a.localeCompare(b))),
+    skills: sorted(lockfile.skills),
+    ...(hasSubagents ? { subagents: sorted(subagents) } : {}),
   };
   await writeFile(path, `${JSON.stringify(ordered, null, 2)}\n`, "utf8");
 }
@@ -280,11 +300,34 @@ export function skillStatus(
   return "current";
 }
 
-/** One Skill the lockfile records, as it actually stands right now. */
+/**
+ * Digests an installed Subagent's one file the way {@link hashSkillFiles}
+ * digested it at install time.
+ *
+ * @param path - The installed file, from `resolveSubagentTarget`.
+ * @param name - The Subagent's name, which names the file inside its Artifact.
+ * @returns The digest, or `null` when the file is gone.
+ * @throws Error when the file exists but cannot be read.
+ * @example
+ * ```ts
+ * const hash = await hashInstalledSubagent("/repo/.claude/agents/reviewer.md", "reviewer");
+ * ```
+ */
+export async function hashInstalledSubagent(path: string, name: string): Promise<string | null> {
+  try {
+    return hashSkillFiles([{ path: subagentFileName(name), bytes: new Uint8Array(await readFile(path)) }]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** One Skill or Subagent the lockfile records, as it actually stands right now. */
 export interface InstalledSkill {
+  kind: InstalledKind;
   name: string;
   entry: LockfileEntry;
-  /** The canonical directory the Skill's files live in at this Scope. */
+  /** The canonical directory a Skill's files live in at this Scope, or a Subagent's one file. */
   directory: string;
   status: SkillStatus;
   /** The Registry's current `updated_at`, or `undefined` when it was not consulted or no longer has this Skill. */
@@ -305,7 +348,11 @@ export interface InstalledSkill {
  * Skill is looked up as the party that named it rather than by a bare name
  * that might now resolve to someone else's (ADR-0042).
  */
-export type RegistryLookup = (name: string, namespace: string | undefined) => Promise<string | undefined>;
+export type RegistryLookup = (
+  name: string,
+  namespace: string | undefined,
+  kind: InstalledKind,
+) => Promise<string | undefined>;
 
 /**
  * Reads what is installed at `scope` and works out how each Skill stands.
@@ -323,7 +370,8 @@ export type RegistryLookup = (name: string, namespace: string | undefined) => Pr
  * @param lookup - How to ask the Registry for a Skill's current
  * `updated_at`, or `null` to skip the Registry entirely — then nothing can
  * read `outdated`, only `current`, `modified`, or `missing`.
- * @returns One entry per Skill the lockfile records, alphabetical by name.
+ * @returns One entry per Skill the lockfile records, alphabetical by name,
+ * then one per Subagent, likewise.
  * @throws Error when the lockfile cannot be read, when a Skill's directory
  * cannot be digested for a reason other than not existing, or whatever
  * `lookup` throws.
@@ -340,27 +388,23 @@ export async function readInstalled(
 ): Promise<InstalledSkill[]> {
   const lockfile = await readLockfile(resolveLockfilePath(scope, ctx), "");
 
-  const names = Object.keys(lockfile.skills).sort((a, b) => a.localeCompare(b));
-  return Promise.all(
-    names.map(async (name) => {
-      const entry = lockfile.skills[name] as LockfileEntry;
-      // `null` for the Agent: only `agentDir` depends on it, and the
-      // canonical directory — the one holding the files a digest is taken
-      // over — never does (ADR-0022).
-      const { canonicalTarget } = resolveInstallTarget(ctx, name, scope, null);
-      const [installedHash, registryUpdatedAt] = await Promise.all([
-        hashInstalledSkill(canonicalTarget),
-        lookup ? lookup(name, entry.namespace) : Promise.resolve(undefined),
-      ]);
-      return {
-        name,
-        entry,
-        directory: canonicalTarget,
-        status: skillStatus(entry, installedHash, registryUpdatedAt),
-        registryUpdatedAt,
-      };
-    }),
-  );
+  const read = (kind: InstalledKind, entries: Record<string, LockfileEntry>): Promise<InstalledSkill>[] =>
+    Object.keys(entries)
+      .sort((a, b) => a.localeCompare(b))
+      .map(async (name) => {
+        const entry = entries[name] as LockfileEntry;
+        // `null` for the Agent: only `agentDir` depends on it, and the
+        // canonical directory — the one holding the files a digest is taken
+        // over — never does (ADR-0022).
+        const directory =
+          kind === "skill" ? resolveInstallTarget(ctx, name, scope, null).canonicalTarget : resolveSubagentTarget(ctx, name, scope);
+        const [installedHash, registryUpdatedAt] = await Promise.all([
+          kind === "skill" ? hashInstalledSkill(directory) : hashInstalledSubagent(directory, name),
+          lookup ? lookup(name, entry.namespace, kind) : Promise.resolve(undefined),
+        ]);
+        return { kind, name, entry, directory, status: skillStatus(entry, installedHash, registryUpdatedAt), registryUpdatedAt };
+      });
+  return Promise.all([...read("skill", lockfile.skills), ...read("subagent", lockfile.subagents ?? {})]);
 }
 
 /**
@@ -374,7 +418,12 @@ export async function readInstalled(
  * the one its entries actually came from.
  * @param name - The Skill's name, as the Registry reports it.
  * @param entry - What to record.
+ * @param kind - Whether `name` is a Skill (the default) or a Subagent.
  * @throws Error when the lockfile cannot be read or written.
+ * @example
+ * ```ts
+ * await recordInstall(ctx, "project", registry, "reviewer", entry, "subagent");
+ * ```
  */
 export async function recordInstall(
   ctx: Pick<InstallContext, "cwd" | "homeDir">,
@@ -382,10 +431,12 @@ export async function recordInstall(
   registry: string,
   name: string,
   entry: LockfileEntry,
+  kind: InstalledKind = "skill",
 ): Promise<void> {
   const path = resolveLockfilePath(scope, ctx);
   const lockfile = await readLockfile(path, registry);
-  await writeLockfile(path, { ...lockfile, registry, skills: { ...lockfile.skills, [name]: entry } });
+  const section = SECTION[kind];
+  await writeLockfile(path, { ...lockfile, registry, [section]: { ...lockfile[section], [name]: entry } });
 }
 
 /**
@@ -394,19 +445,26 @@ export async function recordInstall(
  * @param ctx - Project root and home directory, to place the lockfile.
  * @param scope - Which Scope's lockfile to write.
  * @param name - The Skill to forget.
+ * @param kind - Whether `name` is a Skill (the default) or a Subagent.
  * @returns Whether there was an entry to drop.
  * @throws Error when the lockfile cannot be read or written.
+ * @example
+ * ```ts
+ * const forgotten = await forgetInstall(ctx, "project", "reviewer", "subagent");
+ * ```
  */
 export async function forgetInstall(
   ctx: Pick<InstallContext, "cwd" | "homeDir">,
   scope: Scope,
   name: string,
+  kind: InstalledKind = "skill",
 ): Promise<boolean> {
   const path = resolveLockfilePath(scope, ctx);
   const lockfile = await readLockfile(path, "");
-  if (!(name in lockfile.skills)) return false;
-
-  const remaining = Object.fromEntries(Object.entries(lockfile.skills).filter(([key]) => key !== name));
-  await writeLockfile(path, { ...lockfile, skills: remaining });
+  const section = SECTION[kind];
+  const entries = lockfile[section] ?? {};
+  if (!(name in entries)) return false;
+  const remaining = Object.fromEntries(Object.entries(entries).filter(([key]) => key !== name));
+  await writeLockfile(path, { ...lockfile, [section]: remaining });
   return true;
 }

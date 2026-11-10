@@ -1,9 +1,11 @@
+import { readFile, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import {
   buildSkillBundle,
+  buildSubagentBundle,
+  PublishedResponseSchema,
   SKILL_DISCOVERY_MAX_DEPTH,
   SKILL_FILE_NAME,
-  SkillPublishedSchema,
   SkillValidationError,
   type SkillBundle,
 } from "@in-org-quicko/skillset-shared";
@@ -68,10 +70,15 @@ export type PublishOutcome =
  * @throws ApiError for any other refusal, and `RegistryUnreachableError` when neither the
  * Registry nor storage can be reached.
  */
-async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bundle: SkillBundle): Promise<PublishResult> {
+async function publishBundle(
+  client: RegistryClient,
+  fetchImpl: typeof fetch,
+  bundle: Pick<SkillBundle, "name" | "files"> & { request: object },
+  kind: "skill" | "subagent" = "skill",
+): Promise<PublishResult> {
   let published;
   try {
-    published = await registryFetch(client, `/resources/skill/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
+    published = await registryFetch(client, `/resources/${kind}/${encodeURIComponent(bundle.name)}`, PublishedResponseSchema, {
       method: "PUT",
       body: JSON.stringify(bundle.request),
     });
@@ -87,7 +94,8 @@ async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bu
 
   await uploadArtifactFiles(fetchImpl, published.upload.files, bundle.files);
 
-  return { name: published.skill.name, id: published.skill.id, published_at: published.skill.published_at };
+  const { name, id, published_at } = published.resource;
+  return { name, id, published_at };
 }
 
 /**
@@ -146,7 +154,8 @@ async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], op
 
 /**
  * Publishes the Skill at a directory, or every Skill beneath it — or one named
- * Skill out of a GitHub or GitLab repository.
+ * Skill out of a GitHub or GitLab repository — or the Subagent in a single
+ * markdown file.
  *
  * @param deps - The fetch implementation, config-file path, environment, the directory a
  * relative path is resolved against, whether a terminal is attached, how to confirm
@@ -206,6 +215,18 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
   }
 
   const targetPath = options.target ? resolve(deps.cwd, options.target) : deps.cwd;
+
+  // A single file is a Subagent (ADR-0046); a directory is a Skill, or holds several.
+  if ((await stat(targetPath).catch(() => null))?.isFile()) {
+    let bundle;
+    try {
+      bundle = buildSubagentBundle(new Uint8Array(await readFile(targetPath)));
+    } catch (error) {
+      rethrowValidationError(error);
+    }
+    const { name, request, file } = bundle;
+    return publishBundle(await openAuthenticatedClient(deps), deps.fetch, { name, request, files: [file] }, "subagent");
+  }
 
   if (await holdsSkillFile(targetPath)) {
     let bundle;

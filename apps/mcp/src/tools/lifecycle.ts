@@ -87,7 +87,9 @@ function registryLookup(fetchImpl: typeof fetch, registry: string): RegistryLook
  * ```
  */
 export async function installedSkills(deps: LifecycleDeps): Promise<InstalledSkillReport[]> {
-  const installed = await readInstalled(deps.ctx, deps.scope, registryLookup(deps.fetchImpl, deps.registry));
+  const installed = (await readInstalled(deps.ctx, deps.scope, registryLookup(deps.fetchImpl, deps.registry))).filter(
+    (entry) => entry.kind === "skill",
+  );
   return installed.map((skill) => ({
     name: skill.name,
     status: skill.status,
@@ -128,7 +130,9 @@ export async function updateSkills(
   deps: LifecycleDeps & Pick<InstallSkillsDeps, "detection">,
   options: { names?: string[]; force?: boolean },
 ): Promise<InstallSkillsResult> {
-  const installed = await readInstalled(deps.ctx, deps.scope, registryLookup(deps.fetchImpl, deps.registry));
+  const installed = (await readInstalled(deps.ctx, deps.scope, registryLookup(deps.fetchImpl, deps.registry))).filter(
+    (entry) => entry.kind === "skill",
+  );
   const wanted = options.names?.length ? installed.filter((skill) => options.names?.includes(skill.name)) : installed;
 
   // A Skill installed straight from a repository and not yet approved has no

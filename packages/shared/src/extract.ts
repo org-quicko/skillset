@@ -176,6 +176,28 @@ function enforceDeclaredSizesAgree(bytes: Uint8Array, view: DataView, entry: Cen
  * ```
  */
 export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
+  return stripWrappingDirectory(extractArtifactFiles(zipBytes));
+}
+
+/**
+ * Inspects an Artifact's zip and returns its files exactly as archived,
+ * whatever Kind it belongs to.
+ *
+ * @remarks
+ * Every check `extractSkillFiles` makes except the Skill-specific one: it
+ * does not look for a `SKILL.md` or strip a wrapping directory.
+ *
+ * @param zipBytes - The downloaded zip.
+ * @returns Each file's path and bytes.
+ * @throws SkillValidationError with `artifact_too_large`, `too_many_entries`,
+ * `uncompressed_too_large`, `entry_symlink`, `corrupt_archive`, or one of
+ * `validateArtifactPath`'s rules.
+ * @example
+ * ```ts
+ * const [file] = extractArtifactFiles(await downloadBinary(client, `/resources/${id}/artifact`));
+ * ```
+ */
+export function extractArtifactFiles(zipBytes: Uint8Array): SkillFile[] {
   if (zipBytes.byteLength > ARTIFACT_MAX_TRANSFER_BYTES) {
     throw new SkillValidationError(
       "artifact_too_large",
@@ -211,5 +233,5 @@ export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
     return { path: entry.name, bytes };
   });
 
-  return stripWrappingDirectory(files);
+  return files;
 }

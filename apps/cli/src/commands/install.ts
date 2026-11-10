@@ -1,6 +1,7 @@
 import {
   AGENT_IDS,
   AGENTS,
+  SUBAGENT_AGENT_ID,
   extractSkillFiles,
   ResourceSubmittedSchema,
   SkillSchema,
@@ -26,6 +27,7 @@ import { detectAgentId, recordInstall } from "./installed.js";
 import { rethrowValidationError } from "../errors.js";
 import { ApiError, downloadBinary, registryFetch, uploadArtifactFiles, type RegistryClient } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
+import { installSubagentFromRegistry } from "./subagent.js";
 
 /** One selectable Agent, as the searchable prompt shows it. */
 export interface AgentChoice {
@@ -73,6 +75,8 @@ export interface InstallOptions {
   copy?: boolean;
   /** `--force`: install over a locally-modified copy, or one a different party named, replacing it. */
   force?: boolean;
+  /** `--kind`: `skill` (the default) or `subagent` (ADR-0047). */
+  kind?: string;
 }
 
 /**
@@ -156,6 +160,9 @@ function parseChoice<T extends string>(value: string, allowed: readonly T[], lab
 }
 
 const parseScope = (value: string): Scope => parseChoice(value, SCOPES, "scope");
+/** Narrows `--kind` to a Kind the CLI can install; absent means a Skill. */
+export const parseKind = (value: string | undefined): "skill" | "subagent" =>
+  value === undefined ? "skill" : parseChoice(value, ["skill", "subagent"] as const, "kind");
 const parseAgentId = (value: string): AgentId => parseChoice(value, AGENT_IDS, "Agent");
 
 /** What became of putting a Skill installed from a URL forward for the Registry (ADR-0044). */
@@ -269,7 +276,9 @@ async function submitForApproval(client: RegistryClient, bundle: SkillBundle): P
  * @param deps - The fetch implementation, config-file path, environment, project root,
  * home directory, whether a terminal is attached, and how to prompt when a flag is missing.
  * @param options - The Skill's name or a repository URL, plus `--namespace`, `--agent`,
- * `--scope`, `--copy`, and `--force` when given, and `--name`, which a URL requires.
+ * `--scope`, `--copy`, and `--force` when given, and `--name`, which a URL requires. With
+ * `kind: "subagent"`, the name is a Subagent's and its one file is written into Claude Code's
+ * agents directory instead (ADR-0047).
  * @returns Where the Skill's files were written, the Agent chosen, how its directory
  * was linked, and — for a URL — what became of submitting it for approval.
  * @throws Error when no Registry is configured; when `--scope` is missing and no terminal is
@@ -311,6 +320,21 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
   const flagScope = options.scope ? parseScope(options.scope) : null;
   const flagAgent = options.agent ? parseAgentId(options.agent) : null;
   const fromUrl = isRepositoryUrl(options.name);
+
+  if (parseKind(options.kind) === "subagent") {
+    if (fromUrl) throw new Error("A Subagent is installed from the Registry by name; installing one from a URL is not supported.");
+    if (flagAgent && flagAgent !== SUBAGENT_AGENT_ID) {
+      throw new Error(`A Subagent can only be installed for ${SUBAGENT_AGENT_ID} — other Agents' formats are not supported yet.`);
+    }
+    const scope = flagScope ?? parseScope(await deps.promptChoice("Install for which scope?", SCOPES));
+    return installSubagentFromRegistry({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, client, {
+      name: options.name,
+      namespace: options.namespace,
+      scope,
+      force: options.force,
+    });
+  }
+
   if (fromUrl && options.namespace) {
     throw new Error("--namespace names a Skill at the Registry; a URL already says which repository it came from.");
   }

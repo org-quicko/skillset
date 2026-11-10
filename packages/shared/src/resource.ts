@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SKILL_DESCRIPTION_MAX_LENGTH, validateSkillName } from "./skill-rules.js";
-import { ArtifactUploadSchema, PublisherSchema, SkillPayloadSchema, SkillSchema } from "./skill.js";
+import { ArtifactUploadSchema, PublisherSchema, SkillPayloadSchema, SkillPublishedSchema, SkillSchema } from "./skill.js";
 import { SubagentPayloadSchema, SubagentSchema } from "./subagent.js";
 import { validateSubagentName } from "./subagent-rules.js";
 import { TagSchema } from "./tag.js";
@@ -124,3 +124,15 @@ export const ResourcePublishedSchema = z.object({
   upload: ArtifactUploadSchema,
 });
 export type ResourcePublished = z.infer<typeof ResourcePublishedSchema>;
+
+/**
+ * A publish response as a client should read it: from this Registry, or from
+ * one released before a second Kind existed, which answers `{ skill, upload }`
+ * with no `resource`.
+ */
+export const PublishedResponseSchema = z
+  .union([ResourcePublishedSchema, SkillPublishedSchema])
+  .transform((published) => ({
+    resource: "resource" in published ? published.resource : published.skill,
+    upload: published.upload,
+  }));

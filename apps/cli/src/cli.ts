@@ -233,6 +233,7 @@ interface InstallFlags {
   scope?: string;
   copy?: boolean;
   force?: boolean;
+  kind?: string;
 }
 
 program
@@ -248,6 +249,7 @@ program
   .option("--scope <scope>", "Install scope: project or user")
   .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
   .option("--force", "Replace an already-installed Skill that has local changes, or that a different party named")
+  .option("--kind <kind>", "What to install: skill (default) or subagent, which goes into Claude Code's agents directory")
   .option("--json", JSON_FLAG)
   .addHelpText(
     "after",
@@ -255,6 +257,7 @@ program
       "skillset install code-review",
       "skillset install pdf --namespace anthropics/skills",
       "skillset install https://github.com/anthropics/skills --name pdf",
+      "skillset install code-reviewer --kind subagent --scope project",
     ]),
   )
   .action(async (target: string, opts: InstallFlags) => {
@@ -280,6 +283,7 @@ program
       scope: opts.scope,
       copy: opts.copy,
       force: opts.force,
+      kind: opts.kind,
     };
     if (jsonMode()) return emitJson(() => runInstall(deps, options));
 
@@ -298,6 +302,8 @@ program
       } else if (report.link.kind === "copy") {
         const why = report.link.reason === "symlink-failed" ? " (symlink unavailable on this system)" : "";
         p.log.message(pc.dim(`${report.agent}: copied into ${report.link.path}${why}`));
+      } else if (opts.kind === "subagent") {
+        p.log.message(pc.dim(`${report.agent} loads it as a subagent`));
       } else if (report.agent === null) {
         p.log.message(
           pc.dim("No Agent detected — installed into .agents/skills. Pass --agent to link it into a specific Agent's directory."),
@@ -359,7 +365,8 @@ program
       s.stop(`${report.skills.length} Skill(s) at ${pc.cyan(report.scope)} scope`);
       const width = Math.max(...report.skills.map((skill) => skill.name.length));
       for (const skill of report.skills) {
-        p.log.message(`${skill.name.padEnd(width)}  ${STATUS_LABEL[skill.status]}`);
+        const kind = skill.kind === "subagent" ? pc.dim("  subagent") : "";
+        p.log.message(`${skill.name.padEnd(width)}  ${STATUS_LABEL[skill.status]}${kind}`);
       }
       if (report.offline) {
         p.log.warn("Registry not consulted — nothing here can be reported as outdated.");
@@ -425,10 +432,11 @@ program
   .description("Uninstall a Skill: its files, the Agent's link to it, and its lockfile entry.")
   .argument("<name>", "The Skill's name")
   .option("--scope <scope>", "Which scope to remove from: project or user (default: project)")
+  .option("--kind <kind>", "What to remove: skill (default) or subagent")
   .option("--json", JSON_FLAG)
-  .action(async (name: string, opts: { scope?: string }) => {
+  .action(async (name: string, opts: { scope?: string; kind?: string }) => {
     const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env, cwd: process.cwd(), homeDir: homedir() };
-    const options = { name, scope: opts.scope };
+    const options = { name, scope: opts.scope, kind: opts.kind };
     if (jsonMode()) return emitJson(() => runRemove(deps, options));
 
     p.intro(label("remove"));
@@ -456,10 +464,11 @@ program
   .argument("[query]", "What to search for — a task, or an exact Skill name")
   .option("--tag <name>", "Narrow to Skills carrying this Tag")
   .option("--limit <n>", "Maximum number of results")
+  .option("--kind <kind>", "What to search for: skill (default) or subagent")
   .option("--json", JSON_FLAG)
-  .action(async (query: string | undefined, opts: { tag?: string; limit?: string }) => {
+  .action(async (query: string | undefined, opts: { tag?: string; limit?: string; kind?: string }) => {
     const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env };
-    const options = { query, tag: opts.tag, limit: opts.limit };
+    const options = { query, tag: opts.tag, limit: opts.limit, kind: opts.kind };
     if (jsonMode()) return emitJson(() => runSearch(deps, options));
 
     p.intro(label("search"));
@@ -501,10 +510,11 @@ program
   .description("Show a Skill's SKILL.md and details without installing it.")
   .argument("<name>", "The Skill's name")
   .option("--files", "Also list every file the Skill ships")
+  .option("--kind <kind>", "What to read: skill (default) or subagent")
   .option("--json", JSON_FLAG)
-  .action(async (name: string, opts: { files?: boolean }) => {
+  .action(async (name: string, opts: { files?: boolean; kind?: string }) => {
     const deps = { fetch, configPath: resolveConfigPath(process.env), env: process.env };
-    const options = { name, files: opts.files };
+    const options = { name, files: opts.files, kind: opts.kind };
     if (jsonMode()) return emitJson(() => runInfo(deps, options));
 
     p.intro(label("info"));
@@ -520,7 +530,8 @@ program
         `updated ${skill.updated_at}`,
         `${skill.installs} install(s)`,
         ...(skill.tags.length > 0 ? [`tags: ${skill.tags.map((tag) => tag.name).join(", ")}`] : []),
-        ...(skill.license ? [`license: ${skill.license}`] : []),
+        ...(skill.kind === "skill" && skill.license ? [`license: ${skill.license}`] : []),
+        ...(skill.kind === "subagent" && skill.model ? [`model: ${skill.model}`] : []),
         // Only when it points somewhere else. Telling someone who just asked a
         // Registry about a Skill that the Skill came from that Registry is not
         // a fact, and the same rule hides the interface's Source row.
@@ -533,8 +544,9 @@ program
       // Its own line rather than another dimmed fact: this is what the Skill
       // claims the right to reach once loaded, and installing is what grants
       // it — the one detail here worth reading before `skillset install`.
-      if (skill.allowed_tools) {
-        p.log.message(`${pc.yellow("tool access")}  ${skill.allowed_tools}`);
+      const toolAccess = skill.kind === "skill" ? skill.allowed_tools : skill.tools;
+      if (toolAccess) {
+        p.log.message(`${pc.yellow("tool access")}  ${toolAccess}`);
       }
 
       if (files) {
@@ -542,7 +554,7 @@ program
       }
 
       p.log.message(skill.body);
-      p.outro(pc.dim(`skillset install ${skill.name}`));
+      p.outro(pc.dim(`skillset install ${skill.name}${skill.kind === "subagent" ? " --kind subagent" : ""}`));
     } catch (error) {
       s.error(pc.red("Could not read that Skill"));
       fail(error);

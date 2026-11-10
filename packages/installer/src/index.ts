@@ -8,6 +8,8 @@ import {
   canonicalSkillsDir,
   getAgent,
   SKILL_NAME_MAX_LENGTH,
+  subagentFileName,
+  subagentsDir,
   type AgentId,
   type Scope,
   type SkillFile,
@@ -374,9 +376,78 @@ async function removeIfPresent(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Where a Subagent's one file is installed at `scope` (ADR-0047).
+ *
+ * @param ctx - Project root, environment, and home directory to resolve against.
+ * @param name - The Subagent's name, sanitised before it becomes a file name.
+ * @param scope - "project" or "user".
+ * @returns The absolute path of `<name>.md` in Claude Code's agents directory.
+ * @throws Error when `name` has no characters usable as a file name.
+ * @example
+ * ```ts
+ * resolveSubagentTarget(ctx, "reviewer", "project"); // -> "<cwd>/.claude/agents/reviewer.md"
+ * ```
+ */
+export function resolveSubagentTarget(ctx: InstallContext, name: string, scope: Scope): string {
+  const directory = normalize(subagentsDir(scope, { env: ctx.env, homeDir: ctx.homeDir, projectRoot: ctx.cwd }));
+  return join(directory, subagentFileName(sanitizeSkillDirectoryName(name)));
+}
+
+/**
+ * Writes a Subagent's file into Claude Code's agents directory, replacing any
+ * file already there.
+ *
+ * @remarks
+ * Written to a sibling temporary file and renamed into place, so a failed
+ * write never leaves a half-written Subagent for the Agent to load.
+ *
+ * @param ctx - Project root, environment, and home directory to resolve against.
+ * @param name - The Subagent's name.
+ * @param bytes - The file's contents, as published.
+ * @param scope - "project" or "user".
+ * @returns The path written.
+ * @throws Error when the directory or the file cannot be written.
+ * @example
+ * ```ts
+ * const path = await installSubagent(ctx, "reviewer", bytes, "project");
+ * ```
+ */
+export async function installSubagent(ctx: InstallContext, name: string, bytes: Uint8Array, scope: Scope): Promise<string> {
+  const target = resolveSubagentTarget(ctx, name, scope);
+  const staging = `${target}.${randomUUID()}.tmp`;
+  await mkdir(dirname(target), { recursive: true });
+  try {
+    await writeFile(staging, bytes);
+    await rename(staging, target);
+  } finally {
+    await rm(staging, { force: true });
+  }
+  return target;
+}
+
+/**
+ * Deletes an installed Subagent's file.
+ *
+ * @param ctx - Project root, environment, and home directory to resolve against.
+ * @param name - The Subagent's name.
+ * @param scope - "project" or "user".
+ * @returns The path removed, or `null` when there was no file.
+ * @throws Error when the file exists but cannot be removed.
+ * @example
+ * ```ts
+ * const removed = await removeSubagent(ctx, "reviewer", "project");
+ * ```
+ */
+export async function removeSubagent(ctx: InstallContext, name: string, scope: Scope): Promise<string | null> {
+  const target = resolveSubagentTarget(ctx, name, scope);
+  return (await removeIfPresent(target)) ? target : null;
+}
+
 export {
   forgetInstall,
   hashInstalledSkill,
+  hashInstalledSubagent,
   hashSkillFiles,
   LOCKFILE_NAME,
   LOCKFILE_VERSION,
@@ -386,6 +457,7 @@ export {
   resolveLockfilePath,
   skillStatus,
   writeLockfile,
+  type InstalledKind,
   type InstalledSkill,
   type Lockfile,
   type LockfileEntry,

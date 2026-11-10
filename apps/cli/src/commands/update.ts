@@ -3,6 +3,7 @@ import { hashSkillFiles, installSkill } from "@in-org-quicko/skillset-installer"
 import { rethrowValidationError } from "../errors.js";
 import { downloadBinary, registryFetch, type RegistryClient } from "../http.js";
 import { openReadClient } from "../session.js";
+import { installSubagentFromRegistry } from "./subagent.js";
 import { detectAgentId, parseScopeFlag, readInstalled, recordInstall, type InstalledDeps, type InstalledSkill } from "./installed.js";
 
 export interface UpdateOptions {
@@ -42,6 +43,16 @@ async function reinstall(
   scope: Scope,
   installed: InstalledSkill,
 ): Promise<{ to: string }> {
+  if (installed.kind === "subagent") {
+    await installSubagentFromRegistry({ cwd: deps.cwd, env: deps.env, homeDir: deps.homeDir }, client, {
+      name: installed.name,
+      namespace: installed.entry.namespace,
+      scope,
+      // The caller has already decided a modified copy may be replaced.
+      force: true,
+    });
+    return { to: installed.registryUpdatedAt as string };
+  }
   const query = installed.entry.namespace ? `?namespace=${encodeURIComponent(installed.entry.namespace)}` : "";
   const skill = await registryFetch(
     client,
@@ -129,8 +140,9 @@ export async function runUpdate(deps: InstalledDeps, options: UpdateOptions): Pr
     }
   }
 
-  const byName = new Map(installed.map((skill) => [skill.name, skill]));
-  const targets = requested.length > 0 ? requested.map((name) => byName.get(name) as InstalledSkill) : installed;
+  // A name may be both a Skill and a Subagent; naming it updates both.
+  const targets =
+    requested.length > 0 ? requested.flatMap((name) => installed.filter((skill) => skill.name === name)) : installed;
 
   const outcomes: UpdateOutcome[] = [];
   for (const skill of targets) {

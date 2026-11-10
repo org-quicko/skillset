@@ -1,16 +1,19 @@
-import { ArtifactManifestSchema, SkillSchema, type ArtifactFile, type Skill } from "@in-org-quicko/skillset-shared";
+import { ArtifactManifestSchema, ResourceDetailSchema, type ArtifactFile, type ResourceDetail } from "@in-org-quicko/skillset-shared";
 import { ApiError, registryFetch } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
+import { parseKind } from "./install.js";
 
 export interface InfoOptions {
   name: string;
   /** `--files`: also list what the Skill ships, which costs a second request. */
   files?: boolean;
+  /** `--kind`: `skill` (the default) or `subagent`. */
+  kind?: string;
 }
 
 /** One Skill as `skillset info` reports it. */
 export interface InfoReport {
-  skill: Skill;
+  skill: ResourceDetail;
   /** Every file the Skill ships, or `null` when `--files` was not asked for. */
   files: ArtifactFile[] | null;
 }
@@ -54,9 +57,10 @@ export interface InfoReport {
 export async function runInfo(deps: SessionDeps, options: InfoOptions): Promise<InfoReport> {
   const client = await openReadClient(deps);
 
-  let skill: Skill;
+  const kind = parseKind(options.kind);
+  let skill: ResourceDetail;
   try {
-    skill = await registryFetch(client, `/resources/skill/by-name/${encodeURIComponent(options.name)}`, SkillSchema);
+    skill = await registryFetch(client, `/resources/${kind}/by-name/${encodeURIComponent(options.name)}`, ResourceDetailSchema);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       // Rethrown as an ApiError rather than a plain Error so the Registry's own
@@ -66,7 +70,7 @@ export async function runInfo(deps: SessionDeps, options: InfoOptions): Promise<
       throw new ApiError(
         error.status,
         error.code,
-        `No Skill named "${options.name}" on this Registry. Run \`skillset search\` to see what there is.`,
+        `No ${kind === "skill" ? "Skill" : "Subagent"} named "${options.name}" on this Registry. Run \`skillset search\` to see what there is.`,
       );
     }
     throw error;

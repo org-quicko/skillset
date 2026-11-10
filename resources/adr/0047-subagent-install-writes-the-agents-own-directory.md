@@ -28,8 +28,13 @@ The table of Subagent destinations is separate from the Skill table in
 obligation to support Subagents.
 
 The Lockfile records a Subagent like a Skill: Resource id, `updated_at`, and a digest of the one
-file. Entries gain a `kind`, and an entry without one reads as `skill`, so every Lockfile written
-before this keeps working (ADR-0038). `update`, `remove` and `installed` route by that `kind`.
+file. Subagents live in a `subagents` map of their own beside `skills`, not as a `kind` on each
+entry: a Skill and a Subagent may share a name, and a CLI released before this reads `skills`
+alone, so it never reports a Subagent as a Skill whose directory is missing. Every Lockfile
+written before this keeps working unchanged (ADR-0038). `update` and `list` cover both maps;
+`install`, `remove`, `search` and `info` take `--kind subagent`.
+
+The MCP server's tools still manage Skills only and ignore the `subagents` map.
 
 Installing over an existing `<name>.md` that the Lockfile does not record is refused unless
 `--force`, because that file belongs to the developer, not to the Registry.
