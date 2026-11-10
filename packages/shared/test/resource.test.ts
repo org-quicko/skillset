@@ -24,7 +24,7 @@ describe("KINDS", () => {
   });
 
   it("lists exactly the registered Kind keys", () => {
-    expect(KIND_KEYS).toEqual(["skill"]);
+    expect(KIND_KEYS).toEqual(["skill", "subagent"]);
   });
 });
 

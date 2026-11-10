@@ -11,8 +11,8 @@ import {
   submissionPrefix,
 } from "../../storage/keys.js";
 import type { StorageAdapter } from "../../storage/types.js";
-import type { PublishBody } from "../resources/resources.schemas.js";
-import { namespaceForSource, type ResourcesService, type SkillDetail } from "../resources/resources.service.js";
+import type { PublishInput } from "../resources/resources.schemas.js";
+import { namespaceForSource, type ResourcesService, type ResourceDetail } from "../resources/resources.service.js";
 import {
   ResourceAlreadyPublishedError,
   SubmissionIncompleteError,
@@ -65,9 +65,9 @@ export class SubmissionsService {
    * where a publish of the same Source would have.
    *
    * @param submitter - The authenticated User submitting.
-   * @param name - The Skill's name, already held to `validateSkillName`.
-   * @param input - The same body a publish takes, already held to the shared
-   * Skill rules. `source` is required here.
+   * @param name - The Resource's name, already held to its Kind's name rule.
+   * @param input - The same input a publish takes, already held to its Kind's
+   * rules. `source` is required here.
    * @returns The Submission as stored, and where to upload each file.
    * @throws SubmissionSourceRequiredError if `input.source` is absent.
    * @throws ResourceAlreadyPublishedError if a Resource already exists under
@@ -77,15 +77,17 @@ export class SubmissionsService {
    * const { submission, upload } = await submissions.submit(user, "pdf", {
    *   description: "Reads PDFs.", body: "# pdf\n", source: "https://github.com/acme/skills",
    *   files: [{ path: "SKILL.md", size: 42 }],
+   *   payload: { kind: "skill", license: null, compatibility: null, metadata: null, allowed_tools: null },
    * });
    * ```
    */
   async submit(
     submitter: UserRow,
     name: string,
-    input: PublishBody,
+    input: PublishInput,
   ): Promise<{ submission: ResourceSubmission; upload: ArtifactUpload }> {
-    const kind = "skill";
+    const { payload } = input;
+    const kind = payload.kind;
     if (!input.source) throw new SubmissionSourceRequiredError();
     const source = input.source;
     const namespace = namespaceForSource(source, this.publicUrl);
@@ -94,13 +96,6 @@ export class SubmissionsService {
       throw new ResourceAlreadyPublishedError(namespace, name);
     }
 
-    const payload: SkillPayload = {
-      kind,
-      license: input.license ?? null,
-      compatibility: input.compatibility ?? null,
-      metadata: input.metadata ?? null,
-      allowed_tools: input.allowed_tools ?? null,
-    };
     const fields = {
       description: input.description,
       body: input.body,
@@ -169,7 +164,7 @@ export class SubmissionsService {
    * const skill = await submissions.approve(id);
    * ```
    */
-  async approve(id: string): Promise<SkillDetail> {
+  async approve(id: string): Promise<ResourceDetail> {
     const submission = await this.getRow(id);
     if (await this.isPublished(submission.kind, submission.namespace, submission.name)) {
       throw new ResourceAlreadyPublishedError(submission.namespace, submission.name);

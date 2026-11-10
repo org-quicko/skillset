@@ -42,6 +42,8 @@ export type SkillRule =
   | "compatibility_too_long"
   | "metadata_invalid"
   | "allowed_tools_invalid"
+  | "tools_invalid"
+  | "model_invalid"
   | "source_invalid"
   | "frontmatter_missing"
   | "frontmatter_invalid"

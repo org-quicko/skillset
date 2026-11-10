@@ -1,8 +1,8 @@
-import { ResourceSubmissionListSchema, ResourceSubmittedSchema, SkillSchema } from "@in-org-quicko/skillset-shared";
+import { ResourceDetailSchema, ResourceSubmissionListSchema, ResourceSubmittedSchema } from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
-import { uuidParam, validate } from "../../lib/validator.js";
+import { JsonObjectSchema, parseValue, uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
-import { PublishBodySchema, PublishParamsSchema } from "../resources/resources.schemas.js";
+import { publishBodySchema, PublishParamsSchema } from "../resources/resources.schemas.js";
 import { SubmissionNotFoundError } from "./submissions.errors.js";
 
 const submissionId = uuidParam("id", () => new SubmissionNotFoundError());
@@ -24,14 +24,16 @@ export const submissionsRoutes = createRouter()
     "/:kind/:name",
     requireAuth(),
     validate("param", PublishParamsSchema),
-    validate("json", PublishBodySchema),
+    validate("json", JsonObjectSchema),
     async (c) => {
-      const result = await c.var.services.submissions.submit(c.var.user, c.req.valid("param").name, c.req.valid("json"));
+      const { kind, name } = c.req.valid("param");
+      const input = parseValue(c.req.valid("json"), publishBodySchema(kind, name));
+      const result = await c.var.services.submissions.submit(c.var.user, name, input);
       return c.json(ResourceSubmittedSchema.parse(result));
     },
   )
   .post("/:id/approve", requireAuth(), requireRole("admin"), submissionId, async (c) => {
-    return c.json(SkillSchema.parse(await c.var.services.submissions.approve(c.req.valid("param").id)));
+    return c.json(ResourceDetailSchema.parse(await c.var.services.submissions.approve(c.req.valid("param").id)));
   })
   .delete("/:id", requireAuth(), requireRole("admin"), submissionId, async (c) => {
     await c.var.services.submissions.reject(c.req.valid("param").id);

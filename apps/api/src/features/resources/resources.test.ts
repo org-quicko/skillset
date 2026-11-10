@@ -2146,3 +2146,126 @@ describe("Namespaces (ADR-0042)", () => {
     expect(rows.map((row) => row.namespace).sort()).toEqual(["anthropics/skills", TEST_NAMESPACE].sort());
   });
 });
+
+describe("Publishing and reading Subagents (ADR-0046)", () => {
+  let context: TestContext;
+  let container: StartedPostgreSqlContainer;
+  let writer: Session;
+
+  interface ApiSubagent {
+    id: string;
+    kind: string;
+    name: string;
+    body: string;
+    tools: string | null;
+    model: string | null;
+  }
+
+  const publishSubagent = (name: string, payload: Record<string, unknown>): Promise<Response> =>
+    Promise.resolve(
+      context.app.request(`/api/resources/subagent/${name}`, {
+        method: "PUT",
+        headers: { cookie: writer.cookie, "content-type": "application/json" },
+        body: JSON.stringify({ files: [{ path: `${name}.md`, size: 6 }], ...payload }),
+      }),
+    );
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("publishes a Subagent and hands back one upload destination for its one file", async () => {
+    const res = await publishSubagent("code-reviewer", {
+      description: "Reviews a diff.",
+      body: "You review code.",
+      tools: "Read, Grep",
+      model: "sonnet",
+    });
+    expect(res.status).toBe(200);
+
+    const published = (await res.json()) as { resource: ApiSubagent; skill?: unknown; upload: ApiPublished["upload"] };
+    expect(published.resource).toMatchObject({ kind: "subagent", name: "code-reviewer", tools: "Read, Grep", model: "sonnet" });
+    expect(published.skill).toBeUndefined();
+    expect(published.upload.files.map((file) => file.path)).toEqual(["code-reviewer.md"]);
+  });
+
+  it("reads it back by id and by name, and lists it under its Kind only", async () => {
+    const byName = await context.app.request("/api/resources/subagent/by-name/code-reviewer");
+    expect(byName.status).toBe(200);
+    const subagent = (await byName.json()) as ApiSubagent;
+    expect(subagent.body).toBe("You review code.");
+
+    const byId = await context.app.request(`/api/resources/${subagent.id}`);
+    expect(((await byId.json()) as ApiSubagent).kind).toBe("subagent");
+
+    const subagents = (await (await context.app.request("/api/resources?kind=subagent")).json()) as ApiPage;
+    expect(subagents.items.map((item) => item.name)).toEqual(["code-reviewer"]);
+    const skills = (await (await context.app.request("/api/resources?kind=skill")).json()) as ApiPage;
+    expect(skills.items).toEqual([]);
+  });
+
+  it("clears tools and model on a republish that no longer sets them", async () => {
+    await publishSubagent("code-reviewer", { description: "Reviews a diff.", body: "You review code." });
+    const read = await context.app.request("/api/resources/subagent/by-name/code-reviewer");
+    expect((await read.json()) as ApiSubagent).toMatchObject({ tools: null, model: null });
+  });
+
+  it("keeps a Subagent and a Skill of the same name apart", async () => {
+    const res = await publish(context, writer, "code-reviewer", { description: "A Skill.", body: "Body." });
+    expect(res.status).toBe(200);
+    const published = (await res.json()) as { resource: { kind: string }; skill: { kind: string } };
+    expect(published.resource.kind).toBe("skill");
+    expect(published.skill).toEqual(published.resource);
+
+    const subagent = await context.app.request("/api/resources/subagent/by-name/code-reviewer");
+    expect(((await subagent.json()) as ApiSubagent).kind).toBe("subagent");
+  });
+
+  it("refuses a Manifest that is not exactly <name>.md", async () => {
+    const wrongName = await publishSubagent("planner", {
+      description: "Plans.",
+      body: "You plan.",
+      files: [{ path: "SKILL.md", size: 6 }],
+    });
+    expect(wrongName.status).toBe(400);
+
+    const twoFiles = await publishSubagent("planner", {
+      description: "Plans.",
+      body: "You plan.",
+      files: [
+        { path: "planner.md", size: 6 },
+        { path: "notes.md", size: 6 },
+      ],
+    });
+    expect(twoFiles.status).toBe(400);
+  });
+
+  it("refuses a bad name, a blank system prompt, and a non-string model", async () => {
+    expect((await publishSubagent("Code_Reviewer", { description: "x", body: "y" })).status).toBe(400);
+    expect((await publishSubagent("planner", { description: "Plans.", body: "  " })).status).toBe(400);
+    expect((await publishSubagent("planner", { description: "Plans.", body: "You plan.", model: 3 })).status).toBe(400);
+  });
+
+  it("refuses an unregistered Kind on publish and answers 404 for one on read", async () => {
+    const res = await context.app.request("/api/resources/plugin/thing", {
+      method: "PUT",
+      headers: { cookie: writer.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ description: "x", body: "y", files: [] }),
+    });
+    expect(res.status).toBe(400);
+    expect((await context.app.request("/api/resources/plugin/by-name/thing")).status).toBe(404);
+  });
+});

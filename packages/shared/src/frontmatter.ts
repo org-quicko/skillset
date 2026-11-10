@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import {
+  SKILL_FILE_NAME,
   SkillValidationError,
   validateSkillAllowedTools,
   validateSkillCompatibility,
@@ -83,11 +84,50 @@ export function splitFrontmatter(source: string): { frontmatter: string | null; 
  * normalizeAllowedTools("Read, Grep");           // -> "Read, Grep"
  * ```
  */
-function normalizeAllowedTools(value: unknown): unknown {
+export function normalizeAllowedTools(value: unknown): unknown {
   if (Array.isArray(value) && value.every((tool) => typeof tool === "string")) {
     return value.join(", ");
   }
   return value;
+}
+
+/**
+ * Splits a frontmatter-led markdown file into its parsed YAML mapping and body,
+ * judging neither.
+ *
+ * @param source - The raw contents of the file.
+ * @param fileName - What to call the file in an error, e.g. `SKILL.md`.
+ * @returns The frontmatter's keys, unvalidated, and the body below the fence.
+ * @throws SkillValidationError with rule `frontmatter_missing` if the file
+ * has no `---`-fenced frontmatter, or `frontmatter_invalid` if the fenced
+ * block isn't valid YAML or isn't a mapping.
+ * @example
+ * ```ts
+ * const { fields, body } = parseFrontmatterFields(source, "SKILL.md");
+ * ```
+ */
+export function parseFrontmatterFields(source: string, fileName: string): { fields: Record<string, unknown>; body: string } {
+  const match = FRONTMATTER_PATTERN.exec(source.replace(/^\uFEFF/, ""));
+  if (!match) {
+    throw new SkillValidationError("frontmatter_missing", `${fileName} must open with YAML frontmatter fenced by ---.`, fileName);
+  }
+
+  let frontmatter: unknown;
+  try {
+    frontmatter = parseYaml(match[1] ?? "");
+  } catch (error) {
+    throw new SkillValidationError(
+      "frontmatter_invalid",
+      `${fileName} frontmatter is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
+      fileName,
+    );
+  }
+
+  if (frontmatter === null || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
+    throw new SkillValidationError("frontmatter_invalid", `${fileName} frontmatter must be a mapping of keys to values.`, fileName);
+  }
+
+  return { fields: frontmatter as Record<string, unknown>, body: match[2] ?? "" };
 }
 
 /**
@@ -103,35 +143,7 @@ function normalizeAllowedTools(value: unknown): unknown {
  * `validateSkillAllowedTools`'s rules if a field fails validation.
  */
 export function parseSkillDocument(source: string): SkillDocument {
-  const match = FRONTMATTER_PATTERN.exec(source.replace(/^\uFEFF/, ""));
-  if (!match) {
-    throw new SkillValidationError(
-      "frontmatter_missing",
-      "SKILL.md must open with YAML frontmatter fenced by ---.",
-      "SKILL.md",
-    );
-  }
-
-  let frontmatter: unknown;
-  try {
-    frontmatter = parseYaml(match[1] ?? "");
-  } catch (error) {
-    throw new SkillValidationError(
-      "frontmatter_invalid",
-      `SKILL.md frontmatter is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
-      "SKILL.md",
-    );
-  }
-
-  if (frontmatter === null || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
-    throw new SkillValidationError(
-      "frontmatter_invalid",
-      "SKILL.md frontmatter must be a mapping of keys to values.",
-      "SKILL.md",
-    );
-  }
-
-  const fields = frontmatter as Record<string, unknown>;
+  const { fields, body } = parseFrontmatterFields(source, SKILL_FILE_NAME);
   const license = validateSkillLicense(fields.license);
   const compatibility = validateSkillCompatibility(fields.compatibility);
   const metadata = validateSkillMetadata(fields.metadata);
@@ -144,6 +156,6 @@ export function parseSkillDocument(source: string): SkillDocument {
     ...(compatibility !== undefined ? { compatibility } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
     ...(allowed_tools !== undefined ? { allowed_tools } : {}),
-    body: match[2] ?? "",
+    body,
   };
 }

@@ -119,7 +119,7 @@ describe("ResourceDirectoryQuerySchema — kind", () => {
     expect(res.status).toBe(400);
     expect(body.error.code).toBe("validation_failed");
     expect(body.error.field).toBe("kind");
-    expect(body.error.message).toBe("kind must be one of: skill.");
+    expect(body.error.message).toBe("kind must be one of: skill, subagent.");
   });
 });
 

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { SKILL_DESCRIPTION_MAX_LENGTH, validateSkillName } from "./skill-rules.js";
-import { PublisherSchema, SkillPayloadSchema } from "./skill.js";
+import { ArtifactUploadSchema, PublisherSchema, SkillPayloadSchema, SkillSchema } from "./skill.js";
+import { SubagentPayloadSchema, SubagentSchema } from "./subagent.js";
+import { validateSubagentName } from "./subagent-rules.js";
 import { TagSchema } from "./tag.js";
 import { timestamp } from "./timestamp.js";
 
@@ -22,9 +24,7 @@ export interface KindConfig {
  * @remarks
  * Plain text, not a Postgres enum or a `z.enum` — the treatment
  * `integrations.provider` already gets against `GIT_PROVIDERS` (ADR-0024).
- * Registering a new Kind is an insert here, not a migration. `skill` is the
- * only one registered in this ticket; `mcp-server` and `plugin` follow later
- * (spec: `.scratch/generic-resources/spec.md`).
+ * Registering a new Kind is an insert here, not a migration.
  */
 export const KINDS: Record<string, KindConfig> = {
   skill: {
@@ -32,6 +32,12 @@ export const KINDS: Record<string, KindConfig> = {
     descriptionMaxLength: SKILL_DESCRIPTION_MAX_LENGTH,
     hasArtifact: true,
     payloadSchema: SkillPayloadSchema,
+  },
+  subagent: {
+    validateName: validateSubagentName,
+    descriptionMaxLength: SKILL_DESCRIPTION_MAX_LENGTH,
+    hasArtifact: true,
+    payloadSchema: SubagentPayloadSchema,
   },
 };
 
@@ -75,10 +81,9 @@ export function kindConfig(kind: string): KindConfig {
 
 /**
  * The shape a Resource's `payload` column must satisfy, narrowed by `kind`
- * (ADR-0026). `skill` is the only variant in this ticket; a fourth Kind adds
- * one here alongside a `KINDS` entry.
+ * (ADR-0026). A new Kind adds one here alongside a `KINDS` entry.
  */
-export const ResourcePayloadSchema = z.discriminatedUnion("kind", [SkillPayloadSchema]);
+export const ResourcePayloadSchema = z.discriminatedUnion("kind", [SkillPayloadSchema, SubagentPayloadSchema]);
 export type ResourcePayload = z.infer<typeof ResourcePayloadSchema>;
 
 /**
@@ -103,3 +108,19 @@ export const ResourceSchema = z.object({
   tags: z.array(TagSchema),
 });
 export type Resource = z.infer<typeof ResourceSchema>;
+
+/** A single Resource as a read returns it: the common fields, with its Kind's payload fields beside them. */
+export const ResourceDetailSchema = z.discriminatedUnion("kind", [SkillSchema, SubagentSchema]);
+export type ResourceDetail = z.infer<typeof ResourceDetailSchema>;
+
+/**
+ * `PUT /resources/{kind}/{name}`'s response: the Resource as stored, and where
+ * to write its Artifact. `skill` repeats `resource` for a Skill only, for
+ * clients released before a second Kind existed.
+ */
+export const ResourcePublishedSchema = z.object({
+  resource: ResourceDetailSchema,
+  skill: SkillSchema.optional(),
+  upload: ArtifactUploadSchema,
+});
+export type ResourcePublished = z.infer<typeof ResourcePublishedSchema>;

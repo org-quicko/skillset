@@ -11,6 +11,8 @@ export * from "./resource-rules.js";
 export * from "./resource.js";
 export * from "./skill-rules.js";
 export * from "./skill.js";
+export * from "./subagent-rules.js";
+export * from "./subagent.js";
 export * from "./tag-rules.js";
 export * from "./tag.js";
 export * from "./frontmatter.js";

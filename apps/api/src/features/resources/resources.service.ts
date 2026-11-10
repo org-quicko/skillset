@@ -9,8 +9,9 @@ import {
   type ArtifactFile,
   type ArtifactFileUpload,
   type Page,
+  ResourcePayloadSchema,
+  type ResourcePayload,
   type SkillFile,
-  type SkillPayload,
 } from "@in-org-quicko/skillset-shared";
 import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from "kysely";
 import type { Database } from "../../db/client.js";
@@ -25,7 +26,7 @@ import {
   ResourceNotFoundError,
 } from "./resources.errors.js";
 import type { ResourceDirectoryQuery } from "./resource-directory-query.js";
-import type { PublishBody } from "./resources.schemas.js";
+import type { PublishInput } from "./resources.schemas.js";
 import type { Logger } from "../../lib/logger.js";
 import type { AnalyticsService, InstallSource, InstallTrendPoint } from "../analytics/analytics.service.js";
 import type { TagsService, TagSummary } from "../tags/tags.service.js";
@@ -114,17 +115,14 @@ interface SkillPublisher {
   last_name: string | null;
 }
 
-interface SkillSummary {
+/** What every Kind's read returns, before its payload's own fields (ADR-0026). */
+interface ResourceCore {
   id: string;
-  kind: "skill";
   /** Which party named it — stored, never resolved, never absent (ADR-0042). */
   namespace: string;
   name: string;
   description: string;
-  license: string | null;
-  compatibility: string | null;
-  metadata: Record<string, string> | null;
-  allowed_tools: string | null;
+  body: string;
   /** Always resolved — never the column's null (ADR-0041). */
   source: string;
   tags: TagSummary[];
@@ -139,9 +137,8 @@ interface SkillSummary {
   installs: number;
 }
 
-export interface SkillDetail extends SkillSummary {
-  body: string;
-}
+/** A Resource as a read returns it: the common fields, with its Kind's payload fields beside them. */
+export type ResourceDetail = ResourceCore & ResourcePayload;
 
 /** `PUT /resources/{kind}/{name}`'s `upload`: one presigned destination per declared file. */
 interface SkillUpload {
@@ -525,14 +522,14 @@ export class ResourcesService {
    * it.
    *
    * @param id - The Resource's id.
-   * @returns `SkillDetail`
+   * @returns `ResourceDetail`
    * @throws ResourceNotFoundError if no Resource exists by `id`.
    * @example
    * ```ts
    * const skill = await resourcesService.get(id);
    * ```
    */
-  async get(id: string): Promise<SkillDetail> {
+  async get(id: string): Promise<ResourceDetail> {
     return this.readSkill((eb) => eb("resources.id", "=", id));
   }
 
@@ -566,9 +563,9 @@ export class ResourcesService {
    * @param kind - The Kind path segment, not yet known to be registered.
    * @param name - The Skill's name.
    * @param namespace - Which party named it. Omitted, the rule above applies.
-   * @returns `SkillDetail`
-   * @throws ResourceNotFoundError if `kind` isn't `"skill"`, or no Skill
-   * exists by that name — a route param, so an unrecognised Kind here reads
+   * @returns `ResourceDetail`
+   * @throws ResourceNotFoundError if no Resource of that Kind exists by that
+   * name — a route param, so an unrecognised Kind here reads
    * as "not found" rather than a validation error (unlike the same check on
    * `publish`, whose `kind` chooses what gets written).
    * @throws AmbiguousResourceNameError if the bare name matches several
@@ -579,7 +576,7 @@ export class ResourcesService {
    * await resourcesService.getByName("skill", "pdf", "anthropics/skills");
    * ```
    */
-  async getByName(kind: string, name: string, namespace?: string): Promise<SkillDetail> {
+  async getByName(kind: string, name: string, namespace?: string): Promise<ResourceDetail> {
     const named = namespace ?? (await this.resolveNamespace(kind, name));
     return this.readSkill((eb) =>
       eb.and({ "resources.kind": kind, "resources.namespace": named, "resources.name": name }),
@@ -655,14 +652,14 @@ export class ResourcesService {
    *
    * @param identity - The condition identifying the Resource, over
    * `resources` — by id alone, or by `(kind, namespace, name)`.
-   * @returns `SkillDetail`
+   * @returns `ResourceDetail`
    * @throws ResourceNotFoundError if nothing matches.
    * @example
    * ```ts
    * const skill = await this.readSkill((eb) => eb("resources.id", "=", id));
    * ```
    */
-  private async readSkill(identity: ResourceIdentity): Promise<SkillDetail> {
+  private async readSkill(identity: ResourceIdentity): Promise<ResourceDetail> {
     const skill = await this.db
       .selectFrom("resources")
       .leftJoin("users", "users.id", "resources.published_by")
@@ -675,21 +672,16 @@ export class ResourcesService {
       this.tags.getSkillTags(skill.id),
       this.analytics.getInstallCount(skill.id),
     ]);
-    const payload = skill.payload as SkillPayload;
     return {
+      // Spread first: `kind` and the Kind's own fields, flat on the wire.
+      ...ResourcePayloadSchema.parse(skill.payload),
       id: skill.id,
-      kind: "skill",
       namespace: skill.namespace,
       name: skill.name,
       description: skill.description,
-      // Written by `validateSkillBody` on every publish; only null in
-      // principle for a Kind that doesn't require one (ADR-0026), which a
-      // Skill row never is.
+      // Every registered Kind's publish requires one; the column is nullable
+      // only for a Kind that would not (ADR-0026).
       body: skill.body ?? "",
-      license: payload.license,
-      compatibility: payload.compatibility,
-      metadata: payload.metadata,
-      allowed_tools: payload.allowed_tools,
       source: this.resolveSource(skill.source),
       published_at: skill.published_at,
       updated_at: skill.updated_at,
@@ -721,28 +713,29 @@ export class ResourcesService {
    * puts the window the other way round from the row: for the length of the
    * upload the Artifact is incomplete rather than stale.
    *
-   * `skill` is the only registered Kind, so this is Skill's publish
-   * unconditionally; the route has already refused any other Kind.
+   * The Kind is `input.payload.kind`: the route has already refused an
+   * unregistered one and held the body to that Kind's rules.
    *
-   * @param publisher - The authenticated User publishing the Skill.
-   * @param name - The Skill's name, already held to `validateSkillName`. The
-   * caller parsed it out of the SKILL.md frontmatter; the API does not read the
+   * @param publisher - The authenticated User publishing the Resource.
+   * @param name - The Resource's name, already held to its Kind's name rule.
+   * The caller parsed it out of the frontmatter; the API does not read the
    * Artifact to confirm the two agree (ADR-0001).
-   * @param input - The description, body, optional frontmatter fields, and
-   * manifest, already held to the shared Skill rules (`PublishBodySchema`).
-   * @returns `{ skill: SkillDetail; upload: SkillUpload }`
+   * @param input - The description, body, manifest and Kind payload, already
+   * held to the Kind's rules (`publishBodySchema`).
+   * @returns The Resource as stored, and where to upload its Artifact.
    * @example
    * ```ts
-   * const { skill, upload } = await resourcesService.publish(publisher, "my-skill", {
+   * const { resource, upload } = await resourcesService.publish(publisher, "my-skill", {
    *   description: "Does a thing.",
    *   body: "# my-skill\n...",
    *   files: [{ path: "SKILL.md", size: 42 }],
+   *   payload: { kind: "skill", license: null, compatibility: null, metadata: null, allowed_tools: null },
    * });
    * ```
    */
-  async publish(publisher: UserRow, name: string, input: PublishBody): Promise<{ skill: SkillDetail; upload: SkillUpload }> {
-    const kind = "skill";
-    const { description, body, files: manifest } = input;
+  async publish(publisher: UserRow, name: string, input: PublishInput): Promise<{ resource: ResourceDetail; upload: SkillUpload }> {
+    const { description, body, files: manifest, payload } = input;
+    const kind = payload.kind;
     // `null`, not left `undefined`: a republish fully replaces the frontmatter
     // (ADR-0002), so a field the payload no longer sets must clear what an
     // earlier publish stored.
@@ -755,14 +748,6 @@ export class ResourcesService {
     // moves the Skill into this Registry's own Namespace rather than leaving
     // it filed under a repository these bytes no longer come from.
     const namespace = namespaceForSource(source, this.publicUrl);
-    const skillPayload: SkillPayload = {
-      kind,
-      license: input.license ?? null,
-      compatibility: input.compatibility ?? null,
-      metadata: input.metadata ?? null,
-      allowed_tools: input.allowed_tools ?? null,
-    };
-
     // `tags` appears in neither the insert nor the conflict update: it is not a
     // column on `resources`, and no publish path writes it (ADR-0008, ADR-0011),
     // so a republish leaves a Skill's Tags as they were.
@@ -779,7 +764,7 @@ export class ResourcesService {
         name,
         description,
         body,
-        payload: skillPayload,
+        payload,
         published_by: publisher.id,
         published_by_email: publisher.email,
         published_by_name,
@@ -794,7 +779,7 @@ export class ResourcesService {
         oc.columns(["kind", "namespace", "name"]).doUpdateSet({
           description,
           body,
-          payload: skillPayload,
+          payload,
           published_by: publisher.id,
           published_by_email: publisher.email,
           published_by_name,
@@ -819,7 +804,7 @@ export class ResourcesService {
       })),
     );
 
-    this.logger.info({ skill_name: name, user_id: publisher.id, files: manifest.length }, "skill published");
+    this.logger.info({ kind, skill_name: name, user_id: publisher.id, files: manifest.length }, "resource published");
 
     return {
       // Read back rather than assembled from `row` and `publisher`: one place
@@ -829,7 +814,7 @@ export class ResourcesService {
       // or `resource_install_events`, and nothing but `refreshInstallCounts`
       // ever writes `resource_analytics` (ADR-0012); a brand new Skill simply
       // has neither yet.
-      skill: await this.readSkill((eb) => eb("resources.id", "=", row.id)),
+      resource: await this.readSkill((eb) => eb("resources.id", "=", row.id)),
       upload: { files: uploads, expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS },
     };
   }

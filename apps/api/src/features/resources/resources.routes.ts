@@ -1,21 +1,21 @@
 import {
   ArtifactManifestSchema,
+  ResourceDetailSchema,
+  ResourcePublishedSchema,
   SkillDirectoryPageSchema,
   SkillDirectoryStatsSchema,
   SkillInstallTrendSchema,
-  SkillPublishedSchema,
-  SkillSchema,
   SkillTagsSchema,
 } from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
-import { uuidParam, validate } from "../../lib/validator.js";
+import { JsonObjectSchema, parseValue, uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { ARTIFACT_ARCHIVE_CONTENT_TYPE } from "../../storage/keys.js";
 import type { InstallSource } from "../analytics/analytics.service.js";
 import { installFingerprint } from "../analytics/fingerprint.js";
 import { ResourceDirectoryQuerySchema } from "./resource-directory-query.js";
 import { ResourceNotFoundError } from "./resources.errors.js";
-import { PublishBodySchema, PublishParamsSchema, SetTagsBodySchema } from "./resources.schemas.js";
+import { publishBodySchema, PublishParamsSchema, SetTagsBodySchema } from "./resources.schemas.js";
 
 /**
  * Path segments shaped so no two routes below can match the same valid request,
@@ -97,10 +97,10 @@ export const resourcesRoutes = createRouter()
       c.req.param("name"),
       c.req.query("namespace"),
     );
-    return c.json(SkillSchema.parse(skill));
+    return c.json(ResourceDetailSchema.parse(skill));
   })
   .get(`/${ID}`, resourceId, async (c) => {
-    return c.json(SkillSchema.parse(await c.var.services.resources.get(c.req.valid("param").id)));
+    return c.json(ResourceDetailSchema.parse(await c.var.services.resources.get(c.req.valid("param").id)));
   })
   // Fetched apart from the Resource itself, since most reads never need it.
   .get(`/${ID}/installs/trend`, resourceId, async (c) => {
@@ -112,10 +112,14 @@ export const resourcesRoutes = createRouter()
     requireAuth(),
     requireRole("writer"),
     validate("param", PublishParamsSchema),
-    validate("json", PublishBodySchema),
+    validate("json", JsonObjectSchema),
     async (c) => {
-      const result = await c.var.services.resources.publish(c.var.user, c.req.valid("param").name, c.req.valid("json"));
-      return c.json(SkillPublishedSchema.parse(result));
+      const { kind, name } = c.req.valid("param");
+      const input = parseValue(c.req.valid("json"), publishBodySchema(kind, name));
+      const { resource, upload } = await c.var.services.resources.publish(c.var.user, name, input);
+      return c.json(
+        ResourcePublishedSchema.parse({ resource, upload, ...(resource.kind === "skill" ? { skill: resource } : {}) }),
+      );
     },
   )
   .put(

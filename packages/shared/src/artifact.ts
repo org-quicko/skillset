@@ -176,6 +176,38 @@ export function validateArtifactSize<T>(files: readonly T[], sizeOf: (file: T) =
  * ```
  */
 export function validateArtifactManifest(value: unknown): ArtifactFile[] {
+  const manifest = validateManifestEntries(value);
+  if (!manifest.some((file) => file.path === SKILL_FILE_NAME)) {
+    throw new SkillValidationError(
+      "skill_md_missing",
+      `A Skill needs a ${SKILL_FILE_NAME} at its root.`,
+      SKILL_FILE_NAME,
+    );
+  }
+  return manifest;
+}
+
+/**
+ * Validates a declared Manifest's entries, whatever Kind declares them.
+ *
+ * @remarks
+ * The half of `validateArtifactManifest` that is true of every Artifact:
+ * safe paths, no duplicates, and the count and size limits. Which files must
+ * be present is the Kind's own rule and is checked by its caller.
+ *
+ * @param value - The candidate manifest, not yet known to be an array.
+ * @returns The manifest, typed and with its paths normalised.
+ * @throws SkillValidationError with rule `manifest_invalid` if `value` is not
+ * an array of `(path, size)` pairs, `entry_duplicate` if two entries name the
+ * same path, one of `validateArtifactPath`'s rules for an unsafe path, or
+ * `too_many_entries`/`uncompressed_too_large` if the declared files exceed
+ * what an Artifact may hold.
+ * @example
+ * ```ts
+ * validateManifestEntries([{ path: "reviewer.md", size: 512 }]);
+ * ```
+ */
+export function validateManifestEntries(value: unknown): ArtifactFile[] {
   if (!Array.isArray(value)) {
     throw new SkillValidationError("manifest_invalid", "A Skill's files must be given as a list.", "files");
   }
@@ -206,14 +238,6 @@ export function validateArtifactManifest(value: unknown): ArtifactFile[] {
       throw new SkillValidationError("entry_duplicate", `A Skill lists "${file.path}" more than once.`, file.path);
     }
     seen.add(file.path);
-  }
-
-  if (!seen.has(SKILL_FILE_NAME)) {
-    throw new SkillValidationError(
-      "skill_md_missing",
-      `A Skill needs a ${SKILL_FILE_NAME} at its root.`,
-      SKILL_FILE_NAME,
-    );
   }
 
   validateArtifactSize(manifest, (file) => file.size);
