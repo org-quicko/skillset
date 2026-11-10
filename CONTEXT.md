@@ -15,7 +15,7 @@ a `name` unique within that pair, a description, a publisher, optional markdown 
 _Avoid_: Package, entry, item, asset, artifact (which is the files, not the thing)
 
 **Kind**:
-Which of the three things a Resource is — `skill`, `mcp-server`, or `plugin`. A Kind fixes the
+Which of the four things a Resource is — `skill`, `subagent`, `mcp-server`, or `plugin`. A Kind fixes the
 shape of the payload, the rules `name` and `description` must satisfy, whether there is an
 Artifact, and what `skillset install` does. Stored as plain text rather than an enum, so a fourth
 Kind is an insert rather than a migration (ADR-0026, following ADR-0024).
@@ -60,6 +60,14 @@ The mandatory file at the root of a Skill. Its frontmatter is the source of trut
 `compatibility`, `metadata`, `allowed-tools`); anything else in the file is ignored. Everything
 below the frontmatter becomes the Resource's `body`.
 _Avoid_: Manifest, metadata file
+
+**Subagent**:
+The Kind whose payload is one markdown file an Agent loads to delegate work to: YAML frontmatter
+naming it (`name`, `description`, optionally `tools` and `model`), and a body that is its system
+prompt. Has an Artifact of exactly that one file, `<name>.md`, kept as published (ADR-0046).
+Installed for Claude Code only, into its own agents directory rather than a canonical one
+(ADR-0047).
+_Avoid_: Agent (which is the coding tool that loads it), persona, assistant, bot
 
 **MCP Server**:
 The Kind that is pure metadata — a `server.json`-shaped record naming where a Model Context
