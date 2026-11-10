@@ -207,8 +207,8 @@ describe("publishSkill", () => {
         // the machine (ISSUE-12).
         // In the order they were uploaded, which is the bundle's own order.
         files: [
-          { path: "scripts/helper.sh", size: HELPER_SH.length },
           { path: "SKILL.md", size: SKILL_MD.length },
+          { path: "scripts/helper.sh", size: HELPER_SH.length },
         ],
         total_bytes: SKILL_MD.length + HELPER_SH.length,
       });

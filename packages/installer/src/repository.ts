@@ -28,9 +28,30 @@ import {
  * Reads every file under `root`, skipping whatever `isExcludedPath` (shared)
  * would exclude anyway — pruning descent into `node_modules`/`.git`/etc.
  * rather than reading them and discarding the bytes.
+ *
+ * @param root - The Skill's root directory; returned paths are relative to it.
+ * @param dir - The directory being read, at or below `root`. Callers leave
+ * this out; it is how the walk recurses.
+ * @returns Every kept file, at a `/`-separated path relative to `root`.
+ * @throws The `readdir`/`readFile` error when `dir` does not exist, is not a
+ * directory, or a file under it cannot be read.
+ *
+ * @remarks
+ * Each directory's entries are visited in name order, compared by code unit,
+ * so the result is the same on every filesystem and in every locale —
+ * `readdir` alone promises no order, and this order reaches the publish
+ * manifest and the list of files a publish reports back.
+ *
+ * @example
+ * ```ts
+ * const files = await walkSkillDirectory("./skills/code-review");
+ * files.map((file) => file.path); // -> ["SKILL.md", "scripts/helper.sh"]
+ * ```
  */
 export async function walkSkillDirectory(root: string, dir: string = root): Promise<SkillFile[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
+  const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
   const files: SkillFile[] = [];
 
   for (const entry of entries) {
