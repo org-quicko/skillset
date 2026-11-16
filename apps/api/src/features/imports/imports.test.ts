@@ -522,17 +522,15 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
    */
   describe("Discovering Skill folders (POST /imports/:provider/skills)", () => {
     const DISCOVER_PATH = "/api/imports/github/skills";
-    const ROOT_CONTENTS = "https://api.github.com/repos/acme/skills/contents/?ref=main";
-    const rootDir = (path: string): Record<string, unknown> => ({ path, type: "dir", download_url: null });
+    const ROOT_TREE = "https://api.github.com/repos/acme/skills/git/trees/main?recursive=1";
+    const tree = (...blobs: string[]) => ({ truncated: false, tree: blobs.map((path) => ({ path, type: "blob" })) });
     const rootBody = (overrides: Record<string, unknown> = {}) => ({ project: "acme/skills", ref: "main", path: "", ...overrides });
     const rootLocation = () => ({ provider: "github", project: "acme/skills", ref: "main", path: "" });
 
     it("returns every Skill folder found, shaped as locations ready for /skill-files", async () => {
       await ready();
       const provider = stub({
-        [ROOT_CONTENTS]: [rootDir("apps")],
-        "https://api.github.com/repos/acme/skills/contents/apps?ref=main": [rootDir("apps/code-review")],
-        "https://api.github.com/repos/acme/skills/contents/apps/code-review?ref=main": [file("apps/code-review/SKILL.md")],
+        [ROOT_TREE]: tree("README.md", "apps/code-review/SKILL.md"),
       });
 
       const found = await imports.listSkillFolders(writer.id, rootLocation(), provider.fetch);
@@ -542,7 +540,7 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
 
     it("reports that no Skill was found, distinct from an empty folder", async () => {
       await ready();
-      const provider = stub({ [ROOT_CONTENTS]: [{ path: "README.md", type: "file", download_url: null }] });
+      const provider = stub({ [ROOT_TREE]: tree("README.md") });
 
       await expect(imports.listSkillFolders(writer.id, rootLocation(), provider.fetch)).rejects.toMatchObject({
         code: "import_rejected",
