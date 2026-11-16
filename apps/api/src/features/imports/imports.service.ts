@@ -361,7 +361,7 @@ export class ImportsService {
    * A `GET` against the provider, decoded as JSON — the shared request path
    * for {@link listRepositories}, kept apart from the folder walk's own
    * request-making because it answers with a plain JSON body rather than the
-   * Contents API shape `readSkillFolder`/`discoverSkillFolders` understand.
+   * provider-specific shapes `readSkillFolder`/`discoverSkillFolders` understand.
    *
    * @throws ConnectionExpiredError on a 401 — the token was only just minted
    * or refreshed by `accessTokenFor`, so a provider that still refuses it has

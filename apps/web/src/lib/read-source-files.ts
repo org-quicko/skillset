@@ -155,10 +155,8 @@ export async function fetchSkillSourceFiles(url: string): Promise<SkillFile[]> {
  *
  * @remarks
  * Chooses between the credentialed and anonymous walk exactly as
- * `fetchSkillFilesAt` does, and for the same reason (ADR-0024): a discovery
- * walk spends roughly one request per directory visited, so the sixty
- * requests an hour an anonymous browser gets exhausts far sooner than a
- * single-folder read would.
+ * `fetchSkillFilesAt` does, and for the same reason (ADR-0024): the sixty
+ * requests an hour an anonymous browser gets run out fast.
  *
  * @param url - A repository, project, or folder URL, as accepted by
  * `parseSkillSourceUrl`.
