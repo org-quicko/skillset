@@ -301,10 +301,10 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
     );
   });
 
-  it("finds a Skill exactly five levels below the given path", async () => {
+  it("finds a Skill exactly eight levels below the given path", async () => {
     await withRoot(
       async (root) => {
-        await writeSkillAt(root, "a/b/c/d/e", "at-limit");
+        await writeSkillAt(root, "a/b/c/d/e/f/g/h", "at-limit");
       },
       async (root) => {
         const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
@@ -324,10 +324,10 @@ describe("runPublish: publishing many Skills from a directory (ticket 7)", () =>
     );
   });
 
-  it("does not look past five levels below the given path", async () => {
+  it("does not look past eight levels below the given path", async () => {
     await withRoot(
       async (root) => {
-        await writeSkillAt(root, "a/b/c/d/e/f", "past-limit");
+        await writeSkillAt(root, "a/b/c/d/e/f/g/h/i", "past-limit");
       },
       async (root) => {
         const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));

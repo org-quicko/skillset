@@ -8,4 +8,4 @@
  * Provider's tree — so the depth is one number rather than two
  * that could drift apart.
  */
-export const SKILL_DISCOVERY_MAX_DEPTH = 5;
+export const SKILL_DISCOVERY_MAX_DEPTH = 8;

@@ -472,11 +472,11 @@ describe("Finding every Skill folder under a location", () => {
     });
 
     it("finds a Skill exactly at the depth limit, but not past it", async () => {
-      const atLimit = stub({ [ghTree("main")]: tree("a/b/c/d/e/SKILL.md") });
+      const atLimit = stub({ [ghTree("main")]: tree("a/b/c/d/e/f/g/h/SKILL.md") });
       const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: atLimit.fetch });
-      expect(found.map((location) => location.path)).toEqual(["a/b/c/d/e"]);
+      expect(found.map((location) => location.path)).toEqual(["a/b/c/d/e/f/g/h"]);
 
-      const pastLimit = stub({ [ghTree("main")]: tree("a/b/c/d/e/f/SKILL.md") });
+      const pastLimit = stub({ [ghTree("main")]: tree("a/b/c/d/e/f/g/h/i/SKILL.md") });
       await expectReason(discoverSkillFolders(ROOT_GITHUB, { fetch: pastLimit.fetch }), "empty_folder");
     });
 
@@ -549,11 +549,11 @@ describe("Finding every Skill folder under a location", () => {
     });
 
     it("finds a Skill exactly at the depth limit, but not past it", async () => {
-      const atLimit = stub({ [rootTree(1)]: [{ path: "a/b/c/d/e/SKILL.md", type: "blob" }] });
+      const atLimit = stub({ [rootTree(1)]: [{ path: "a/b/c/d/e/f/g/h/SKILL.md", type: "blob" }] });
       const found = await discoverSkillFolders(ROOT_GITLAB, { fetch: atLimit.fetch });
-      expect(found.map((location) => location.path)).toEqual(["a/b/c/d/e"]);
+      expect(found.map((location) => location.path)).toEqual(["a/b/c/d/e/f/g/h"]);
 
-      const pastLimit = stub({ [rootTree(1)]: [{ path: "a/b/c/d/e/f/SKILL.md", type: "blob" }] });
+      const pastLimit = stub({ [rootTree(1)]: [{ path: "a/b/c/d/e/f/g/h/i/SKILL.md", type: "blob" }] });
       await expectReason(discoverSkillFolders(ROOT_GITLAB, { fetch: pastLimit.fetch }), "empty_folder");
     });
 
