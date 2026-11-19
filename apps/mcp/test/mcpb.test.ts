@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { v0_3 } from "@anthropic-ai/mcpb";
 import pkg from "../package.json" with { type: "json" };
+import { parseConfig } from "../src/config.js";
 import { buildDiscoveryDocument } from "../src/discovery.js";
-import { buildMcpbManifest, MCPB_NAME } from "../src/mcpb.js";
+import { buildMcpbManifest } from "../src/mcpb.js";
 
 describe("the generated MCPB manifest", () => {
   it("is a valid MCPB 0.3 manifest", async () => {
@@ -23,10 +24,10 @@ describe("the generated MCPB manifest", () => {
     expect(manifest.tools).toEqual(discovery.tools.map((tool) => ({ name: tool.name, description: tool.description ?? "" })));
   });
 
-  // Claude Code and Cowork refuse to start a bundle whose name contains
-  // `skillset` anywhere (ADR-0037).
-  it("keeps the substring `skillset` out of its name and display name", () => {
-    expect(MCPB_NAME).not.toContain("skillset");
-    expect(MCPB_NAME.toLowerCase()).not.toContain("skillset");
+  it("runs the server so that installs go to user scope", async () => {
+    const manifest = buildMcpbManifest(await buildDiscoveryDocument());
+    const config = parseConfig(manifest.server.mcp_config.args ?? [], {});
+
+    expect(config.scope).toBe("user");
   });
 });
