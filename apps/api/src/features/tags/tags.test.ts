@@ -6,7 +6,6 @@ import { SIGN_IN_PATH, seedUserWithPassword, startTestContext, stopTestContext, 
 interface ApiTag {
   id: string;
   name: string;
-  skill_count?: number;
 }
 
 interface ApiSkill {
@@ -246,7 +245,6 @@ describe("Listing the Tag catalog (GET /tags)", () => {
     expect(res.status).toBe(200);
     const { items } = (await res.json()) as { items: ApiTag[] };
     expect(items.map((tag) => tag.name)).toEqual(["apple", "mango", "zebra"]);
-    expect(items.find((tag) => tag.name === "apple")?.skill_count).toBe(1);
   });
 
   it("is readable without a session, same as the Skill reads (ADR-0013)", async () => {

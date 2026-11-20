@@ -7,7 +7,6 @@ import { TagNameConflictError, TagNotFoundError } from "./tags.errors.js";
 export interface TagSummary {
   id: string;
   name: string;
-  skill_count?: number;
 }
 
 /** The Tag catalog, and the `resource_tags` join that attaches it to Skills (ADR-0011). */
@@ -83,17 +82,7 @@ export class TagsService {
    * writer sees what exists before typing a near-duplicate (ADR-0011).
    */
   async list(): Promise<TagSummary[]> {
-    return this.db
-      .selectFrom("tags")
-      .leftJoin("resource_tags", "resource_tags.tag_id", "tags.id")
-      .select([
-        "tags.id",
-        "tags.name",
-        (eb) => eb.fn.count<number>("resource_tags.resource_id").as("skill_count"),
-      ])
-      .groupBy(["tags.id", "tags.name"])
-      .orderBy("tags.name")
-      .execute();
+    return this.db.selectFrom("tags").select(["id", "name"]).orderBy("name").execute();
   }
 
   /**
