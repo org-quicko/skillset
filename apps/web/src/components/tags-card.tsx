@@ -1,7 +1,8 @@
 import type { Tag } from "@in-org-quicko/skillset-shared";
-import { SearchIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, SearchIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DeleteTagDialog } from "@/components/delete-tag-dialog";
+import { EditTagDialog } from "@/components/edit-tag-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,11 +24,12 @@ function TagsTableSkeleton() {
 
 /**
  * An Admin's view of the Registry's Tag catalog.
- * Lists all catalog tags with filtering and allows permanently deleting a Tag.
+ * Lists all catalog tags with filtering and allows renaming or permanently deleting a Tag.
  */
 export function TagsCard() {
   const tagsQuery = useTags();
   const [filter, setFilter] = useState("");
+  const [editTarget, setEditTarget] = useState<Tag | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
 
   const tags = useMemo(() => tagsQuery.data?.items ?? [], [tagsQuery.data]);
@@ -35,7 +37,7 @@ export function TagsCard() {
   const filteredTags = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return tags;
-    return tags.filter((tag) => tag.name.toLowerCase().includes(q) || tag.id.toLowerCase().includes(q));
+    return tags.filter((tag) => tag.name.toLowerCase().includes(q));
   }, [tags, filter]);
 
   return (
@@ -70,12 +72,11 @@ export function TagsCard() {
               {tags.length === 0 ? "No tags in the catalog yet." : "No tags match your filter."}
             </div>
           ) : (
-            <Table className="table-fixed">
+            <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-1/3">Tag Name</TableHead>
-                  <TableHead className="w-1/2">ID</TableHead>
-                  <TableHead className="w-24 text-right" />
+                  <TableHead>Tag Name</TableHead>
+                  <TableHead className="w-28 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -84,17 +85,27 @@ export function TagsCard() {
                     <TableCell className="font-medium">
                       <Badge variant="secondary">{tag.name}</Badge>
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground truncate">{tag.id}</TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="icon-sm"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteTarget(tag)}
-                        aria-label={`Delete tag ${tag.name}`}
-                      >
-                        <Trash2Icon />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="outline"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => setEditTarget(tag)}
+                          aria-label={`Edit tag ${tag.name}`}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteTarget(tag)}
+                          aria-label={`Delete tag ${tag.name}`}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -102,6 +113,16 @@ export function TagsCard() {
             </Table>
           )}
         </Panel>
+      )}
+
+      {editTarget && (
+        <EditTagDialog
+          tag={editTarget}
+          open
+          onOpenChange={(next) => {
+            if (!next) setEditTarget(null);
+          }}
+        />
       )}
 
       {deleteTarget && (
