@@ -53,7 +53,7 @@ is the reason a GitHub Provider cannot be enabled without an organisation set.
 
 **`permitted_domain` is renamed `permitted_organisation`.** It holds a Workspace domain for Google, a
 tenant id for Microsoft, and an organisation login for GitHub; "domain" was already loose for
-Microsoft and is simply wrong for GitHub. CONTEXT.md already describes a Provider as vouching for
+Microsoft and is simply wrong for GitHub. GLOSSARY.md already describes a Provider as vouching for
 "the organisation that address belongs to", so the column now matches the glossary.
 
 **The gate is no longer uniformly a claim.** ADR-0015 was able to say the gate is "matched on the

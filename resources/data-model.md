@@ -4,7 +4,7 @@ Postgres 18. Twelve tables, one materialized view, and one plain view, built by 
 `apps/api/src/db/migrations/` (ADR-0045). Their TypeScript types are generated from those
 migrations into `apps/api/src/db/database.ts` by `bun run db:types`.
 
-Terms are as defined in [CONTEXT.md](../CONTEXT.md) — User, Admin, Skill, Artifact, Token, Tag,
+Terms are as defined in [GLOSSARY.md](../GLOSSARY.md) — User, Admin, Skill, Artifact, Token, Tag,
 Git Provider, Integration, Connection, Import.
 
 Column names are snake_case, and so are the JSON keys in [openapi.json](./openapi.json) and every
@@ -53,7 +53,7 @@ is no write path to keep in sync. Nothing may insert into it.
 
 `email_verified` is set on every User the Registry creates, and does not mean the address was
 challenged — nothing here sends email. It means the Registry stands behind the address, which is
-already what CONTEXT.md means by calling the email the identity. It has to be set: Better Auth
+already what GLOSSARY.md means by calling the email the identity. It has to be set: Better Auth
 refuses to link a Provider login to an unverified row, so a User created with it false could never
 sign in through a Provider (ADR-0016).
 

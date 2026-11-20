@@ -1,0 +1,12 @@
+{
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/.claude/**",
+    "**/.scratch/**",
+    "apps/api/src/db/database.ts",
+    "_ds/**",
+    ".agents/**",
+    "bun.lock"
+  ]
+}

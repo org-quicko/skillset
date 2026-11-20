@@ -11,7 +11,7 @@ different Workspace domains. Rejected because Better Auth's `socialProviders` is
 provider name with one configuration per key (ADR-0016), so preserving the capability means either
 the `genericOAuth` plugin — giving up the built-in handling of GitHub that ADR-0018 depends on — or
 running several Better Auth instances, which is a great deal of machinery for a capability nothing
-asked for. CONTEXT.md describes a Registry as serving one team, and one team has one Workspace
+asked for. GLOSSARY.md describes a Registry as serving one team, and one team has one Workspace
 domain, one Entra tenant, and one GitHub organisation.
 
 **Keeping the slug column as a display key** while making `kind` unique. Rejected as the worst of

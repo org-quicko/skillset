@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. Amends [ADR-0026](0026-resource-with-a-kind-and-a-payload.md); narrows the
-"keeps no reference" language in the Import term of `CONTEXT.md`, without reopening
+"keeps no reference" language in the Import term of `GLOSSARY.md`, without reopening
 [ADR-0001](0001-registry-does-not-inspect-artifacts.md).
 
 ## Context

@@ -12,7 +12,7 @@ import {
 /**
  * A parsed `SKILL.md`. Its frontmatter is the source of truth for a Skill's
  * `name` and `description`, plus the four optional fields the Agent Skills
- * specification defines (CONTEXT.md); `body` is everything below the
+ * specification defines (GLOSSARY.md); `body` is everything below the
  * frontmatter, which is what gets stored and rendered.
  */
 export interface SkillDocument {

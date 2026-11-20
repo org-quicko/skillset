@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "registry": "https://skillset.quicko.company",
+  "skills": {
+    "domain-modeling": {
+      "id": null,
+      "registry_updated_at": null,
+      "source": "https://github.com/mattpocock/skills",
+      "namespace": "mattpocock/skills",
+      "content_hash": "sha256:1c6fbaf3ae639b8667d788719d9737df00bd89e6f587d45fd3eea93e488b42d6",
+      "installed_at": "2026-11-20T13:19:27.324Z"
+    }
+  }
+}
