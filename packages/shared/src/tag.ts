@@ -11,6 +11,7 @@ export const TagNameSchema = z.string().min(1).max(TAG_NAME_MAX_LENGTH).regex(TA
 export const TagSchema = z.object({
   id: z.string(),
   name: TagNameSchema,
+  skill_count: z.number().int().nonnegative().optional(),
 });
 export type Tag = z.infer<typeof TagSchema>;
 

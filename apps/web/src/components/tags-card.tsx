@@ -76,6 +76,7 @@ export function TagsCard() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Tag Name</TableHead>
+                  <TableHead className="w-36">Skills</TableHead>
                   <TableHead className="w-28 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -84,6 +85,21 @@ export function TagsCard() {
                   <TableRow key={tag.id} className="hover:bg-transparent">
                     <TableCell className="font-medium">
                       <Badge variant="secondary">{tag.name}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {tag.skill_count !== undefined && tag.skill_count > 0 ? (
+                        <a
+                          href={`/?tag_id=${encodeURIComponent(tag.id)}`}
+                          className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                          title={`View ${tag.skill_count} ${tag.skill_count === 1 ? "skill" : "skills"} tagged with ${tag.name}`}
+                        >
+                          <Badge variant="outline" className="cursor-pointer font-normal hover:border-foreground/40">
+                            {tag.skill_count} {tag.skill_count === 1 ? "skill" : "skills"}
+                          </Badge>
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground/60 italic">0 skills</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
