@@ -180,4 +180,25 @@ export class TagsService {
 
     return row;
   }
+
+  /**
+   * Deletes a Tag from the catalog.
+   *
+   * @remarks
+   * Irreversible. Every Skill carrying this Tag loses the attachment automatically:
+   * `resource_tags.tag_id` is `ON DELETE CASCADE`.
+   *
+   * @param id - The Tag's id.
+   * @throws TagNotFoundError if no Tag exists by `id`.
+   */
+  async delete(id: string): Promise<void> {
+    const deleted = await this.db
+      .deleteFrom("tags")
+      .where("id", "=", id)
+      .returning("id")
+      .executeTakeFirst();
+    if (!deleted) throw new TagNotFoundError();
+
+    this.logger.info({ tag_id: id }, "tag deleted");
+  }
 }

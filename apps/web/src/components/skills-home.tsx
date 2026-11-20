@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Role } from "@in-org-quicko/skillset-shared";
+import { roleMeets, type Role } from "@in-org-quicko/skillset-shared";
 import { SearchIcon, XIcon } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { Reveal } from "@/components/reveal";
@@ -212,6 +212,7 @@ export function SkillsHome({
             tags={tags.data?.items ?? []}
             selected={filters.tagIds}
             onChange={(tagIds) => onFiltersChange({ ...filters, tagIds })}
+            canManageTags={role !== null && roleMeets(role, "admin")}
           />
           {hasTagFilters && (
             <button

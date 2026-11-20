@@ -1,5 +1,6 @@
 services:
   app:
+    build: .
     image: labsatquicko/skillset
     restart: unless-stopped
     ports:

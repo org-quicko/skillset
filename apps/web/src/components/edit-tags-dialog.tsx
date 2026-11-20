@@ -1,6 +1,7 @@
 import { validateTagName, type Tag } from "@in-org-quicko/skillset-shared";
-import { XIcon } from "lucide-react";
+import { Trash2Icon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
+import { DeleteTagDialog } from "@/components/delete-tag-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,6 +34,7 @@ interface DraftTag {
  * @param id - The Skill's id.
  * @param name - The Skill's name, shown in the dialog description.
  * @param tags - The Skill's current Tags, seeded into the draft each time the dialog opens.
+ * @param canDeleteTags - Whether the user can delete a Tag from the catalog (admin or above).
  * @param open - Whether the dialog is open.
  * @param onOpenChange - Called when the dialog should open or close.
  */
@@ -40,12 +42,14 @@ export function EditTagsDialog({
   id,
   name,
   tags,
+  canDeleteTags = false,
   open,
   onOpenChange,
 }: {
   id: string;
   name: string;
   tags: Tag[];
+  canDeleteTags?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -56,17 +60,28 @@ export function EditTagsDialog({
           <DialogTitle>Edit Tags</DialogTitle>
           <DialogDescription>Tags help with browsing and filtering — {name} can carry as many as you like.</DialogDescription>
         </DialogHeader>
-        {open && <TagsEditorBody id={id} name={name} tags={tags} />}
+        {open && <TagsEditorBody id={id} name={name} tags={tags} canDeleteTags={canDeleteTags} />}
       </DialogContent>
     </Dialog>
   );
 }
 
 /** Owns every piece of local editing state — split out so it only exists while the dialog is open (see `EditTagsDialog`'s remarks). */
-function TagsEditorBody({ id, name, tags }: { id: string; name: string; tags: Tag[] }) {
+function TagsEditorBody({
+  id,
+  name,
+  tags,
+  canDeleteTags = false,
+}: {
+  id: string;
+  name: string;
+  tags: Tag[];
+  canDeleteTags?: boolean;
+}) {
   const [draftTags, setDraftTags] = useState<DraftTag[]>(() => tags.map((tag) => ({ id: tag.id, name: tag.name })));
   const [query, setQuery] = useState("");
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [tagToDelete, setTagToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const catalog = useTags();
   const setSkillTags = useSetSkillTags();
@@ -139,8 +154,22 @@ function TagsEditorBody({ id, name, tags }: { id: string; name: string; tags: Ta
               <CommandList className="absolute z-10 mt-1 w-full rounded-lg border border-input bg-popover shadow-md">
                 <CommandGroup>
                   {suggestions.map((tag) => (
-                    <CommandItem key={tag.id} value={tag.name} onSelect={() => addTag(tag)}>
-                      {tag.name}
+                    <CommandItem key={tag.id} value={tag.name} onSelect={() => addTag(tag)} className="group flex items-center justify-between">
+                      <span>{tag.name}</span>
+                      {canDeleteTags && (
+                        <button
+                          type="button"
+                          aria-label={`Delete ${tag.name} from catalog`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setTagToDelete(tag);
+                          }}
+                          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-60 transition-opacity hover:bg-destructive/10 hover:text-destructive hover:opacity-100"
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </button>
+                      )}
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -155,12 +184,30 @@ function TagsEditorBody({ id, name, tags }: { id: string; name: string; tags: Ta
             {draftTags.map((tag) => (
               <Badge key={tag.name} variant="secondary">
                 {tag.name}
+                {canDeleteTags && tag.id && (
+                  <button
+                    type="button"
+                    data-icon="inline-end"
+                    disabled={setSkillTags.isPending}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setTagToDelete({ id: tag.id!, name: tag.name });
+                    }}
+                    aria-label={`Delete ${tag.name} from catalog`}
+                    title="Delete tag from catalog"
+                    className="flex cursor-pointer rounded-sm p-0.5 text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96] disabled:cursor-not-allowed"
+                  >
+                    <Trash2Icon className="size-3" />
+                  </button>
+                )}
                 <button
                   type="button"
                   data-icon="inline-end"
                   disabled={setSkillTags.isPending}
                   onClick={() => removeTag(tag.name)}
-                  aria-label={`Remove ${tag.name}`}
+                  aria-label={`Remove ${tag.name} from skill`}
+                  title="Remove from skill"
                   className="flex cursor-pointer rounded-sm p-0.5 transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96] disabled:cursor-not-allowed"
                 >
                   <XIcon className="size-3" />
@@ -172,6 +219,21 @@ function TagsEditorBody({ id, name, tags }: { id: string; name: string; tags: Ta
       </div>
 
       {setSkillTags.isError && <p className="text-sm text-destructive">{apiErrorMessage(setSkillTags.error)}</p>}
+
+      {tagToDelete && (
+        <DeleteTagDialog
+          tag={tagToDelete}
+          open
+          onOpenChange={(next) => {
+            if (!next) setTagToDelete(null);
+          }}
+          onDeleted={() => {
+            if (tagToDelete) {
+              setDraftTags((current) => current.filter((t) => t.name !== tagToDelete.name));
+            }
+          }}
+        />
+      )}
     </>
   );
 }

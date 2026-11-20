@@ -71,3 +71,25 @@ export function useRenameTag() {
     },
   });
 }
+
+/**
+ * Deletes a Tag from the catalog — `DELETE /tags/{id}`. `admin` and `superadmin` only;
+ * the API refuses everyone else.
+ *
+ * @remarks
+ * Deleting a Tag removes it from the catalog and cascades to every Resource
+ * carrying it. Invalidates the Tag catalog and every cached Resource query.
+ */
+export function useDeleteTag() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/tags/${encodeURIComponent(id)}`, null, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tagsListQueryKey });
+      queryClient.invalidateQueries({ queryKey: resourcesQueryKey });
+    },
+  });
+}

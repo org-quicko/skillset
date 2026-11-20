@@ -19,10 +19,12 @@ import {
 } from "@/components/ui/sidebar";
 import { TokensCard } from "@/components/tokens-card";
 import { UsersCard } from "@/components/users-card";
+import { TagsCard } from "@/components/tags-card";
 import { useRouter } from "@/lib/use-router";
 
 const PROFILE_PATH = "/settings";
 const USERS_PATH = "/settings/users";
+const TAGS_PATH = "/settings/tags";
 const SUBMISSIONS_PATH = "/settings/submissions";
 const TOKENS_PATH = "/settings/tokens";
 const LOGIN_PATH = "/settings/login";
@@ -30,7 +32,7 @@ const INTEGRATIONS_PATH = "/settings/integrations";
 const CONNECTIONS_PATH = "/settings/connected-accounts";
 const ASSISTANTS_PATH = "/settings/ai-assistants";
 
-type Section = "profile" | "users" | "submissions" | "login" | "integrations" | "connections" | "tokens" | "assistants";
+type Section = "profile" | "users" | "tags" | "submissions" | "login" | "integrations" | "connections" | "tokens" | "assistants";
 
 // `canManageUsers` gates the Integrations section too: it decides something
 // about the Registry rather than about you — which apps it holds repository
@@ -51,6 +53,7 @@ function sectionFor(
   canImport: boolean,
 ): Section {
   if (pathname === USERS_PATH && canManageUsers) return "users";
+  if (pathname === TAGS_PATH && canManageUsers) return "tags";
   if (pathname === SUBMISSIONS_PATH && canManageUsers) return "submissions";
   if (pathname === LOGIN_PATH && canManageLogin) return "login";
   if (pathname === INTEGRATIONS_PATH && canManageUsers) return "integrations";
@@ -70,6 +73,7 @@ export function SettingsPage({ user }: { user: User }) {
   const tabs: { label: string; section: Section; path: string }[] = [
     { label: "Personal Info", section: "profile", path: PROFILE_PATH },
     ...(canManageUsers ? [{ label: "Team", section: "users" as const, path: USERS_PATH }] : []),
+    ...(canManageUsers ? [{ label: "Tags", section: "tags" as const, path: TAGS_PATH }] : []),
     ...(canManageUsers ? [{ label: "Submissions", section: "submissions" as const, path: SUBMISSIONS_PATH }] : []),
     ...(canManageLogin ? [{ label: "OIDC", section: "login" as const, path: LOGIN_PATH }] : []),
     ...(canManageUsers
@@ -128,6 +132,7 @@ export function SettingsPage({ user }: { user: User }) {
         >
           {section === "profile" && <ProfileCard user={user} />}
           {section === "users" && canManageUsers && <UsersCard currentUserId={user.id} />}
+          {section === "tags" && canManageUsers && <TagsCard />}
           {section === "submissions" && canManageUsers && <SubmissionsCard />}
           {section === "login" && canManageLogin && <IdentityProvidersCard />}
           {section === "integrations" && canManageUsers && <IntegrationsCard />}

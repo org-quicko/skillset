@@ -66,6 +66,16 @@ Content-Type: application/json
 
 An `admin` role is required — stricter than attaching a Tag, because a rename affects every Resource in the catalog.
 
+### Deleting a Tag
+
+Admins and Superadmins can delete a Tag from the catalog via the web interface or the API. Deleting a Tag removes it from the catalog and automatically detaches it from every Resource carrying it.
+
+```http
+DELETE /api/tags/{id}
+```
+
+An `admin` role is required.
+
 ### Listing all Tags
 
 The full Tag catalog is public — no authentication required. The CLI and MCP server fetch it automatically when resolving a name to an id.
