@@ -53,7 +53,7 @@ export function TagFilter({
               {tags.map((tag) => (
                 <CommandItem key={tag.id} value={tag.name} onSelect={() => toggle(tag.id)}>
                   <Checkbox checked={selected.includes(tag.id)} />
-                  {tag.name}
+                  <span className="truncate">{tag.name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

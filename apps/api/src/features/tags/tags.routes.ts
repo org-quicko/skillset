@@ -30,4 +30,16 @@ export const tagsRoutes = createRouter()
       const tag = await c.var.services.tags.rename(c.req.valid("param").id, c.req.valid("json").name);
       return c.json(TagSchema.parse(tag));
     },
+  )
+  // `admin`, stricter than attaching a Tag: deleting a Tag removes it from the
+  // catalog and detaches it from every Resource carrying it (ADR-0011).
+  .delete(
+    "/:id",
+    requireAuth(),
+    requireRole("admin"),
+    uuidParam("id", () => new TagNotFoundError()),
+    async (c) => {
+      await c.var.services.tags.delete(c.req.valid("param").id);
+      return c.body(null, 204);
+    },
   );

@@ -337,6 +337,7 @@ export function SkillDetail({
           id={data.id}
           name={data.name}
           tags={data.tags}
+          canDeleteTags={canDelete}
           open={editTagsOpen}
           onOpenChange={setEditTagsOpen}
         />

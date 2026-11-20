@@ -24,7 +24,7 @@ Keeping the `text[]` column from ADR-0008 was considered and rejected for the dr
 above — it also has no way to support renaming a tag without rewriting every row that
 happens to contain the old spelling. A version scoping the catalog per something narrower
 than the whole Registry (e.g. per publisher) was not considered: the Registry already serves
-exactly one team (CONTEXT.md), so there is nothing narrower to scope it to.
+exactly one team (GLOSSARY.md), so there is nothing narrower to scope it to.
 
 ## Consequences
 

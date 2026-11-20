@@ -367,3 +367,137 @@ describe("Renaming a Tag (PATCH /tags/{id})", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("Deleting a Tag (DELETE /tags/{id})", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let superadmin: Session;
+  let admin: Session;
+  let writer: Session;
+  let reader: Session;
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    const signUp = await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ first_name: "Ada", last_name: "Lovelace", email: "ada@example.com", password: PASSWORD }),
+    });
+    superadmin = { cookie: sessionCookie(signUp), email: "ada@example.com", id: ((await signUp.json()) as { id: string }).id };
+
+    admin = await createUserAndLogIn(context, {
+      first_name: "Charles",
+      last_name: "Babbage",
+      email: "charles@example.com",
+      password: PASSWORD,
+      role: "admin",
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function deleteTag(session: Session | null, tagId: string): Promise<Response> {
+    return context.app.request(`/api/tags/${tagId}`, {
+      method: "DELETE",
+      headers: session ? { cookie: session.cookie } : {},
+    });
+  }
+
+  it("deletes a Tag from the catalog, returning 204", async () => {
+    const skillId = await publish(context, writer, "delete-tag-test-skill");
+    const setRes = await setTags(context, writer, skillId, ["to-delete"]);
+    const tagId = ((await setRes.json()) as { tags: ApiTag[] }).tags[0]?.id;
+    if (!tagId) throw new Error("Tag was not created.");
+
+    const res = await deleteTag(admin, tagId);
+    expect(res.status).toBe(204);
+
+    const catalog = await context.app.request("/api/tags");
+    const { items } = (await catalog.json()) as { items: ApiTag[] };
+    expect(items.some((tag) => tag.id === tagId)).toBe(false);
+  });
+
+  it("cascades deletion and detaches the Tag from every Skill carrying it", async () => {
+    const skillOne = await publish(context, writer, "cascade-skill-one");
+    const skillTwo = await publish(context, writer, "cascade-skill-two");
+
+    const setRes = await setTags(context, writer, skillOne, ["shared-delete", "kept-tag"]);
+    await setTags(context, writer, skillTwo, ["shared-delete"]);
+
+    const tagId = ((await setRes.json()) as { tags: ApiTag[] }).tags.find((t) => t.name === "shared-delete")?.id;
+    if (!tagId) throw new Error("Tag was not created.");
+
+    const res = await deleteTag(superadmin, tagId);
+    expect(res.status).toBe(204);
+
+    const skillOneAfter = await getSkill(context, reader, skillOne);
+    expect(skillOneAfter.tags.map((t) => t.name)).toEqual(["kept-tag"]);
+
+    const skillTwoAfter = await getSkill(context, reader, skillTwo);
+    expect(skillTwoAfter.tags).toEqual([]);
+  });
+
+  it("allows both Admin and Superadmin", async () => {
+    const skillId = await publish(context, writer, "admin-roles-skill");
+    const setRes = await setTags(context, writer, skillId, ["tag-for-admin", "tag-for-superadmin"]);
+    const tags = ((await setRes.json()) as { tags: ApiTag[] }).tags;
+    const adminTag = tags.find((t) => t.name === "tag-for-admin")!;
+    const superadminTag = tags.find((t) => t.name === "tag-for-superadmin")!;
+
+    const adminRes = await deleteTag(admin, adminTag.id);
+    expect(adminRes.status).toBe(204);
+
+    const superadminRes = await deleteTag(superadmin, superadminTag.id);
+    expect(superadminRes.status).toBe(204);
+  });
+
+  it("refuses writers and readers (403), and unauthenticated requests (401)", async () => {
+    const skillId = await publish(context, writer, "permission-delete-skill");
+    const setRes = await setTags(context, writer, skillId, ["protected-tag"]);
+    const tagId = ((await setRes.json()) as { tags: ApiTag[] }).tags[0]?.id;
+    if (!tagId) throw new Error("Tag was not created.");
+
+    const byWriter = await deleteTag(writer, tagId);
+    expect(byWriter.status).toBe(403);
+
+    const byReader = await deleteTag(reader, tagId);
+    expect(byReader.status).toBe(403);
+
+    const byAnonymous = await deleteTag(null, tagId);
+    expect(byAnonymous.status).toBe(401);
+
+    // Verify tag was not deleted
+    const catalog = await context.app.request("/api/tags");
+    const { items } = (await catalog.json()) as { items: ApiTag[] };
+    expect(items.some((tag) => tag.id === tagId)).toBe(true);
+  });
+
+  it("returns 404 for a Tag that does not exist", async () => {
+    const res = await deleteTag(admin, crypto.randomUUID());
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for a malformed id", async () => {
+    const res = await deleteTag(admin, "not-a-valid-uuid");
+    expect(res.status).toBe(404);
+  });
+});

@@ -893,6 +893,22 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
+      },
+      "delete": {
+        "tags": ["tags"],
+        "summary": "Delete a Tag",
+        "description": "Requires at least the admin role. Deleting a Tag removes it completely from the catalog and detaches it from every Resource carrying it.",
+        "responses": {
+          "204": {
+            "description": "The Tag was deleted"
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "403": {
+            "description": "Only Admins may delete a Tag",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/TagNotFound" }
+        }
       }
     },
     "/submissions": {

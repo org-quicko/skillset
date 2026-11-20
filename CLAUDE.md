@@ -14,7 +14,7 @@ The five canonical roles, used verbatim as label strings. See `docs/agents/triag
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 Don't add unneceesaary comments. Add comments wherever it is required to state a beahviour
 

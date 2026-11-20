@@ -16,6 +16,7 @@ Attaching or removing Tags from a specific Resource is done through [`PUT /api/r
 |---|---|---|---|
 | GET | `/api/tags` | None | List all Tags |
 | PATCH | `/api/tags/:id` | Admin+ | Rename a Tag |
+| DELETE | `/api/tags/:id` | Admin+ | Delete a Tag |
 
 ---
 
@@ -98,4 +99,37 @@ curl -X PATCH https://registry.example.com/api/tags/018f1234-abcd-7000-8000-0000
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{ "name": "react-18" }'
+```
+
+---
+
+## Delete a Tag
+
+```
+DELETE /api/tags/:id
+```
+
+Permanently removes a Tag from the catalog and detaches it from every Resource carrying it. Requires **Admin** role (Admin or Superadmin).
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  UUID of the Tag to delete.
+</ParamField>
+
+### Response
+
+Returns `204 No Content` on success.
+
+### Error codes
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No Tag exists with that id. |
+| `forbidden` | 403 | The caller does not hold the Admin role. |
+| `unauthenticated` | 401 | No valid session or token provided. |
+
+```bash
+curl -X DELETE https://registry.example.com/api/tags/018f1234-abcd-7000-8000-000000000001 \
+  -H "Authorization: Bearer <token>"
 ```

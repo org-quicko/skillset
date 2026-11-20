@@ -71,7 +71,7 @@ exchange, applied one level up.
 mean what its name suggests. This Registry has no address-verification step and sends no email at
 all, so it cannot mean "we challenged this address". It means the Registry stands behind it — an
 Admin naming someone's address is this system's assertion that it is theirs, which is already the
-model CONTEXT.md describes when it calls the email address the identity.
+model GLOSSARY.md describes when it calls the email address the identity.
 
 Setting it is not tidiness. Better Auth refuses to link a Provider login to a local row whose email
 is unverified — a defence against an attacker pre-registering an unverified row at a victim's

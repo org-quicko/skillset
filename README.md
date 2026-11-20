@@ -13,7 +13,7 @@ the bundled MCP server — all under your own infrastructure, with your own acce
   `.claude-plugin/plugin.json` manifest, for an agent to load together.
 
 Reading the catalog needs no account; publishing, deleting, and administration are restricted to
-Users with the right role. See [`CONTEXT.md`](CONTEXT.md) for the full domain vocabulary.
+Users with the right role. See [`GLOSSARY.md`](GLOSSARY.md) for the full domain vocabulary.
 
 Every Resource records a **Source** — the repository URL it was imported from, or this Registry's
 own domain in reverse-DNS notation (`com.quicko.skills`) when it was published straight here. It

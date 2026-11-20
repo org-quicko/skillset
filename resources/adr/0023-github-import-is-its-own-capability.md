@@ -112,7 +112,7 @@ every pre-existing GitHub user to a capability they were never asked about.
 
 ## What is deliberately not gated
 
-**The organisation gate does not run on a Connection.** `CONTEXT.md` defines Permitted Organisation
+**The organisation gate does not run on a Connection.** `GLOSSARY.md` defines Permitted Organisation
 as the control on *who gets an account*, and a Connection creates no account — the User was admitted
 already, through this Provider or another one. Running it here would overload that term with a
 second meaning, which is the mistake this whole ADR exists to undo, and it would refuse the ordinary

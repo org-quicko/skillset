@@ -105,7 +105,7 @@ export class UsersService {
             email: input.email,
             // Not "we challenged this address" — the Registry sends no email.
             // It records that an Admin named the address, which is this
-            // system's assertion that it is theirs (CONTEXT.md). Required, not
+            // system's assertion that it is theirs (GLOSSARY.md). Required, not
             // tidy: Better Auth refuses to link a Provider login to an
             // unverified row, and ADR-0015 requires that link to work.
             email_verified: true,
