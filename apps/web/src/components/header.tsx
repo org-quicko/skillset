@@ -19,10 +19,7 @@ import {
 import { useLogout } from "@/hooks/use-auth";
 import { LOGIN_PATH, skillPath } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
-
-function initials(user: User): string {
-  return `${user.first_name[0]}${user.last_name[0]}`.toUpperCase();
-}
+import { userDisplayName, userInitials } from "@/lib/utils";
 
 /**
  * The site's top navigation: the wordmark, the Publish a skill action (shown to every
@@ -59,18 +56,18 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
             <DropdownMenu>
               <DropdownMenuTrigger className="flex cursor-pointer items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
                 <Avatar className="size-[26px]">
-                  <AvatarFallback className="text-[11px]">{initials(user)}</AvatarFallback>
+                  <AvatarFallback className="text-[11px]">{userInitials(user)}</AvatarFallback>
                 </Avatar>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={14} className="w-64">
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="flex flex-col items-center gap-3 px-3 pt-3 pb-4 text-center font-normal">
                     <Avatar className="size-12">
-                      <AvatarFallback className="text-base">{initials(user)}</AvatarFallback>
+                      <AvatarFallback className="text-base">{userInitials(user)}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col gap-0.5">
                       <span className="text-sm font-medium text-foreground">
-                        {user.first_name} {user.last_name}
+                        {userDisplayName(user)}
                       </span>
                       <span className="text-xs text-muted-foreground">{user.email}</span>
                     </div>

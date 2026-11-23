@@ -1,4 +1,4 @@
-import { importedSource, type Publisher } from "@in-org-quicko/skillset-shared";
+import { importedSource } from "@in-org-quicko/skillset-shared";
 import { DownloadIcon, EllipsisIcon, ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
@@ -22,7 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDownloadSkillArtifact, useSkill, useSkillInstallTrend } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { formatDate, splitAllowedTools } from "@/lib/utils";
+import { formatDate, splitAllowedTools, userDisplayName, userInitials } from "@/lib/utils";
 
 /** The placeholder page shown while a Skill loads — mirrors the real two-column layout. */
 function SkillDetailSkeleton() {
@@ -47,19 +47,6 @@ function SkillDetailSkeleton() {
       </div>
     </div>
   );
-}
-
-/** A Publisher's display name, falling back to their email once the User row is gone (docs/data-model.md). */
-function publisherName(publisher: Publisher): string {
-  const full = [publisher.first_name, publisher.last_name].filter(Boolean).join(" ");
-  return full || publisher.email;
-}
-
-function publisherInitials(publisher: Publisher): string {
-  if (publisher.first_name || publisher.last_name) {
-    return `${publisher.first_name?.[0] ?? ""}${publisher.last_name?.[0] ?? ""}`.toUpperCase();
-  }
-  return publisher.email.slice(0, 2).toUpperCase();
 }
 
 function DetailRow({
@@ -326,10 +313,10 @@ export function SkillDetail({
               <div className="flex items-center gap-2">
                 <Avatar className="size-[26px]">
                   <AvatarFallback className="text-[11px]">
-                    {publisherInitials(data.published_by)}
+                    {userInitials(data.published_by)}
                   </AvatarFallback>
                 </Avatar>
-                <span>{publisherName(data.published_by)}</span>
+                <span>{userDisplayName(data.published_by)}</span>
               </div>
             </DetailRow>
             <DetailRow label="Published">{formatDate(data.published_at)}</DetailRow>

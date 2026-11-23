@@ -97,3 +97,68 @@ export function splitAllowedTools(value: string | null): string[] {
     .filter((tool) => tool.length > 0)
 }
 
+/**
+ * Calculates a 1-2 character uppercase initials string for a user or publisher avatar.
+ *
+ * @param user - User or publisher object with optional first_name, last_name, and email.
+ * @returns 1-2 character uppercase initials, falling back to email or empty string if no identifiers exist.
+ *
+ * @remarks
+ * Handles partial names, missing last names, multi-word first names, and email fallbacks cleanly,
+ * preventing accidental `undefined` string coercion (such as "SUNDEFINED").
+ *
+ * @example
+ * ```ts
+ * userInitials({ first_name: "Ada", last_name: "Lovelace" }) // -> "AL"
+ * userInitials({ first_name: "Superadmin", last_name: "" })  // -> "SU"
+ * userInitials({ first_name: "Sarah Connor" })               // -> "SC"
+ * userInitials({ email: "bot@example.com" })                 // -> "BO"
+ * ```
+ */
+export function userInitials(user: {
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+}): string {
+  const first = user.first_name?.trim() ?? ""
+  const last = user.last_name?.trim() ?? ""
+
+  if (first && last) {
+    return `${first[0]}${last[0]}`.toUpperCase()
+  }
+  if (first) {
+    const parts = first.split(/\s+/).filter(Boolean)
+    if (parts.length > 1) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    }
+    return first.slice(0, 2).toUpperCase()
+  }
+  if (last) {
+    return last.slice(0, 2).toUpperCase()
+  }
+  return (user.email?.trim() ?? "").slice(0, 2).toUpperCase()
+}
+
+/**
+ * Formats a user's display name from first and last names, falling back to email.
+ *
+ * @param user - User or publisher object with optional first_name, last_name, and email.
+ * @returns Combined full name or email address.
+ *
+ * @example
+ * ```ts
+ * userDisplayName({ first_name: "Ada", last_name: "Lovelace" }) // -> "Ada Lovelace"
+ * userDisplayName({ first_name: "Superadmin" })                 // -> "Superadmin"
+ * userDisplayName({ email: "bot@example.com" })                 // -> "bot@example.com"
+ * ```
+ */
+export function userDisplayName(user: {
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+}): string {
+  const full = [user.first_name?.trim(), user.last_name?.trim()].filter(Boolean).join(" ")
+  return full || user.email?.trim() || ""
+}
+
+
