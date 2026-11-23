@@ -1,6 +1,19 @@
-import { artifactMediaType, SKILL_FILE_NAME, splitFrontmatter, type ArtifactFile } from "@in-org-quicko/skillset-shared";
-import { ChevronDownIcon, CodeIcon, ExternalLinkIcon, EyeIcon, FileIcon, FolderIcon } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import {
+  artifactMediaType,
+  SKILL_FILE_NAME,
+  splitFrontmatter,
+  type ArtifactFile,
+} from "@in-org-quicko/skillset-shared";
+import {
+  ChevronDownIcon,
+  CodeIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  FileIcon,
+  FolderIcon,
+} from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Panel } from "@/components/panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,6 +21,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { artifactFileUrl, useArtifactFile, useArtifactFiles } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
+import { findArtifactFile, resolveArtifactPath } from "@/lib/artifact-links";
 import { renderSkillBody } from "@/lib/render-skill-body";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -85,6 +99,19 @@ function FileTree({
   // see what is there.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
+  useEffect(() => {
+    const slash = selected.lastIndexOf("/");
+    if (slash !== -1) {
+      const directory = selected.slice(0, slash);
+      setCollapsed((current) => {
+        if (!current.has(directory)) return current;
+        const next = new Set(current);
+        next.delete(directory);
+        return next;
+      });
+    }
+  }, [selected]);
+
   function toggle(directory: string) {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -110,7 +137,10 @@ function FileTree({
                 <FolderIcon className="size-3.5 shrink-0 opacity-70" />
                 <span className="truncate">{group.directory}</span>
                 <ChevronDownIcon
-                  className={cn("ml-auto size-3.5 shrink-0 opacity-60 transition-transform", isCollapsed && "-rotate-90")}
+                  className={cn(
+                    "ml-auto size-3.5 shrink-0 opacity-60 transition-transform",
+                    isCollapsed && "-rotate-90",
+                  )}
                 />
               </button>
             )}
@@ -149,7 +179,13 @@ const VIEW_CONTROLS = [
   { view: "code", label: "Code", Icon: CodeIcon },
 ] as const;
 
-function ViewToggle({ view, onChange }: { view: MarkdownView; onChange: (view: MarkdownView) => void }) {
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: MarkdownView;
+  onChange: (view: MarkdownView) => void;
+}) {
   return (
     <div className="flex items-center gap-0.5 rounded-md border p-0.5">
       {VIEW_CONTROLS.map(({ view: candidate, label, Icon }) => (
@@ -162,7 +198,9 @@ function ViewToggle({ view, onChange }: { view: MarkdownView; onChange: (view: M
               aria-label={label}
               className={cn(
                 "cursor-pointer rounded p-1 transition-colors",
-                view === candidate ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+                view === candidate
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               <Icon className="size-3.5" />
@@ -196,7 +234,19 @@ function ViewToggle({ view, onChange }: { view: MarkdownView; onChange: (view: M
  * The prose is sanitised by `renderSkillBody` — the markup is whoever
  * published the Skill's, not the reader's.
  */
-function TextFileViewer({ path, source, view }: { path: string; source: string; view: MarkdownView }) {
+function TextFileViewer({
+  path,
+  source,
+  view,
+  files,
+  onSelect,
+}: {
+  path: string;
+  source: string;
+  view: MarkdownView;
+  files?: readonly ArtifactFile[];
+  onSelect?: (path: string) => void;
+}) {
   const isPreview = isMarkdownPath(path) && view === "preview";
   const { frontmatter, body } = useMemo(() => splitFrontmatter(source), [source]);
   const html = useMemo(() => (isPreview ? renderSkillBody(body) : ""), [isPreview, body]);
@@ -206,10 +256,49 @@ function TextFileViewer({ path, source, view }: { path: string; source: string; 
   // rendered — and a file without any has nothing for the editor to hold.
   const showEditor = !isPreview || hasFrontmatter;
 
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    const anchor = (e.target as HTMLElement).closest("a");
+    if (!anchor) return;
+
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+
+    if (href.startsWith("#")) {
+      e.preventDefault();
+      const id = href.slice(1);
+      const target = document.getElementById(id) ?? document.getElementById(decodeURIComponent(id));
+      target?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) || href.startsWith("//")) {
+      return;
+    }
+
+    e.preventDefault();
+    const resolved = resolveArtifactPath(path, href);
+    if (!resolved) return;
+
+    if (files && onSelect) {
+      const match = findArtifactFile(files, resolved);
+      if (match) {
+        onSelect(match.path);
+        return;
+      }
+    }
+
+    toast.error(`File "${resolved}" not found in this skill.`);
+  }
+
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", isPreview && "overflow-y-auto")}>
       {showEditor && (
-        <div className={cn("flex flex-col", isPreview ? "shrink-0 border-b bg-muted/20" : "min-h-0 flex-1")}>
+        <div
+          className={cn(
+            "flex flex-col",
+            isPreview ? "shrink-0 border-b bg-muted/20" : "min-h-0 flex-1",
+          )}
+        >
           {isPreview && (
             <span className="px-4 pt-2.5 text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
               Frontmatter
@@ -233,6 +322,7 @@ function TextFileViewer({ path, source, view }: { path: string; source: string; 
       )}
       {isPreview && (
         <div
+          onClick={handleClick}
           className="px-6 py-5 text-sm leading-relaxed text-pretty [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:first:mt-0 [&_h2]:mt-5 [&_h2]:mb-1.5 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1 [&_h3]:font-semibold [&_hr]:my-5 [&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_li]:my-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-2.5 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:my-3 [&_table]:w-full [&_table]:text-left [&_td]:border-t [&_td]:py-1.5 [&_td]:pr-3 [&_th]:py-1.5 [&_th]:pr-3 [&_th]:font-medium [&_ul]:list-disc [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1"
           dangerouslySetInnerHTML={{ __html: html }}
         />
@@ -246,7 +336,19 @@ function TextFileViewer({ path, source, view }: { path: string; source: string; 
  * an image inline, a PDF in a frame, and for bytes nothing recognises, its
  * size and a way to fetch it.
  */
-function FileViewer({ id, file, view }: { id: string; file: ArtifactFile; view: MarkdownView }) {
+function FileViewer({
+  id,
+  file,
+  view,
+  files,
+  onSelect,
+}: {
+  id: string;
+  file: ArtifactFile;
+  view: MarkdownView;
+  files?: readonly ArtifactFile[];
+  onSelect?: (path: string) => void;
+}) {
   const media = artifactMediaType(file.path);
   const url = artifactFileUrl(id, file.path);
   const content = useArtifactFile(id, file.path);
@@ -266,7 +368,9 @@ function FileViewer({ id, file, view }: { id: string; file: ArtifactFile; view: 
   if (media.kind === "pdf") {
     // A frame, not an `<object>`: the browser's own PDF viewer already has
     // paging, zoom and search, and none of it needs anything from this page.
-    return <iframe src={url} title={file.path} className="min-h-0 w-full flex-1 border-0 bg-muted/40" />;
+    return (
+      <iframe src={url} title={file.path} className="min-h-0 w-full flex-1 border-0 bg-muted/40" />
+    );
   }
 
   if (media.kind === "binary") {
@@ -303,7 +407,15 @@ function FileViewer({ id, file, view }: { id: string; file: ArtifactFile; view: 
     );
   }
 
-  return <TextFileViewer path={file.path} source={content.data} view={view} />;
+  return (
+    <TextFileViewer
+      path={file.path}
+      source={content.data}
+      view={view}
+      files={files}
+      onSelect={onSelect}
+    />
+  );
 }
 
 /** Whether a file has a rendered reading as well as a source one. */
@@ -370,7 +482,12 @@ export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
 
   return (
     <Panel title={`Contents (${files.length})`} className="min-h-0 flex-1" contentClassName="p-0">
-      <div className={cn("grid grid-rows-[minmax(0,9rem)_minmax(0,1fr)] sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] sm:grid-rows-1", PANEL_HEIGHT)}>
+      <div
+        className={cn(
+          "grid grid-rows-[minmax(0,9rem)_minmax(0,1fr)] sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] sm:grid-rows-1",
+          PANEL_HEIGHT,
+        )}
+      >
         <div className="min-h-0 border-b bg-muted/20 sm:border-r sm:border-b-0">
           <FileTree files={files} selected={file.path} onSelect={setSelected} />
         </div>
@@ -399,7 +516,7 @@ export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
               </Tooltip>
             </div>
           </div>
-          <FileViewer id={id} file={file} view={view} />
+          <FileViewer id={id} file={file} view={view} files={files} onSelect={setSelected} />
         </div>
       </div>
     </Panel>
