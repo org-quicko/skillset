@@ -91,7 +91,10 @@ function NamespaceValue({ namespace }: { namespace: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} className="block truncate rounded-sm font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+        <span
+          tabIndex={0}
+          className="block truncate rounded-sm font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
           {namespace}
         </span>
       </TooltipTrigger>
@@ -198,7 +201,8 @@ export function SkillDetail({
   const download = useDownloadSkillArtifact();
 
   if (skill.isPending) return <SkillDetailSkeleton />;
-  if (skill.isError) return <p className="text-sm text-destructive">{apiErrorMessage(skill.error)}</p>;
+  if (skill.isError)
+    return <p className="text-sm text-destructive">{apiErrorMessage(skill.error)}</p>;
 
   const data = skill.data;
   // Null for a Skill published straight to this Registry, which is what hides
@@ -268,7 +272,10 @@ export function SkillDetail({
         </Reveal>
       )}
 
-      <Reveal delayMs={150} className="mt-2 grid min-h-0 flex-1 gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <Reveal
+        delayMs={150}
+        className="mt-2 grid min-h-0 flex-1 gap-7 lg:grid-cols-[minmax(0,1fr)_280px]"
+      >
         <div className="flex min-h-0 min-w-0 flex-col gap-4">
           {/* Qualified only for a Skill that came from elsewhere: one
               published here is what a bare name already reaches. */}
@@ -279,7 +286,9 @@ export function SkillDetail({
 
         <div className="flex flex-col gap-4 overflow-y-auto">
           <Panel title="Installs">
-            <span className="text-[44px] leading-none font-semibold">{data.installs.toLocaleString()}</span>
+            <span className="text-[44px] leading-none font-semibold">
+              {data.installs.toLocaleString()}
+            </span>
             {trend.data && trend.data.points.length > 0 && (
               <div className="mt-1">
                 <InstallTrendChart points={trend.data.points} />
@@ -294,7 +303,9 @@ export function SkillDetail({
             <DetailRow label="Publisher">
               <div className="flex items-center gap-2">
                 <Avatar className="size-[26px]">
-                  <AvatarFallback className="text-[11px]">{publisherInitials(data.published_by)}</AvatarFallback>
+                  <AvatarFallback className="text-[11px]">
+                    {publisherInitials(data.published_by)}
+                  </AvatarFallback>
                 </Avatar>
                 <span>{publisherName(data.published_by)}</span>
               </div>
@@ -337,7 +348,6 @@ export function SkillDetail({
           id={data.id}
           name={data.name}
           tags={data.tags}
-          canDeleteTags={canDelete}
           open={editTagsOpen}
           onOpenChange={setEditTagsOpen}
         />

@@ -1,11 +1,40 @@
 import { validateTagName, type Tag } from "@in-org-quicko/skillset-shared";
-import { useEffect, useState } from "react";
-import { FormDialog, FormDialogBody, FormDialogFooter, FormDialogHeader, FormField } from "@/components/ui/dialog";
+import { useState } from "react";
+import {
+  FormDialog,
+  FormDialogBody,
+  FormDialogFooter,
+  FormDialogHeader,
+  FormField,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useRenameTag } from "@/hooks/use-tags";
 import { apiErrorMessage } from "@/lib/api";
 
-/** Renames a Tag in place in the catalog — cascades to every Skill carrying it. */
+/**
+ * Dialog for renaming an existing Tag across the catalog.
+ *
+ * @param props - Dialog properties including current Tag and visibility handlers.
+ * @param props.tag - The Tag to rename, or null when closed.
+ * @param props.open - Whether the dialog is open.
+ * @param props.onOpenChange - Callback when dialog open state changes.
+ * @param props.onRenamed - Optional callback invoked with the new name upon successful rename.
+ *
+ * @remarks
+ * Renaming a tag is an Admin action that updates the tag in the shared catalog
+ * and cascades to every skill carrying it. The dialog body mounts only while open
+ * so state is fresh each session.
+ *
+ * @example
+ * ```tsx
+ * <EditTagDialog
+ *   tag={selectedTag}
+ *   open={isOpen}
+ *   onOpenChange={setIsOpen}
+ *   onRenamed={(newName) => console.log(newName)}
+ * />
+ * ```
+ */
 export function EditTagDialog({
   tag,
   open,
@@ -17,30 +46,35 @@ export function EditTagDialog({
   onOpenChange: (open: boolean) => void;
   onRenamed?: (newName: string) => void;
 }) {
-  const [name, setName] = useState("");
+  if (!tag) return null;
+
+  return (
+    <FormDialog open={open} onOpenChange={onOpenChange}>
+      <FormDialogHeader
+        title={`Edit tag "${tag.name}"`}
+        description="Renaming this tag updates it in the catalog and across every skill carrying it."
+      />
+      {open && (
+        <EditTagDialogBody tag={tag} onClose={() => onOpenChange(false)} onRenamed={onRenamed} />
+      )}
+    </FormDialog>
+  );
+}
+
+function EditTagDialogBody({
+  tag,
+  onClose,
+  onRenamed,
+}: {
+  tag: Tag;
+  onClose: () => void;
+  onRenamed?: (newName: string) => void;
+}) {
+  const [name, setName] = useState(tag.name);
   const [error, setError] = useState<string | null>(null);
   const renameTag = useRenameTag();
 
-  useEffect(() => {
-    if (tag && open) {
-      setName(tag.name);
-      setError(null);
-      renameTag.reset();
-    }
-  }, [tag, open, renameTag]);
-
-  function handleOpenChange(next: boolean) {
-    if (!next) {
-      renameTag.reset();
-      setError(null);
-    }
-    onOpenChange(next);
-  }
-
-  if (!tag) return null;
-
   function handleSubmit() {
-    if (!tag) return;
     let normalized = "";
     try {
       normalized = validateTagName(name);
@@ -49,8 +83,8 @@ export function EditTagDialog({
       return;
     }
 
-    if (normalized === tag?.name) {
-      handleOpenChange(false);
+    if (normalized === tag.name) {
+      onClose();
       return;
     }
 
@@ -58,7 +92,7 @@ export function EditTagDialog({
       { id: tag.id, name: normalized },
       {
         onSuccess: () => {
-          handleOpenChange(false);
+          onClose();
           onRenamed?.(normalized);
         },
       },
@@ -68,12 +102,7 @@ export function EditTagDialog({
   const isUnchanged = name.trim().toLowerCase() === tag.name;
 
   return (
-    <FormDialog open={open} onOpenChange={handleOpenChange}>
-      <FormDialogHeader
-        title={`Edit tag "${tag.name}"`}
-        description="Renaming this tag updates it in the catalog and across every skill carrying it."
-      />
-
+    <>
       <FormDialogBody>
         <FormField
           htmlFor="edit_tag_name"
@@ -95,6 +124,7 @@ export function EditTagDialog({
             }}
             disabled={renameTag.isPending}
             placeholder="eg. frontend"
+            autoFocus
           />
         </FormField>
 
@@ -104,7 +134,7 @@ export function EditTagDialog({
       </FormDialogBody>
 
       <FormDialogFooter
-        onCancel={() => handleOpenChange(false)}
+        onCancel={onClose}
         cancelDisabled={renameTag.isPending}
         submit={{
           label: "Save Changes",
@@ -114,6 +144,6 @@ export function EditTagDialog({
           onClick: handleSubmit,
         }}
       />
-    </FormDialog>
+    </>
   );
 }

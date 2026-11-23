@@ -1,10 +1,15 @@
 import { validateTagName, type Tag } from "@in-org-quicko/skillset-shared";
-import { Trash2Icon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { DeleteTagDialog } from "@/components/delete-tag-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSetSkillTags, useTags } from "@/hooks/use-tags";
@@ -31,25 +36,34 @@ interface DraftTag {
  * mount/unmount, not an effect: `TagsEditorBody`'s `draftTags` is initialised
  * once, at mount, straight from the `tags` prop already in hand.
  *
- * @param id - The Skill's id.
- * @param name - The Skill's name, shown in the dialog description.
- * @param tags - The Skill's current Tags, seeded into the draft each time the dialog opens.
- * @param canDeleteTags - Whether the user can delete a Tag from the catalog (admin or above).
- * @param open - Whether the dialog is open.
- * @param onOpenChange - Called when the dialog should open or close.
+ * @param props - Dialog properties including Skill identification and visibility handlers.
+ * @param props.id - The Skill's id.
+ * @param props.name - The Skill's name, shown in the dialog description.
+ * @param props.tags - The Skill's current Tags, seeded into the draft each time the dialog opens.
+ * @param props.open - Whether the dialog is open.
+ * @param props.onOpenChange - Called when the dialog should open or close.
+ *
+ * @example
+ * ```tsx
+ * <EditTagsDialog
+ *   id={skill.id}
+ *   name={skill.name}
+ *   tags={skill.tags}
+ *   open={isOpen}
+ *   onOpenChange={setIsOpen}
+ * />
+ * ```
  */
 export function EditTagsDialog({
   id,
   name,
   tags,
-  canDeleteTags = false,
   open,
   onOpenChange,
 }: {
   id: string;
   name: string;
   tags: Tag[];
-  canDeleteTags?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -58,30 +72,23 @@ export function EditTagsDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit Tags</DialogTitle>
-          <DialogDescription>Tags help with browsing and filtering — {name} can carry as many as you like.</DialogDescription>
+          <DialogDescription>
+            Tags help with browsing and filtering — {name} can carry as many as you like.
+          </DialogDescription>
         </DialogHeader>
-        {open && <TagsEditorBody id={id} name={name} tags={tags} canDeleteTags={canDeleteTags} />}
+        {open && <TagsEditorBody id={id} name={name} tags={tags} />}
       </DialogContent>
     </Dialog>
   );
 }
 
 /** Owns every piece of local editing state — split out so it only exists while the dialog is open (see `EditTagsDialog`'s remarks). */
-function TagsEditorBody({
-  id,
-  name,
-  tags,
-  canDeleteTags = false,
-}: {
-  id: string;
-  name: string;
-  tags: Tag[];
-  canDeleteTags?: boolean;
-}) {
-  const [draftTags, setDraftTags] = useState<DraftTag[]>(() => tags.map((tag) => ({ id: tag.id, name: tag.name })));
+function TagsEditorBody({ id, name, tags }: { id: string; name: string; tags: Tag[] }) {
+  const [draftTags, setDraftTags] = useState<DraftTag[]>(() =>
+    tags.map((tag) => ({ id: tag.id, name: tag.name })),
+  );
   const [query, setQuery] = useState("");
   const [queryError, setQueryError] = useState<string | null>(null);
-  const [tagToDelete, setTagToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const catalog = useTags();
   const setSkillTags = useSetSkillTags();
@@ -90,7 +97,9 @@ function TagsEditorBody({
     const trimmed = query.trim().toLowerCase();
     if (!trimmed || !catalog.data) return [];
     const draftNames = new Set(draftTags.map((tag) => tag.name));
-    return catalog.data.items.filter((tag) => tag.name.includes(trimmed) && !draftNames.has(tag.name)).slice(0, 8);
+    return catalog.data.items
+      .filter((tag) => tag.name.includes(trimmed) && !draftNames.has(tag.name))
+      .slice(0, 8);
   }, [query, catalog.data, draftTags]);
 
   /** Applies a new draft list: updates local state right away and fires the full-replace request in the background. */
@@ -128,112 +137,66 @@ function TagsEditorBody({
   }
 
   return (
-    <>
-      <div className="flex flex-col gap-3">
-        <Label htmlFor="tag-input">Add a tag</Label>
-        <div className="relative">
-          <Command shouldFilter={false} className="contents">
-            <Input
-              id="tag-input"
-              value={query}
-              disabled={setSkillTags.isPending}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setQueryError(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && suggestions.length === 0) {
-                  event.preventDefault();
-                  handleQuerySubmit();
-                }
-              }}
-              placeholder="Type a name and press Enter…"
-              autoComplete="off"
-            />
-            {suggestions.length > 0 && (
-              <CommandList className="absolute z-10 mt-1 w-full rounded-lg border border-input bg-popover shadow-md">
-                <CommandGroup>
-                  {suggestions.map((tag) => (
-                    <CommandItem key={tag.id} value={tag.name} onSelect={() => addTag(tag)} className="group flex items-center justify-between">
-                      <span>{tag.name}</span>
-                      {canDeleteTags && (
-                        <button
-                          type="button"
-                          aria-label={`Delete ${tag.name} from catalog`}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setTagToDelete(tag);
-                          }}
-                          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-60 transition-opacity hover:bg-destructive/10 hover:text-destructive hover:opacity-100"
-                        >
-                          <Trash2Icon className="size-3.5" />
-                        </button>
-                      )}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </CommandList>
-            )}
-          </Command>
-        </div>
-        {queryError && <p className="text-sm text-destructive">{queryError}</p>}
-
-        {draftTags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {draftTags.map((tag) => (
-              <Badge key={tag.name} variant="secondary">
-                {tag.name}
-                {canDeleteTags && tag.id && (
-                  <button
-                    type="button"
-                    data-icon="inline-end"
-                    disabled={setSkillTags.isPending}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setTagToDelete({ id: tag.id!, name: tag.name });
-                    }}
-                    aria-label={`Delete ${tag.name} from catalog`}
-                    title="Delete tag from catalog"
-                    className="flex cursor-pointer rounded-sm p-0.5 text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96] disabled:cursor-not-allowed"
-                  >
-                    <Trash2Icon className="size-3" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  data-icon="inline-end"
-                  disabled={setSkillTags.isPending}
-                  onClick={() => removeTag(tag.name)}
-                  aria-label={`Remove ${tag.name} from skill`}
-                  title="Remove from skill"
-                  className="flex cursor-pointer rounded-sm p-0.5 transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96] disabled:cursor-not-allowed"
-                >
-                  <XIcon className="size-3" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        )}
+    <div className="flex flex-col gap-3">
+      <Label htmlFor="tag-input">Add a tag</Label>
+      <div className="relative">
+        <Command shouldFilter={false} className="contents">
+          <Input
+            id="tag-input"
+            value={query}
+            disabled={setSkillTags.isPending}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setQueryError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && suggestions.length === 0) {
+                event.preventDefault();
+                handleQuerySubmit();
+              }
+            }}
+            placeholder="Type a name and press Enter…"
+            autoComplete="off"
+          />
+          {suggestions.length > 0 && (
+            <CommandList className="absolute z-10 mt-1 w-full rounded-lg border border-input bg-popover shadow-md">
+              <CommandGroup>
+                {suggestions.map((tag) => (
+                  <CommandItem key={tag.id} value={tag.name} onSelect={() => addTag(tag)}>
+                    <span>{tag.name}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          )}
+        </Command>
       </div>
+      {queryError && <p className="text-sm text-destructive">{queryError}</p>}
 
-      {setSkillTags.isError && <p className="text-sm text-destructive">{apiErrorMessage(setSkillTags.error)}</p>}
-
-      {tagToDelete && (
-        <DeleteTagDialog
-          tag={tagToDelete}
-          open
-          onOpenChange={(next) => {
-            if (!next) setTagToDelete(null);
-          }}
-          onDeleted={() => {
-            if (tagToDelete) {
-              setDraftTags((current) => current.filter((t) => t.name !== tagToDelete.name));
-            }
-          }}
-        />
+      {draftTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {draftTags.map((tag) => (
+            <Badge key={tag.name} variant="secondary">
+              {tag.name}
+              <button
+                type="button"
+                data-icon="inline-end"
+                disabled={setSkillTags.isPending}
+                onClick={() => removeTag(tag.name)}
+                aria-label={`Remove ${tag.name} from skill`}
+                title="Remove from skill"
+                className="flex cursor-pointer rounded-sm p-0.5 transition-[color,background-color,scale] duration-150 ease-out outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.96] disabled:cursor-not-allowed"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
       )}
-    </>
+
+      {setSkillTags.isError && (
+        <p className="text-sm text-destructive">{apiErrorMessage(setSkillTags.error)}</p>
+      )}
+    </div>
   );
 }
