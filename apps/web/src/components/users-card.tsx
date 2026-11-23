@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { useUpdateUserRole, useUsers } from "@/hooks/use-users";
 import { apiErrorMessage } from "@/lib/api";
+import { userDisplayName, userInitials } from "@/lib/utils";
 
 // Fixed column widths (with `table-fixed`) so a long name or email
 // truncates within the row instead of stretching the table past
@@ -63,10 +64,6 @@ function UsersTableSkeleton() {
       </Table>
     </Panel>
   );
-}
-
-function initials(user: User): string {
-  return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
 }
 
 /**
@@ -132,10 +129,10 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                     <TableCell className="font-medium">
                       <div className="flex min-w-0 items-center gap-2">
                         <Avatar className="size-[26px] shrink-0">
-                          <AvatarFallback className="text-[11px]">{initials(user)}</AvatarFallback>
+                          <AvatarFallback className="text-[11px]">{userInitials(user)}</AvatarFallback>
                         </Avatar>
                         <span className="min-w-0 flex-1 truncate">
-                          {user.first_name} {user.last_name}
+                          {userDisplayName(user)}
                           {user.id === currentUserId && (
                             <span className="font-normal text-muted-foreground"> (you)</span>
                           )}
@@ -200,7 +197,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
       {removeTarget && (
         <RemoveUserDialog
           userId={removeTarget.id}
-          name={`${removeTarget.first_name} ${removeTarget.last_name}`}
+          name={userDisplayName(removeTarget)}
           open
           onOpenChange={(next) => {
             if (!next) setRemoveTarget(null);
