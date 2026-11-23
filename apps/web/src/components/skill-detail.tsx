@@ -62,7 +62,24 @@ function publisherInitials(publisher: Publisher): string {
   return publisher.email.slice(0, 2).toUpperCase();
 }
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailRow({
+  label,
+  children,
+  stacked = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  stacked?: boolean;
+}) {
+  if (stacked) {
+    return (
+      <div className="flex flex-col gap-2 border-b px-5 py-3 last:border-b-0">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <div className="min-w-0 text-sm">{children}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-between gap-3 border-b px-5 py-3 last:border-b-0">
       <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
@@ -162,10 +179,15 @@ function ToolAccess({ allowedTools }: { allowedTools: string | null }) {
   }
 
   return (
-    <div className="flex flex-wrap justify-end gap-1">
+    <div className="flex flex-wrap gap-1.5">
       {tools.map((tool) => (
-        <Badge key={tool} variant="secondary" className="font-mono text-[11px]">
-          {tool}
+        <Badge
+          key={tool}
+          variant="secondary"
+          title={tool}
+          className="max-w-full shrink font-mono text-[11px]"
+        >
+          <span className="truncate">{tool}</span>
         </Badge>
       ))}
     </div>
@@ -327,7 +349,12 @@ export function SkillDetail({
                 <SourceLink source={imported} />
               </DetailRow>
             )}
-            <DetailRow label="Tool access">
+            <DetailRow
+              label="Tool access"
+              stacked={Boolean(
+                data.allowed_tools && splitAllowedTools(data.allowed_tools).length > 0,
+              )}
+            >
               <ToolAccess allowedTools={data.allowed_tools} />
             </DetailRow>
           </Panel>
