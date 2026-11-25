@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildPluginBundle,
+  PluginComponentsSchema,
   PluginValidationError,
   validatePluginAgents,
   validatePluginFiles,
@@ -123,6 +124,32 @@ describe("buildPluginBundle's components", () => {
       { name: "github", description: "npx -y gh-mcp", path: ".mcp.json" },
       { name: "docs", description: "https://docs.example/mcp", path: ".mcp.json" },
     ]);
+  });
+
+  it("lists the mods hooks.json names under modules, beside its hook events", () => {
+    const bundle = buildPluginBundle([
+      MANIFEST,
+      file("hooks/hooks.json", JSON.stringify({ hooks: { Stop: [] }, modules: ["./register.tsx"] })),
+      file("hooks/register.tsx", "export const register = () => {};"),
+    ]);
+    expect(bundle.request.components.hooks.map((h) => h.name)).toEqual(["Stop"]);
+    expect(bundle.request.components.mods).toEqual([
+      { name: "register.tsx", description: null, path: "hooks/register.tsx" },
+    ]);
+  });
+
+  it("resolves a mod's module from the hooks folder, and leaves out one the plugin does not hold", () => {
+    const bundle = buildPluginBundle([
+      MANIFEST,
+      file("hooks/hooks.json", JSON.stringify({ modules: ["../src/mod.ts", "./missing.ts", "../../outside.ts", 7] })),
+      file("src/mod.ts", "export const register = () => {};"),
+    ]);
+    expect(bundle.request.components.mods.map((m) => m.path)).toEqual(["src/mod.ts"]);
+  });
+
+  it("reads components recorded before mods existed as having none", () => {
+    const parsed = PluginComponentsSchema.parse({ skills: [], commands: [], agents: [], hooks: [], mcp_servers: [] });
+    expect(parsed.mods).toEqual([]);
   });
 
   it("lists a component whose frontmatter does not parse by its file name, without failing the publish", () => {

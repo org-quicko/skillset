@@ -892,7 +892,8 @@ export class ResourcesService {
       version: payload.version,
       license: payload.license,
       homepage: payload.homepage,
-      components: payload.components ?? null,
+      // `mods` is absent from a payload stored before the Registry read mods.
+      components: payload.components ? { ...payload.components, mods: payload.components.mods ?? [] } : null,
       source: this.resolveSource(resource.source),
       published_at: resource.published_at,
       updated_at: resource.updated_at,

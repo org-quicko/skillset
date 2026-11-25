@@ -35,7 +35,7 @@ export function Panel({
   return (
     <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card", className)}>
       {(title || action) && (
-        <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-5 py-2.5">
           {title && (
             <span className={cn("text-xs tracking-[0.08em] text-muted-foreground", uppercase && "uppercase")}>
               {title}

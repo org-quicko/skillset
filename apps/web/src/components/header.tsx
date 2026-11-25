@@ -120,8 +120,10 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
       <div className="relative mx-auto flex h-[54px] w-full max-w-[1200px] items-center justify-between px-7">
         <WordmarkButton />
 
-        {/* Centred on the bar, not between its neighbours, as the Top Nav design has it. */}
-        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-[22px]">
+        {/* Centred on the bar, not between its neighbours, as the Top Nav design
+            has it. Below `md` the labels do not fit beside the wordmark, so the
+            links shrink to their icons and sit between their neighbours. */}
+        <nav className="flex items-center gap-0.5 md:absolute md:left-1/2 md:-translate-x-1/2 md:gap-[22px]">
           {SECTION_LIST.map((section) => {
             const active = current?.kind === section.kind;
             const Icon = SECTION_ICONS[section.kind];
@@ -136,18 +138,18 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
                   navigate(section.path);
                 }}
                 className={cn(
-                  "group flex h-8 items-center gap-[7px] rounded-full px-3 text-sm leading-4 font-medium whitespace-nowrap transition-colors outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "group flex h-8 items-center gap-[7px] rounded-full px-2 text-sm md:px-3 leading-4 font-medium whitespace-nowrap transition-colors outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50",
                   active ? "text-foreground" : "text-muted-foreground",
                 )}
               >
                 <Icon />
-                {section.title}
+                <span className="sr-only md:not-sr-only">{section.title}</span>
               </a>
             );
           })}
         </nav>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           {!user && (
             <Button variant="outline" onClick={() => navigate(LOGIN_PATH)}>
               Sign in

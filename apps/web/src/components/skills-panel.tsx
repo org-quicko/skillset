@@ -13,6 +13,7 @@ import type { SkillDirectoryFilters } from "@/hooks/use-skills";
 import { namespaceFromSearch, skillPath } from "@/lib/routes";
 import { sectionForPath } from "@/lib/sections";
 import { useRouter } from "@/lib/use-router";
+import { cn } from "@/lib/utils";
 
 // `sort_by` has no single default — it is `relevance` while a search term is
 // active and `updated_at` otherwise, which is the rule the API applies to the
@@ -85,7 +86,13 @@ export function SkillsPanel({ role }: { role: Role | null }) {
   if (pathname.startsWith(section.detailPrefix)) {
     const name = decodeURIComponent(pathname.slice(section.detailPrefix.length));
     return (
-      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1200px] flex-col px-7 pt-6 pb-10">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[1200px] flex-col px-7 pt-6 pb-10",
+          // Matches SkillDetail: only a Skill's page fills the viewport, and only at `lg`.
+          section.kind === "skill" && "lg:h-full lg:min-h-0",
+        )}
+      >
         <SkillDetail
           name={name}
           // Undefined for a bare `/skills/<name>`, which the Registry resolves

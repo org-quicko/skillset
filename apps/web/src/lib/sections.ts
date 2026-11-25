@@ -8,6 +8,11 @@ export interface Section {
   /** Lower-case, for breadcrumbs and empty states. */
   noun: string;
   nounPlural: string;
+  /**
+   * What adding one is called. An MCP server is "listed": the Registry only
+   * points at a package or endpoint that lives elsewhere, it stores no files.
+   */
+  publishVerb: "Publish" | "List";
   description: string;
   /** Where the section's list lives. */
   path: string;
@@ -21,6 +26,7 @@ export const SECTIONS: Record<SectionKind, Section> = {
     title: "Skills",
     noun: "skill",
     nounPlural: "skills",
+    publishVerb: "Publish",
     description: "Browse and install skills for research, coding, design, automation, and more.",
     path: "/",
     detailPrefix: "/skills/",
@@ -30,6 +36,7 @@ export const SECTIONS: Record<SectionKind, Section> = {
     title: "MCP Servers",
     noun: "MCP server",
     nounPlural: "MCP servers",
+    publishVerb: "List",
     description: "Connect your agents to tools and data through Model Context Protocol servers.",
     path: "/mcp-servers",
     detailPrefix: "/mcp-servers/",
@@ -39,6 +46,7 @@ export const SECTIONS: Record<SectionKind, Section> = {
     title: "Plugins",
     noun: "plugin",
     nounPlural: "plugins",
+    publishVerb: "Publish",
     description: "Bundles of skills, commands, and MCP servers you install in one step.",
     path: "/plugins",
     detailPrefix: "/plugins/",
@@ -56,8 +64,7 @@ export const SECTION_LIST: readonly Section[] = [SECTIONS.skill, SECTIONS.mcp, S
 export function sectionForPath(pathname: string): Section {
   return (
     SECTION_LIST.find(
-      (section) =>
-        section.path !== "/" && (pathname === section.path || pathname.startsWith(section.detailPrefix)),
+      (section) => section.path !== "/" && (pathname === section.path || pathname.startsWith(section.detailPrefix)),
     ) ?? SECTIONS.skill
   );
 }

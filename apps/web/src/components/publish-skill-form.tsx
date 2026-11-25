@@ -12,6 +12,7 @@ import { connectHref, useConnections, useRepositories } from "@/hooks/use-connec
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FormDialogBody, FormDialogFooter } from "@/components/ui/dialog";
 import {
   Command,
   CommandEmpty,
@@ -24,7 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PluginFolderUpload } from "@/components/publish-plugin-form";
+import { PluginFolderUpload, type StagedPlugin } from "@/components/publish-plugin-form";
 import { SkillUploadError, usePublishPlugin, usePublishSkill } from "@/hooks/use-skills";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -359,15 +360,29 @@ const NOUNS: Record<SourceKind, { one: string; many: string }> = {
  * discovery walk looks for (a `SKILL.md`, or an agent manifest) and which
  * publish runs. The upload tab is the kind's own.
  *
+ * Renders a {@link FormDialog}'s body and footer, so it goes straight inside
+ * one, after its header. Only a staged plugin folder has a footer: a dropped
+ * Skill publishes at once, and an import publishes from its own list.
+ *
  * @param kind - What to publish. Defaults to Skills.
  * @param onPublished - Called with the stored name and Namespace when exactly one was published.
+ * @param onCancel - Called when the footer's Cancel is pressed.
+ * @example
+ * ```tsx
+ * <FormDialog open={open} onOpenChange={setOpen}>
+ *   <FormDialogHeader title="Publish a plugin" />
+ *   <PublishSkillForm kind="plugin" onPublished={goTo} onCancel={() => setOpen(false)} />
+ * </FormDialog>
+ * ```
  */
 export function PublishSkillForm({
   kind = "skill",
   onPublished,
+  onCancel,
 }: {
   kind?: SourceKind;
   onPublished: (name: string, namespace: string) => void;
+  onCancel: () => void;
 }) {
   const noun = NOUNS[kind];
   const [isDragging, setIsDragging] = useState(false);
@@ -383,6 +398,10 @@ export function PublishSkillForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const publish = usePublishSkill();
   const publishPlugin = usePublishPlugin();
+  // Its own mutation, so a GitHub import's failure never shows under a staged folder.
+  const publishStaged = usePublishPlugin();
+  const [tab, setTab] = useState("upload");
+  const [stagedPlugin, setStagedPlugin] = useState<StagedPlugin>();
   // One of the two hooks, chosen by kind; both take the same input and answer with a name and Namespace.
   const publishAsync = (input: { files: SkillFile[]; source: string }) =>
     kind === "plugin" ? publishPlugin.mutateAsync(input) : publish.mutateAsync(input);
@@ -400,7 +419,11 @@ export function PublishSkillForm({
   const manageAccessUrl = (provider: string) =>
     connections.data?.connectable.find((entry) => entry.provider === provider)?.manage_access_url ?? null;
   const isBusy =
-    publish.isPending || publishPlugin.isPending || step.kind === "reading" || step.kind === "publishing";
+    publish.isPending ||
+    publishPlugin.isPending ||
+    publishStaged.isPending ||
+    step.kind === "reading" ||
+    step.kind === "publishing";
 
   function handleFiles(files: SkillFile[]) {
     setReadError(null);
@@ -531,344 +554,377 @@ export function PublishSkillForm({
     }
   }
 
-  return (
-    <Tabs defaultValue="upload">
-      <TabsList className="grid w-full grid-cols-2">
-        <TabsTrigger value="upload" disabled={isBusy}>
-          Drag and drop
-        </TabsTrigger>
-        <TabsTrigger value="github" disabled={isBusy}>
-          GitHub
-        </TabsTrigger>
-      </TabsList>
+  function stagePlugin(staged: StagedPlugin | undefined) {
+    publishStaged.reset();
+    setStagedPlugin(staged);
+  }
 
-      <TabsContent value="upload" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
-        {kind === "plugin" ? (
-          <PluginFolderUpload onPublished={onPublished} />
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled={isBusy}
-              onDragOver={(event) => {
-                event.preventDefault();
-                if (!isDragging) setIsDragging(true);
-              }}
-              onDragLeave={(event) => {
-                // `dragleave` fires when the pointer crosses onto a child element
-                // too, not just when it leaves the drop zone entirely — only
-                // clear the highlight once it's genuinely outside.
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
-              }}
-              onDrop={handleDrop}
-              // Dropping is read via `webkitGetAsEntry` and accepts a folder or a
-              // lone SKILL.md either way (see `readDroppedFiles`). Clicking opens
-              // a native dialog, which can only ever be in one mode or the
-              // other — `webkitdirectory` below picks folder-picking mode, so a
-              // single markdown file has to be dragged in instead.
-              onClick={() => fileInputRef.current?.click()}
-              className={cn(
-                "flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
-                isDragging ? "border-primary bg-accent" : "border-border",
-                isBusy ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/50",
-              )}
-            >
-              <UploadIcon className="size-5 text-muted-foreground" />
-              <p className="text-sm text-pretty text-muted-foreground">
-                Drag and drop a Skill&apos;s folder or a SKILL.md file here, or{" "}
-                <span className="text-foreground underline underline-offset-2">browse for a folder</span>
-              </p>
-            </button>
-            {/* Kept outside the button — HTML doesn't allow interactive content
+  return (
+    <>
+      <FormDialogBody>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="upload" disabled={isBusy}>
+              Drag and drop
+            </TabsTrigger>
+            <TabsTrigger value="github" disabled={isBusy}>
+              GitHub
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="upload" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
+            {kind === "plugin" ? (
+              <>
+                <PluginFolderUpload staged={stagedPlugin} onStage={stagePlugin} disabled={publishStaged.isPending} />
+                {publishStaged.isError && (
+                  <p className="text-sm text-pretty text-destructive">{apiErrorMessage(publishStaged.error)}</p>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (!isDragging) setIsDragging(true);
+                  }}
+                  onDragLeave={(event) => {
+                    // `dragleave` fires when the pointer crosses onto a child element
+                    // too, not just when it leaves the drop zone entirely — only
+                    // clear the highlight once it's genuinely outside.
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
+                  }}
+                  onDrop={handleDrop}
+                  // Dropping is read via `webkitGetAsEntry` and accepts a folder or a
+                  // lone SKILL.md either way (see `readDroppedFiles`). Clicking opens
+                  // a native dialog, which can only ever be in one mode or the
+                  // other — `webkitdirectory` below picks folder-picking mode, so a
+                  // single markdown file has to be dragged in instead.
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    "flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
+                    isDragging ? "border-primary bg-accent" : "border-border",
+                    isBusy ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/50",
+                  )}
+                >
+                  <UploadIcon className="size-5 text-muted-foreground" />
+                  <p className="text-sm text-pretty text-muted-foreground">
+                    Drag and drop a Skill&apos;s folder or a SKILL.md file here, or{" "}
+                    <span className="text-foreground underline underline-offset-2">browse for a folder</span>
+                  </p>
+                </button>
+                {/* Kept outside the button — HTML doesn't allow interactive content
                 nested inside one — but still hidden and driven entirely by
                 `fileInputRef`, so it needs no layout of its own. */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handlePicked}
-              // Nonstandard but universally supported attribute for picking a
-              // folder from the file dialog — not in React's JSX typings.
-              {...{ webkitdirectory: "true", directory: "true" }}
-            />
-            <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-              <li>A folder must include a SKILL.md file</li>
-              <li>A markdown file must have its skill name and description in YAML frontmatter</li>
-            </ul>
-            {readError && <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />}
-            {/* Only this tab publishes through `publish.mutate` directly. Every
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handlePicked}
+                  // Nonstandard but universally supported attribute for picking a
+                  // folder from the file dialog — not in React's JSX typings.
+                  {...{ webkitdirectory: "true", directory: "true" }}
+                />
+                <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                  <li>A folder must include a SKILL.md file</li>
+                  <li>A markdown file must have its skill name and description in YAML frontmatter</li>
+                </ul>
+                {readError && <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />}
+                {/* Only this tab publishes through `publish.mutate` directly. Every
                 GitHub failure lands in an `ImportOutcome` instead, so the two
                 can't report the same error twice. */}
-            {publish.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
-            {publish.isError && <p className="text-sm text-pretty text-destructive">{describeFailure(publish.error)}</p>}
-          </>
-        )}
-      </TabsContent>
+                {publish.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
+                {publish.isError && (
+                  <p className="text-sm text-pretty text-destructive">{describeFailure(publish.error)}</p>
+                )}
+              </>
+            )}
+          </TabsContent>
 
-      <TabsContent value="github" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
-        {/* One search box for both ways in, because they are the same question:
+          <TabsContent value="github" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
+            {/* One search box for both ways in, because they are the same question:
             a repository this writer's Connection can see, or one named by URL.
             Which it is falls out of whether the text parses, so there is no
             mode to choose and no second field competing for the same intent.
             It stays mounted through reading and choosing, too — picking a
             repository or submitting a URL swaps what the list below it shows,
             never the box itself, so the query that got them here stays put. */}
-        {(step.kind === "pick" || step.kind === "reading" || step.kind === "choose") && (
-          <>
-            <SourcePanel>
-              <Command
-                shouldFilter={step.kind === "pick"}
-                className="rounded-none! bg-transparent **:data-[slot=input-group]:rounded-md!"
-              >
-                <CommandInput
-                  placeholder="Search your repositories, or paste a repository URL"
-                  value={query}
-                  onValueChange={handleQueryChange}
-                  disabled={isBusy}
-                  icon={TypedSourceIcon && <TypedSourceIcon className="size-4 shrink-0 opacity-70" />}
-                />
-                <CommandList className={step.kind === "pick" ? "h-64" : undefined}>
-                  {step.kind === "pick" && (
-                    <>
-                      {typedSource && (
-                        <CommandGroup heading="From URL">
-                          <CommandItem
-                            value={query}
-                            disabled={isBusy}
-                            onSelect={() => runImport(query)}
-                            className="rounded-md"
-                          >
-                            <SourceGlyph provider={typedSource.provider} />
-                            <span className="truncate">{sourceTitle(typedSource)}</span>
-                            {/* The field looks like a search box, so the key that
+            {(step.kind === "pick" || step.kind === "reading" || step.kind === "choose") && (
+              <>
+                <SourcePanel>
+                  <Command
+                    shouldFilter={step.kind === "pick"}
+                    className="rounded-none! bg-transparent **:data-[slot=input-group]:rounded-md!"
+                  >
+                    <CommandInput
+                      placeholder="Search your repositories, or paste a repository URL"
+                      value={query}
+                      onValueChange={handleQueryChange}
+                      disabled={isBusy}
+                      icon={TypedSourceIcon && <TypedSourceIcon className="size-4 shrink-0 opacity-70" />}
+                    />
+                    <CommandList className={step.kind === "pick" ? "h-64" : undefined}>
+                      {step.kind === "pick" && (
+                        <>
+                          {typedSource && (
+                            <CommandGroup heading="From URL">
+                              <CommandItem
+                                value={query}
+                                disabled={isBusy}
+                                onSelect={() => runImport(query)}
+                                className="rounded-md"
+                              >
+                                <SourceGlyph provider={typedSource.provider} />
+                                <span className="truncate">{sourceTitle(typedSource)}</span>
+                                {/* The field looks like a search box, so the key that
                                 imports what was pasted into it is worth naming. */}
-                            <CommandShortcut>↵</CommandShortcut>
-                          </CommandItem>
-                        </CommandGroup>
-                      )}
+                                <CommandShortcut>↵</CommandShortcut>
+                              </CommandItem>
+                            </CommandGroup>
+                          )}
 
-                      {/* Connection-aware, and in the same place the repositories
+                          {/* Connection-aware, and in the same place the repositories
                           would be rather than in a block of its own above them: a
                           writer with no GitHub Connection is offered one, and a
                           connected writer gets every repository it can see.
                           Absent while an Admin has configured no GitHub
                           Integration at all, since there is then nothing to
                           connect to or list. */}
-                      {githubConnectable && !githubConnection && (
-                        <div className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 text-center">
-                          <p className="text-sm text-pretty text-muted-foreground">
-                            Connect GitHub to search your own repositories, public and private.
-                          </p>
-                          <Button asChild size="sm">
-                            <a href={connectHref("github", githubConnectable.id)}>Connect GitHub</a>
-                          </Button>
-                        </div>
-                      )}
-
-                      {githubConnection && (
-                        <>
-                          {repositories.isLoading && <RepositorySkeleton />}
-                          {repositories.isError && (
-                            <p className="px-6 py-7 text-center text-sm text-pretty text-destructive">
-                              {apiErrorMessage(repositories.error)}
-                            </p>
+                          {githubConnectable && !githubConnection && (
+                            <div className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 text-center">
+                              <p className="text-sm text-pretty text-muted-foreground">
+                                Connect GitHub to search your own repositories, public and private.
+                              </p>
+                              <Button asChild size="sm">
+                                <a href={connectHref("github", githubConnectable.id)}>Connect GitHub</a>
+                              </Button>
+                            </div>
                           )}
-                          {repositories.data && (
+
+                          {githubConnection && (
                             <>
-                              <CommandEmpty>No repositories match.</CommandEmpty>
-                              <CommandGroup heading="Your repositories">
-                                {repositories.data.items.map((repository) => (
-                                  <CommandItem
-                                    key={repository.full_name}
-                                    value={repository.full_name}
-                                    disabled={isBusy}
-                                    onSelect={() => {
-                                      setQuery(repository.html_url);
-                                      runImport(repository.html_url);
-                                    }}
-                                    className="cursor-pointer rounded-md"
-                                  >
-                                    <span className="truncate">{repository.full_name}</span>
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
+                              {repositories.isLoading && <RepositorySkeleton />}
+                              {repositories.isError && (
+                                <p className="px-6 py-7 text-center text-sm text-pretty text-destructive">
+                                  {apiErrorMessage(repositories.error)}
+                                </p>
+                              )}
+                              {repositories.data && (
+                                <>
+                                  <CommandEmpty>No repositories match.</CommandEmpty>
+                                  <CommandGroup heading="Your repositories">
+                                    {repositories.data.items.map((repository) => (
+                                      <CommandItem
+                                        key={repository.full_name}
+                                        value={repository.full_name}
+                                        disabled={isBusy}
+                                        onSelect={() => {
+                                          setQuery(repository.html_url);
+                                          runImport(repository.html_url);
+                                        }}
+                                        className="cursor-pointer rounded-md"
+                                      >
+                                        <span className="truncate">{repository.full_name}</span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
                             </>
+                          )}
+
+                          {!githubConnectable && !typedSource && (
+                            <p className="px-6 py-7 text-center text-sm text-pretty text-muted-foreground">
+                              Paste a repository URL to publish {kind === "plugin" ? "a plugin" : "a Skill"} from GitHub
+                              or GitLab.
+                            </p>
                           )}
                         </>
                       )}
 
-                      {!githubConnectable && !typedSource && (
-                        <p className="px-6 py-7 text-center text-sm text-pretty text-muted-foreground">
-                          Paste a repository URL to publish {kind === "plugin" ? "a plugin" : "a Skill"} from GitHub or
-                          GitLab.
-                        </p>
-                      )}
-                    </>
-                  )}
-
-                  {/* A bare repository has to be searched before there is
+                      {/* A bare repository has to be searched before there is
                       anything to show, so it gets a skeleton of the list about
                       to appear; a URL already naming a folder resolves to one
                       Skill and has no list coming, so it keeps a plain line. */}
-                  {step.kind === "reading" && (
-                    <div className="animate-in fade-in-0 duration-150 ease-out">
-                      {step.source.path === "" ? (
-                        <DiscoverySkeleton />
-                      ) : (
-                        <p className="px-6 py-7 text-center text-sm text-muted-foreground">
-                          Reading {sourceTitle(step.source)}…
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {step.kind === "choose" && (
-                    <div className="animate-in fade-in-0 duration-150 ease-out">
-                      <div className="flex min-h-10 items-center justify-between gap-2 px-2 pt-1">
-                        <p className="truncate text-xs text-muted-foreground">
-                          <span className="tabular-nums">{step.found.length}</span> {noun.many} found in{" "}
-                          {sourceTitle(step.source)}
-                        </p>
-                        <label
-                          className={cn(
-                            ROW_HIT_AREA,
-                            "flex shrink-0 items-center gap-2 rounded-md pl-2",
-                            "has-focus-visible:ring-3 has-focus-visible:ring-ring/50",
-                            isBusy ? "opacity-50" : "cursor-pointer",
+                      {step.kind === "reading" && (
+                        <div className="animate-in fade-in-0 duration-150 ease-out">
+                          {step.source.path === "" ? (
+                            <DiscoverySkeleton />
+                          ) : (
+                            <p className="px-6 py-7 text-center text-sm text-muted-foreground">
+                              Reading {sourceTitle(step.source)}…
+                            </p>
                           )}
-                        >
-                          <Checkbox
-                            checked={
-                              selectedPaths.size === 0
-                                ? false
-                                : selectedPaths.size === step.found.length
-                                  ? true
-                                  : "indeterminate"
-                            }
-                            disabled={isBusy}
-                            onCheckedChange={(next) =>
-                              setSelectedPaths(
-                                next === true ? new Set(step.found.map((location) => location.path)) : new Set(),
-                              )
-                            }
-                            className="focus-visible:border-input focus-visible:ring-0"
-                          />
-                          <span className="text-xs text-muted-foreground">Select all</span>
-                        </label>
-                      </div>
-                      <ul className="flex flex-col p-1">
-                        {step.found.map((location) => (
-                          <li key={location.path}>
-                            <CandidateRow
-                              label={sourceLabel(location)}
-                              checked={selectedPaths.has(location.path)}
-                              disabled={isBusy}
-                              onToggle={(checked) => toggleCandidate(location.path, checked)}
-                            />
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </CommandList>
-              </Command>
-            </SourcePanel>
+                        </div>
+                      )}
 
-            {step.kind === "choose" ? (
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  disabled={isBusy || selectedPaths.size === 0}
-                  onClick={() =>
-                    publishLocations(
-                      step.source,
-                      step.found.filter((location) => selectedPaths.has(location.path)),
-                    )
-                  }
-                >
-                  {/* One flex child, so the button's own `gap-1.5` can't pry the
+                      {step.kind === "choose" && (
+                        <div className="animate-in fade-in-0 duration-150 ease-out">
+                          <div className="flex min-h-10 items-center justify-between gap-2 px-2 pt-1">
+                            <p className="truncate text-xs text-muted-foreground">
+                              <span className="tabular-nums">{step.found.length}</span> {noun.many} found in{" "}
+                              {sourceTitle(step.source)}
+                            </p>
+                            <label
+                              className={cn(
+                                ROW_HIT_AREA,
+                                "flex shrink-0 items-center gap-2 rounded-md pl-2",
+                                "has-focus-visible:ring-3 has-focus-visible:ring-ring/50",
+                                isBusy ? "opacity-50" : "cursor-pointer",
+                              )}
+                            >
+                              <Checkbox
+                                checked={
+                                  selectedPaths.size === 0
+                                    ? false
+                                    : selectedPaths.size === step.found.length
+                                      ? true
+                                      : "indeterminate"
+                                }
+                                disabled={isBusy}
+                                onCheckedChange={(next) =>
+                                  setSelectedPaths(
+                                    next === true ? new Set(step.found.map((location) => location.path)) : new Set(),
+                                  )
+                                }
+                                className="focus-visible:border-input focus-visible:ring-0"
+                              />
+                              <span className="text-xs text-muted-foreground">Select all</span>
+                            </label>
+                          </div>
+                          <ul className="flex flex-col p-1">
+                            {step.found.map((location) => (
+                              <li key={location.path}>
+                                <CandidateRow
+                                  label={sourceLabel(location)}
+                                  checked={selectedPaths.has(location.path)}
+                                  disabled={isBusy}
+                                  onToggle={(checked) => toggleCandidate(location.path, checked)}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </CommandList>
+                  </Command>
+                </SourcePanel>
+
+                {step.kind === "choose" ? (
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      disabled={isBusy || selectedPaths.size === 0}
+                      onClick={() =>
+                        publishLocations(
+                          step.source,
+                          step.found.filter((location) => selectedPaths.has(location.path)),
+                        )
+                      }
+                    >
+                      {/* One flex child, so the button's own `gap-1.5` can't pry the
                       label apart — and no count while there is nothing to count,
                       since "Publish 0 Skills" reads as an instruction to do it. */}
-                  <span className="tabular-nums">
-                    {selectedPaths.size === 0
-                      ? "Publish"
-                      : `Publish ${selectedPaths.size} ${selectedPaths.size === 1 ? noun.one : noun.many}`}
-                  </span>
-                </Button>
-              </div>
-            ) : (
-              step.kind === "pick" &&
-              /* The failure sits where the hint would, so it reads as the
+                      <span className="tabular-nums">
+                        {selectedPaths.size === 0
+                          ? "Publish"
+                          : `Publish ${selectedPaths.size} ${selectedPaths.size === 1 ? noun.one : noun.many}`}
+                      </span>
+                    </Button>
+                  </div>
+                ) : (
+                  step.kind === "pick" &&
+                  /* The failure sits where the hint would, so it reads as the
                  answer to what was just typed rather than a line after an
                  aside. */
-              (readError ? (
-                <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />
-              ) : (
-                <p className="text-xs text-pretty text-muted-foreground">
-                  A public repository URL works without connecting — a project&apos;s page, or a folder view inside it.
-                </p>
-              ))
-            )}
-          </>
-        )}
-
-        {step.kind === "publishing" && (
-          <SourcePanel className="flex-1">
-            <SourceHeader source={step.source} trailing={<Spinner className="size-4" />} />
-            <div className="flex flex-1 items-center justify-center px-6">
-              <p className="text-center text-sm text-muted-foreground">
-                {step.total === 1 ? (
-                  "Publishing…"
-                ) : (
-                  <>
-                    Publishing <span className="tabular-nums">{step.done + 1}</span> of{" "}
-                    <span className="tabular-nums">{step.total}</span>…
-                  </>
+                  (readError ? (
+                    <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />
+                  ) : (
+                    <p className="text-xs text-pretty text-muted-foreground">
+                      A public repository URL works without connecting — a project&apos;s page, or a folder view inside
+                      it.
+                    </p>
+                  ))
                 )}
-              </p>
-            </div>
-          </SourcePanel>
-        )}
+              </>
+            )}
 
-        {step.kind === "report" && (
-          <SourcePanel className="animate-in fade-in-0 duration-150 ease-out">
-            <SourceHeader
-              source={step.source}
-              trailing={
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {step.outcomes.filter((outcome) => outcome.status === "published").length} of {step.outcomes.length}{" "}
-                  published
-                </span>
-              }
-            />
-            <ul className="scrollbar-hidden flex max-h-56 flex-col overflow-y-auto p-1">
-              {step.outcomes.map((outcome) => (
-                <li key={outcome.path} className="flex min-h-9 items-start gap-2.5 px-2 py-1.5 text-sm">
-                  {outcome.status === "published" ? (
-                    <CircleCheckIcon className="mt-px size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <CircleAlertIcon className="mt-px size-4 shrink-0 text-destructive" />
-                  )}
-                  {outcome.status === "published" ? (
-                    <span className="truncate">{outcome.name}</span>
-                  ) : (
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate">{sourceLabel({ ...step.source, path: outcome.path })}</span>
-                      <span className="text-pretty text-destructive">{outcome.message}</span>
+            {step.kind === "publishing" && (
+              <SourcePanel className="flex-1">
+                <SourceHeader source={step.source} trailing={<Spinner className="size-4" />} />
+                <div className="flex flex-1 items-center justify-center px-6">
+                  <p className="text-center text-sm text-muted-foreground">
+                    {step.total === 1 ? (
+                      "Publishing…"
+                    ) : (
+                      <>
+                        Publishing <span className="tabular-nums">{step.done + 1}</span> of{" "}
+                        <span className="tabular-nums">{step.total}</span>…
+                      </>
+                    )}
+                  </p>
+                </div>
+              </SourcePanel>
+            )}
+
+            {step.kind === "report" && (
+              <SourcePanel className="animate-in fade-in-0 duration-150 ease-out">
+                <SourceHeader
+                  source={step.source}
+                  trailing={
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {step.outcomes.filter((outcome) => outcome.status === "published").length} of{" "}
+                      {step.outcomes.length} published
                     </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <div className="flex justify-end border-t px-3 py-2.5">
-              <Button type="button" variant="outline" onClick={reset}>
-                Publish another
-              </Button>
-            </div>
-          </SourcePanel>
-        )}
-      </TabsContent>
-    </Tabs>
+                  }
+                />
+                <ul className="scrollbar-hidden flex max-h-56 flex-col overflow-y-auto p-1">
+                  {step.outcomes.map((outcome) => (
+                    <li key={outcome.path} className="flex min-h-9 items-start gap-2.5 px-2 py-1.5 text-sm">
+                      {outcome.status === "published" ? (
+                        <CircleCheckIcon className="mt-px size-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <CircleAlertIcon className="mt-px size-4 shrink-0 text-destructive" />
+                      )}
+                      {outcome.status === "published" ? (
+                        <span className="truncate">{outcome.name}</span>
+                      ) : (
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate">{sourceLabel({ ...step.source, path: outcome.path })}</span>
+                          <span className="text-pretty text-destructive">{outcome.message}</span>
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex justify-end border-t px-3 py-2.5">
+                  <Button type="button" variant="outline" onClick={reset}>
+                    Publish another
+                  </Button>
+                </div>
+              </SourcePanel>
+            )}
+          </TabsContent>
+        </Tabs>
+      </FormDialogBody>
+      {kind === "plugin" && tab === "upload" && stagedPlugin && (
+        <FormDialogFooter
+          onCancel={onCancel}
+          cancelDisabled={publishStaged.isPending}
+          submit={{
+            label: "Publish plugin",
+            pendingLabel: "Publishing…",
+            pending: publishStaged.isPending,
+            onClick: () =>
+              publishStaged.mutate(
+                { files: stagedPlugin.files },
+                { onSuccess: (plugin) => onPublished(plugin.name, plugin.namespace) },
+              ),
+          }}
+        />
+      )}
+    </>
   );
 }

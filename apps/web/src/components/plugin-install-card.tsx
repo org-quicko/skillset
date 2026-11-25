@@ -2,8 +2,8 @@ import { PLUGIN_AGENTS, type Plugin, type PluginAgent } from "@in-org-quicko/ski
 import { useState } from "react";
 import { CopyableCode } from "@/components/copyable-code";
 import { Panel } from "@/components/panel";
+import { PanelTabs } from "@/components/panel-tabs";
 import { PLUGIN_INSTALL_GUIDES } from "@/lib/plugin-install";
-import { cn } from "@/lib/utils";
 
 /**
  * The Installation panel for a Plugin: one tab per agent the Plugin supports,
@@ -27,23 +27,11 @@ export function PluginInstallCard({ plugin }: { plugin: Plugin }) {
     <Panel
       title="Installation"
       action={
-        <div role="tablist" className="flex gap-3.5 text-xs">
-          {plugin.agents.map((id) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={id === agent}
-              onClick={() => setChosen(id)}
-              className={cn(
-                "cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                id === agent ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {PLUGIN_AGENTS[id].label}
-            </button>
-          ))}
-        </div>
+        <PanelTabs
+          tabs={plugin.agents.map((id) => ({ id, label: PLUGIN_AGENTS[id].label }))}
+          value={agent}
+          onChange={setChosen}
+        />
       }
     >
       <ol className="flex flex-col gap-3">

@@ -174,7 +174,7 @@ export function SkillList({
         <p className="text-sm text-muted-foreground">
           {hasFilters
             ? `No ${section.nounPlural} match “${filters.q || "that filter"}”`
-            : `Publish your first ${section.noun}`}
+            : `${section.publishVerb} your first ${section.noun}`}
         </p>
         {hasFilters ? (
           <p className="text-sm text-muted-foreground">Try a name, tag or publisher.</p>
@@ -182,7 +182,7 @@ export function SkillList({
           onPublish && (
             <Button variant="outline" size="sm" className="mt-1" onClick={onPublish}>
               <UploadIcon />
-              Publish
+              {section.publishVerb}
             </Button>
           )
         )}

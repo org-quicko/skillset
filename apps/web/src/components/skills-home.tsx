@@ -8,7 +8,7 @@ import { Reveal } from "@/components/reveal";
 import { SkillList } from "@/components/skill-list";
 import { TagFilter } from "@/components/tag-filter";
 import { Button } from "@/components/ui/button";
-import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
+import { FormDialog, FormDialogHeader } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSkillStats, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useTags } from "@/hooks/use-tags";
@@ -38,8 +38,7 @@ const SEARCH_DEBOUNCE_MS = 300;
  */
 function isMacPlatform(): boolean {
   if (typeof navigator === "undefined") return false;
-  const uaDataPlatform = (navigator as { userAgentData?: { platform?: string } }).userAgentData
-    ?.platform;
+  const uaDataPlatform = (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform;
   return /mac/i.test(uaDataPlatform ?? navigator.platform ?? navigator.userAgent ?? "");
 }
 
@@ -86,25 +85,34 @@ function withArticle(noun: string): string {
   return `${/^(MCP|[aeiou])/i.test(noun) ? "an" : "a"} ${noun}`;
 }
 
-type OnPublished = (name: string, namespace: string) => void;
+interface PublishFormProps {
+  onPublished: (name: string, namespace: string) => void;
+  onCancel: () => void;
+}
 
-/** Each section's publish form, and the line under the dialog's title. */
-const PUBLISH_FORMS: Record<SectionKind, (onPublished: OnPublished) => { description: string; form: ReactNode }> = {
-  skill: (onPublished) => ({
+/**
+ * Each section's publish form, and the line under the dialog's title. Each
+ * form renders the dialog's body and footer itself, since only it knows what
+ * its footer's action does.
+ */
+const PUBLISH_FORMS: Record<SectionKind, { description: string; form: (props: PublishFormProps) => ReactNode }> = {
+  skill: {
     description: "Upload a Skill's folder or SKILL.md, or import it from GitHub.",
-    form: <PublishSkillForm onPublished={onPublished} />,
-  }),
-  mcp: (onPublished) => ({
-    description: "Describe a package an agent runs, or a remote endpoint it connects to.",
-    form: <PublishMcpForm onPublished={onPublished} />,
-  }),
-  plugin: (onPublished) => ({
-    description: "Upload a plugin's folder, or import it from GitHub. Its agent manifests say which agents it supports.",
-    form: <PublishSkillForm kind="plugin" onPublished={onPublished} />,
-  }),
+    form: (props) => <PublishSkillForm {...props} />,
+  },
+  mcp: {
+    description:
+      "Point to a package an agent runs, or a remote endpoint it connects to. The server's code stays where it is.",
+    form: (props) => <PublishMcpForm {...props} />,
+  },
+  plugin: {
+    description:
+      "Upload a plugin's folder, or import it from GitHub. Its agent manifests say which agents it supports.",
+    form: (props) => <PublishSkillForm kind="plugin" {...props} />,
+  },
 };
 
-/** The dialog behind a section's Publish button — the form fits the section's Kind. */
+/** The dialog behind a section's Publish (or List) button — the form fits the section's Kind. */
 function PublishDialog({
   section,
   open,
@@ -116,11 +124,11 @@ function PublishDialog({
   onOpenChange: (open: boolean) => void;
   onPublished: (name: string, namespace: string) => void;
 }) {
-  const { description, form } = PUBLISH_FORMS[section.kind](onPublished);
+  const { description, form } = PUBLISH_FORMS[section.kind];
   return (
     <FormDialog open={open} onOpenChange={onOpenChange} className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl">
-      <FormDialogHeader title={`Publish ${withArticle(section.noun)}`} description={description} />
-      <FormDialogBody>{form}</FormDialogBody>
+      <FormDialogHeader title={`${section.publishVerb} ${withArticle(section.noun)}`} description={description} />
+      {form({ onPublished, onCancel: () => onOpenChange(false) })}
     </FormDialog>
   );
 }
@@ -215,7 +223,7 @@ export function SkillsHome({
                 <Reveal delayMs={90}>
                   <Button onClick={openPublish}>
                     <UploadIcon />
-                    Publish {withArticle(section.noun)}
+                    {section.publishVerb} {withArticle(section.noun)}
                   </Button>
                 </Reveal>
               )}
@@ -292,10 +300,7 @@ export function SkillsHome({
         }}
       />
 
-      <Reveal
-        delayMs={220}
-        className="mx-auto flex w-full max-w-[1200px] flex-col gap-3.5 px-7 pt-5 pb-10"
-      >
+      <Reveal delayMs={220} className="mx-auto flex w-full max-w-[1200px] flex-col gap-3.5 px-7 pt-5 pb-10">
         <div className="flex items-center gap-3">
           <TagFilter
             tags={tags.data?.items ?? []}

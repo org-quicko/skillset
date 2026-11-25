@@ -1,0 +1,77 @@
+[
+  {
+    "name": "server-filesystem",
+    "description": "Secure local filesystem access with explicit path boundaries.",
+    "body": "# Filesystem MCP Server\n\nRead, write and traverse files inside the directories you allow.\n\n### Tools\n- `read_file`\n- `write_file`\n- `list_directory`\n- `search_files`",
+    "source": "https://github.com/modelcontextprotocol/servers",
+    "packages": [
+      {
+        "registry_name": "npm",
+        "name": "@modelcontextprotocol/server-filesystem",
+        "version": "0.6.2",
+        "package_arguments": ["/projects"]
+      }
+    ]
+  },
+  {
+    "name": "server-postgres",
+    "description": "Read-only PostgreSQL schema inspection and queries.",
+    "body": "# PostgreSQL MCP Server\n\nInspect schemas and run read-only SQL.\n\n### Tools\n- `query`\n- `list_tables`\n- `describe_table`",
+    "source": "https://github.com/modelcontextprotocol/servers",
+    "packages": [
+      {
+        "registry_name": "npm",
+        "name": "@modelcontextprotocol/server-postgres",
+        "version": "0.6.2",
+        "package_arguments": ["postgresql://localhost:5432/mydb"]
+      }
+    ]
+  },
+  {
+    "name": "server-github",
+    "description": "Work with GitHub repositories, issues, pull requests and files.",
+    "body": "# GitHub MCP Server\n\n### Tools\n- `create_or_update_file`\n- `search_repositories`\n- `create_issue`\n- `create_pull_request`",
+    "source": "https://github.com/modelcontextprotocol/servers",
+    "packages": [
+      {
+        "registry_name": "npm",
+        "name": "@modelcontextprotocol/server-github",
+        "version": "0.6.2",
+        "environment_variables": [
+          {
+            "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "description": "GitHub Personal Access Token with repo scope",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "server-fetch",
+    "description": "Fetches web pages and converts HTML to Markdown.",
+    "body": "# Fetch MCP Server\n\n### Tools\n- `fetch`",
+    "source": "https://github.com/modelcontextprotocol/servers",
+    "packages": [{ "registry_name": "pypi", "name": "mcp-server-fetch", "version": "0.6.2" }]
+  },
+  {
+    "name": "server-memory",
+    "description": "Persistent knowledge-graph memory across sessions.",
+    "body": "# Memory MCP Server\n\n### Tools\n- `create_entities`\n- `create_relations`\n- `search_nodes`",
+    "source": "https://github.com/modelcontextprotocol/servers",
+    "packages": [{ "registry_name": "npm", "name": "@modelcontextprotocol/server-memory", "version": "0.6.2" }]
+  },
+  {
+    "name": "workers-mcp",
+    "description": "Remote MCP server for Cloudflare Workers, KV and D1.",
+    "body": "# Cloudflare Workers MCP Server\n\nA remote server over Server-Sent Events.",
+    "source": "https://github.com/cloudflare/workers-mcp",
+    "remotes": [
+      {
+        "transport_type": "sse",
+        "url": "https://mcp.cloudflare.com/sse",
+        "headers": { "Authorization": "Bearer ${CLOUDFLARE_API_TOKEN}" }
+      }
+    ]
+  }
+]

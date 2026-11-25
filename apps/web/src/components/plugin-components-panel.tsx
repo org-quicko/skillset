@@ -1,7 +1,7 @@
 import type { Plugin, PluginComponent, PluginComponents } from "@in-org-quicko/skillset-shared";
 import { useState } from "react";
 import { Panel } from "@/components/panel";
-import { cn } from "@/lib/utils";
+import { PanelTabs } from "@/components/panel-tabs";
 
 /** Each component kind's tab, in the order they show. */
 const COMPONENT_KINDS: { key: keyof PluginComponents; label: string; prefix?: string }[] = [
@@ -9,12 +9,13 @@ const COMPONENT_KINDS: { key: keyof PluginComponents; label: string; prefix?: st
   { key: "commands", label: "Commands", prefix: "/" },
   { key: "agents", label: "Agents" },
   { key: "hooks", label: "Hooks" },
+  { key: "mods", label: "Mods" },
   { key: "mcp_servers", label: "MCP servers" },
 ];
 
 /**
- * What a Plugin provides — its skills, commands, agents, hook events, and MCP
- * servers — one tab per kind it has.
+ * What a Plugin provides — its skills, commands, agents, hook events, mods, and
+ * MCP servers — one tab per kind it has.
  *
  * @remarks
  * Read from the Plugin's files when it was published. A Plugin published
@@ -39,35 +40,30 @@ export function PluginComponentsPanel({
     <Panel
       title="What's inside"
       action={
-        present.length > 0 && (
-          <div role="tablist" className="flex gap-3.5 text-xs">
-            {present.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={key === active?.key}
-                onClick={() => setChosen(key)}
-                className={cn(
-                  "cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                  key === active?.key ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {label} <span className="tabular-nums opacity-70">{components?.[key].length}</span>
-              </button>
-            ))}
-          </div>
+        active && (
+          <PanelTabs
+            tabs={present.map(({ key, label }) => ({
+              id: key,
+              label: (
+                <>
+                  {label} <span className="tabular-nums opacity-70">{components?.[key].length}</span>
+                </>
+              ),
+            }))}
+            value={active.key}
+            onChange={setChosen}
+          />
         )
       }
     >
       {!components ? (
         <p className="text-sm text-pretty text-muted-foreground">
           This plugin was published before Skillset listed what plugins contain. Publish it again to see its skills,
-          commands, agents, hooks, and MCP servers.
+          commands, agents, hooks, mods, and MCP servers.
         </p>
       ) : !active ? (
         <p className="text-sm text-pretty text-muted-foreground">
-          No skills, commands, agents, hooks, or MCP servers were found in this plugin&apos;s default folders.
+          No skills, commands, agents, hooks, mods, or MCP servers were found in this plugin&apos;s default folders.
         </p>
       ) : (
         <ul className="-mx-2 flex max-h-80 flex-col overflow-y-auto">
