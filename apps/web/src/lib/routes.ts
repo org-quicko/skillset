@@ -1,8 +1,10 @@
+import { isSectionKind, SECTIONS } from "@/lib/sections";
+
 /** Where a signed-out visitor lands, and the only path that renders `LoginForm`. */
 export const LOGIN_PATH = "/login";
 
 /** The URL path prefix every Skill detail page sits under. */
-export const SKILL_PATH_PREFIX = "/skills/";
+export const SKILL_PATH_PREFIX = SECTIONS.skill.detailPrefix;
 
 /**
  * The URL path for a Skill's detail page.
@@ -12,8 +14,11 @@ export const SKILL_PATH_PREFIX = "/skills/";
  * alone might not reach it (ADR-0042). Added as a query parameter rather than
  * more path segments, because a Namespace may itself contain a slash and is
  * compared whole — the same reason the API takes it that way.
- * @returns A root-relative path like `/skills/my-skill`, or
- * `/skills/pdf?namespace=anthropics%2Fskills`.
+ * @param kind - The Resource's Kind, which picks the section the page sits
+ * under. A Kind with no section falls back to `/skills/`, which still resolves
+ * it, since the detail read is Kind-agnostic.
+ * @returns A root-relative path like `/skills/my-skill`,
+ * `/skills/pdf?namespace=anthropics%2Fskills`, or `/mcp-servers/io.github.x%2Fy`.
  *
  * @remarks
  * A bare path still works and still means what it always did: the Registry
@@ -22,8 +27,9 @@ export const SKILL_PATH_PREFIX = "/skills/";
  * *is* ambiguous linkable at all, and it keeps a shared or bookmarked URL
  * pointing at the Skill the reader was actually looking at.
  */
-export function skillPath(name: string, namespace?: string): string {
-  const path = `${SKILL_PATH_PREFIX}${encodeURIComponent(name)}`;
+export function skillPath(name: string, namespace?: string, kind = "skill"): string {
+  const prefix = isSectionKind(kind) ? SECTIONS[kind].detailPrefix : SKILL_PATH_PREFIX;
+  const path = `${prefix}${encodeURIComponent(name)}`;
   return namespace ? `${path}?namespace=${encodeURIComponent(namespace)}` : path;
 }
 

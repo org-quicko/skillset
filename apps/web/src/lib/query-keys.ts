@@ -28,21 +28,26 @@ export const resourcesListQueryKey = ["resources", "list"] as const;
  * same set of Tags in a different pick order still hits the same entry.
  *
  * @param filters - The search term, selected Tag ids, and sort choice.
+ * @param kind - The Kind the list is narrowed to.
  * @returns A query key rooted at {@link resourcesListQueryKey}, so
  * invalidating that shared prefix still invalidates every filter/sort
  * combination.
  * @example
- * resourceDirectoryQueryKey({ q: "code review", tagIds: [], sortBy: "installs", sortOrder: "desc" })
- * // => ["resources", "list", "code review", [], "installs", "desc"]
+ * resourceDirectoryQueryKey({ q: "code review", tagIds: [], sortBy: "installs", sortOrder: "desc" }, "skill")
+ * // => ["resources", "list", "skill", "code review", [], "installs", "desc"]
  */
-export function resourceDirectoryQueryKey(filters: {
-  q: string;
-  tagIds: string[];
-  sortBy: string;
-  sortOrder: string;
-}) {
+export function resourceDirectoryQueryKey(
+  filters: {
+    q: string;
+    tagIds: string[];
+    sortBy: string;
+    sortOrder: string;
+  },
+  kind: string,
+) {
   return [
     ...resourcesListQueryKey,
+    kind,
     filters.q,
     [...filters.tagIds].sort(),
     filters.sortBy,
@@ -78,8 +83,13 @@ export function resourceDetailPrefixKey(name: string) {
   return ["resources", "detail", name] as const;
 }
 
-/** The catalog's hero stats — unfiltered, unlike `resourcesListQueryKey`'s pages. */
+/** Every section's hero stats. A shared prefix so publishing can invalidate them all at once. */
 export const resourceStatsQueryKey = ["resources", "stats"] as const;
+
+/** One section's hero stats — narrowed by Kind alone, unlike `resourcesListQueryKey`'s pages. */
+export function resourceKindStatsQueryKey(kind: string) {
+  return [...resourceStatsQueryKey, kind] as const;
+}
 
 /** A single Skill's install trend chart — keyed by id, not name, since the route it reads is `/resources/{id}/installs/trend`. */
 export function resourceInstallTrendQueryKey(id: string) {

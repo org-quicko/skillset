@@ -1,14 +1,24 @@
-import { importedSource } from "@in-org-quicko/skillset-shared";
+import {
+  importedSource,
+  PLUGIN_AGENTS,
+  PLUGIN_README_FILE_NAME,
+  type ResourceDetail,
+} from "@in-org-quicko/skillset-shared";
 import { DownloadIcon, EllipsisIcon, ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { InstallTrendChart } from "@/components/install-trend-chart";
+import { McpDetailPanel } from "@/components/mcp-detail-panel";
 import { Panel } from "@/components/panel";
 import { Reveal } from "@/components/reveal";
 import { SkillFilesPanel } from "@/components/skill-files-panel";
+import { PluginComponentsPanel } from "@/components/plugin-components-panel";
+import { PluginInstallCard } from "@/components/plugin-install-card";
+import { PublishMcpForm } from "@/components/publish-mcp-form";
 import { SkillInstallCard } from "@/components/skill-install-card";
+import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDownloadSkillArtifact, useSkill, useSkillInstallTrend } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { formatDate, splitAllowedTools, userDisplayName, userInitials } from "@/lib/utils";
+import { cn, formatDate, splitAllowedTools, userDisplayName, userInitials } from "@/lib/utils";
 
 /** The placeholder page shown while a Skill loads — mirrors the real two-column layout. */
 function SkillDetailSkeleton() {
@@ -48,6 +58,9 @@ function SkillDetailSkeleton() {
     </div>
   );
 }
+
+/** What the breadcrumb's first link says, per Kind — the section the page belongs to. */
+const BREADCRUMB_LABELS: Record<ResourceDetail["kind"], string> = { skill: "skills", mcp: "mcp", plugin: "plugins" };
 
 function DetailRow({
   label,
@@ -207,6 +220,10 @@ export function SkillDetail({
   const trend = useSkillInstallTrend(skill.data?.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editTagsOpen, setEditTagsOpen] = useState(false);
+  const [editMcpOpen, setEditMcpOpen] = useState(false);
+  // A Plugin's component list opens a component's file in the files panel below it.
+  const [openFile, setOpenFile] = useState<string>();
+  const filesRef = useRef<HTMLDivElement>(null);
   const download = useDownloadSkillArtifact();
 
   if (skill.isPending) return <SkillDetailSkeleton />;
@@ -223,7 +240,7 @@ export function SkillDetail({
       <Reveal delayMs={0} className="flex items-center gap-2 text-xs text-muted-foreground">
         <nav className="flex items-center gap-2">
           <button type="button" onClick={onBack} className="cursor-pointer hover:text-foreground">
-            skills
+            {BREADCRUMB_LABELS[data.kind]}
           </button>
           <span>/</span>
           <span>{data.name}</span>
@@ -233,19 +250,22 @@ export function SkillDetail({
       <Reveal delayMs={50} className="flex items-center justify-between gap-3">
         <h1 className="text-3xl font-medium tracking-tight text-balance">{data.name}</h1>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                aria-label="Download Skill"
-                onClick={() => download(data.id, data.name)}
-              >
-                <DownloadIcon />
-                Download
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Download Skill</TooltipContent>
-          </Tooltip>
+          {/* An MCP server has no Artifact to download (ADR-0027). */}
+          {data.kind !== "mcp" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  aria-label={`Download ${data.kind === "plugin" ? "plugin" : "Skill"}`}
+                  onClick={() => download(data.id, data.name)}
+                >
+                  <DownloadIcon />
+                  Download
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Download {data.kind === "plugin" ? "plugin" : "Skill"}</TooltipContent>
+            </Tooltip>
+          )}
           {(canEditTags || canDelete) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -254,6 +274,12 @@ export function SkillDetail({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-44">
+                {canEditTags && data.kind === "mcp" && (
+                  <DropdownMenuItem onClick={() => setEditMcpOpen(true)}>
+                    <PencilIcon />
+                    Edit
+                  </DropdownMenuItem>
+                )}
                 {canEditTags && (
                   <DropdownMenuItem onClick={() => setEditTagsOpen(true)}>
                     <PencilIcon />
@@ -285,12 +311,51 @@ export function SkillDetail({
         delayMs={150}
         className="mt-2 grid min-h-0 flex-1 gap-7 lg:grid-cols-[minmax(0,1fr)_280px]"
       >
-        <div className="flex min-h-0 min-w-0 flex-col gap-4">
-          {/* Qualified only for a Skill that came from elsewhere: one
-              published here is what a bare name already reaches. */}
-          <SkillInstallCard name={data.name} namespace={imported ? data.namespace : undefined} />
+        {/* A Plugin stacks three panels, too many to share the viewport's
+            height, so its column scrolls and its files panel keeps a height of
+            its own; a Skill's files panel fills what is left. */}
+        <div
+          className={cn(
+            "flex min-h-0 min-w-0 flex-col gap-4",
+            // In a scrolling column a panel must keep its own height, or flex shrinks it to nothing.
+            data.kind === "plugin" && "overflow-y-auto pr-1 *:shrink-0",
+          )}
+        >
+          {/* An MCP server's Configuration panel says how to add it, so the
+              install command is a Skill's only. Qualified only for a Skill
+              that came from elsewhere: one published here is what a bare
+              name already reaches. */}
+          {data.kind === "skill" && (
+            <SkillInstallCard name={data.name} namespace={imported ? data.namespace : undefined} />
+          )}
+          {data.kind === "plugin" && <PluginInstallCard plugin={data} />}
 
-          <SkillFilesPanel id={data.id} body={data.body} />
+          {data.kind === "mcp" && <McpDetailPanel mcp={data} />}
+          {data.kind === "skill" && <SkillFilesPanel id={data.id} body={data.body} />}
+          {data.kind === "plugin" && (
+            <>
+              <PluginComponentsPanel
+                plugin={data}
+                onOpenFile={(path) => {
+                  setOpenFile(path);
+                  filesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              />
+              <div ref={filesRef} className="flex h-[560px] shrink-0 flex-col">
+                <SkillFilesPanel
+                  id={data.id}
+                  body={data.body ?? ""}
+                  rootFile={
+                    data.body !== null || !data.agents[0]
+                      ? PLUGIN_README_FILE_NAME
+                      : PLUGIN_AGENTS[data.agents[0]].manifestPath
+                  }
+                  selectedPath={openFile}
+                  onSelectedPathChange={setOpenFile}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex flex-col gap-4 overflow-y-auto">
@@ -336,14 +401,55 @@ export function SkillDetail({
                 <SourceLink source={imported} />
               </DetailRow>
             )}
-            <DetailRow
-              label="Tool access"
-              stacked={Boolean(
-                data.allowed_tools && splitAllowedTools(data.allowed_tools).length > 0,
-              )}
-            >
-              <ToolAccess allowedTools={data.allowed_tools} />
-            </DetailRow>
+            {data.kind === "plugin" && (
+              <>
+                <DetailRow label="Agents">
+                  <div className="flex flex-wrap justify-end gap-1">
+                    {data.agents.map((agent) => (
+                      <Badge key={agent} variant="outline">
+                        {PLUGIN_AGENTS[agent].label}
+                      </Badge>
+                    ))}
+                  </div>
+                </DetailRow>
+                {data.version && <DetailRow label="Version">{data.version}</DetailRow>}
+                {data.license && <DetailRow label="License">{data.license}</DetailRow>}
+                {data.homepage && (
+                  <DetailRow label="Homepage">
+                    <a
+                      href={data.homepage}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 hover:text-foreground"
+                    >
+                      Open
+                      <ExternalLinkIcon className="size-3" />
+                    </a>
+                  </DetailRow>
+                )}
+              </>
+            )}
+            {data.kind === "skill" && (
+              <DetailRow
+                label="Tool access"
+                stacked={Boolean(
+                  data.allowed_tools && splitAllowedTools(data.allowed_tools).length > 0,
+                )}
+              >
+                <ToolAccess allowedTools={data.allowed_tools} />
+              </DetailRow>
+            )}
+            {data.kind === "mcp" && (
+              <DetailRow label="Type">
+                <span className="font-mono text-xs">
+                  {data.packages && data.packages.length > 0
+                    ? `${data.packages[0]?.registry_name} package`
+                    : data.remotes && data.remotes.length > 0
+                      ? `${data.remotes[0]?.transport_type} remote`
+                      : "MCP Server"}
+                </span>
+              </DetailRow>
+            )}
           </Panel>
         </div>
       </Reveal>
@@ -356,6 +462,18 @@ export function SkillDetail({
           onOpenChange={setDeleteOpen}
           onDeleted={onDeleted}
         />
+      )}
+      {canEditTags && data.kind === "mcp" && (
+        <FormDialog
+          open={editMcpOpen}
+          onOpenChange={setEditMcpOpen}
+          className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl"
+        >
+          <FormDialogHeader title="Edit MCP server" description={data.name} />
+          <FormDialogBody>
+            <PublishMcpForm initial={data} onPublished={() => setEditMcpOpen(false)} />
+          </FormDialogBody>
+        </FormDialog>
       )}
       {canEditTags && (
         <EditTagsDialog

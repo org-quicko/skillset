@@ -1,6 +1,7 @@
 import {
   discoverSkillFolders,
   gitProviderConfig,
+  PLUGIN_MANIFEST_PATHS,
   readSkillFolder,
   SkillFolderError,
   type Repository,
@@ -194,7 +195,9 @@ export class ImportsService {
    * @param location - The provider, project, ref, and folder to search from.
    * @param fetchImpl - The `fetch` to reach the provider with. Defaults to
    * the global one; tests pass a fake so a request never leaves the process.
-   * @returns Every Skill folder found, as a `SkillSourceLocation` each.
+   * @param kind - What to look for: folders holding a `SKILL.md`, or Plugin
+   * roots holding an agent manifest (`PLUGIN_MANIFEST_PATHS`).
+   * @returns Every Skill folder (or Plugin root) found, as a `SkillSourceLocation` each.
    * @throws IntegrationNotConfiguredError if no Integration is configured for
    * that Git Provider.
    * @throws NotConnectedError if the caller holds no Connection to it.
@@ -204,7 +207,7 @@ export class ImportsService {
    * installed on the project's owner, rather than a missing folder.
    * @throws ImportFailedError if the provider refuses for any other reason,
    * rate-limits the request, or cannot be reached.
-   * @throws ImportRejectedError if no Skill was found, or the project holds
+   * @throws ImportRejectedError if nothing of `kind` was found, or the project holds
    * more entries than a discovery walk will search.
    * @example
    * ```ts
@@ -217,6 +220,7 @@ export class ImportsService {
     userId: string,
     location: SkillSourceLocation,
     fetchImpl?: typeof fetch,
+    kind: "skill" | "plugin" = "skill",
   ): Promise<SkillSourceLocation[]> {
     const configured = await this.integrations.listByProvider(location.provider);
     if (configured.length === 0) {
@@ -231,7 +235,8 @@ export class ImportsService {
 
     let found: SkillSourceLocation[];
     try {
-      found = await discoverSkillFolders(location, { token, fetch: fetchImpl });
+      const markers = kind === "plugin" ? PLUGIN_MANIFEST_PATHS : undefined;
+      found = await discoverSkillFolders(location, { token, fetch: fetchImpl, markers });
     } catch (cause) {
       if (!(cause instanceof SkillFolderError)) throw cause;
 
@@ -240,7 +245,9 @@ export class ImportsService {
       // both ("that folder is empty" / "that folder holds more files than a
       // Skill may contain") is written for the latter and would mislead here.
       if (cause.reason === "empty_folder") {
-        throw new ImportRejectedError("No Skill was found under that project or folder.");
+        throw new ImportRejectedError(
+          `No ${kind === "plugin" ? "plugin" : "Skill"} was found under that project or folder.`,
+        );
       }
       if (cause.reason === "too_many_entries") {
         throw new ImportRejectedError("That project has more to search than a discovery walk will look through.");

@@ -1,5 +1,6 @@
 import type { Kysely } from "kysely";
 import * as baseline from "./0000_baseline.js";
+import * as marketplaceInstallSource from "./0001_marketplace_install_source.js";
 
 /**
  * A migration, handed the schema it runs in alongside a client already scoped
@@ -12,4 +13,5 @@ export interface SchemaMigration {
 /** Every migration, by the name the migrator records and orders it by. */
 export const migrations: Record<string, SchemaMigration> = {
   "0000_baseline": baseline,
+  "0001_marketplace_install_source": marketplaceInstallSource,
 };

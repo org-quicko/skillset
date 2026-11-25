@@ -2,13 +2,22 @@ import {
   ARTIFACT_MAX_UNCOMPRESSED_BYTES,
   artifactMediaType,
   buildArtifact,
+  CLAUDE_MARKETPLACE_NAME,
+  claudeMarketplaceEntryName,
   validateArtifactPath,
   normalizeSkillPath,
   registryNamespace,
   reverseDomain,
+  kindConfig,
   type ArtifactFile,
   type ArtifactFileUpload,
+  type McpPackage,
+  type McpPayload,
+  type McpRemote,
   type Page,
+  type PluginAgent,
+  type PluginComponents,
+  type PluginPayload,
   type SkillFile,
   type SkillPayload,
 } from "@in-org-quicko/skillset-shared";
@@ -21,11 +30,12 @@ import {
   ArtifactFileNotFoundError,
   ArtifactMissingError,
   ArtifactTooLargeError,
+  NotAnMcpServerError,
   ResourceDeleteFailedError,
   ResourceNotFoundError,
 } from "./resources.errors.js";
 import type { ResourceDirectoryQuery } from "./resource-directory-query.js";
-import type { PublishBody } from "./resources.schemas.js";
+import type { PublishBody, PublishMcpBody, PublishPluginBody } from "./resources.schemas.js";
 import type { Logger } from "../../lib/logger.js";
 import type { AnalyticsService, InstallSource, InstallTrendPoint } from "../analytics/analytics.service.js";
 import type { TagsService, TagSummary } from "../tags/tags.service.js";
@@ -37,6 +47,15 @@ import {
   artifactPrefix,
 } from "../../storage/keys.js";
 import type { StorageAdapter } from "../../storage/types.js";
+
+/** What an MCP publish or edit stores in `payload` — an empty list is stored as none. */
+function mcpPayloadFrom(input: PublishMcpBody): McpPayload {
+  return {
+    kind: "mcp",
+    packages: input.packages && input.packages.length > 0 ? input.packages : null,
+    remotes: input.remotes && input.remotes.length > 0 ? input.remotes : null,
+  };
+}
 
 /**
  * The Namespace a Resource is named by, from the `source` it declared.
@@ -141,6 +160,53 @@ interface SkillSummary {
 
 export interface SkillDetail extends SkillSummary {
   body: string;
+}
+
+export interface McpServiceDetail {
+  id: string;
+  kind: "mcp";
+  namespace: string;
+  name: string;
+  description: string;
+  body: string | null;
+  packages: McpPackage[] | null;
+  remotes: McpRemote[] | null;
+  source: string;
+  published_at: Date;
+  updated_at: Date;
+  published_by: SkillPublisher;
+  tags: TagSummary[];
+  installs: number;
+}
+
+export interface PluginServiceDetail {
+  id: string;
+  kind: "plugin";
+  namespace: string;
+  name: string;
+  description: string;
+  body: string | null;
+  agents: PluginAgent[];
+  version: string | null;
+  license: string | null;
+  homepage: string | null;
+  components: PluginComponents | null;
+  source: string;
+  published_at: Date;
+  updated_at: Date;
+  published_by: SkillPublisher;
+  tags: TagSummary[];
+  installs: number;
+}
+
+export type ResourceDetailResult = SkillDetail | McpServiceDetail | PluginServiceDetail;
+
+/** One plugin in Claude Code's marketplace file (code.claude.com/docs/en/plugin-marketplaces). */
+interface ClaudeMarketplaceEntry {
+  name: string;
+  description: string;
+  version: string;
+  source: { source: "archive"; url: string };
 }
 
 /** `PUT /resources/{kind}/{name}`'s `upload`: one presigned destination per declared file. */
@@ -494,26 +560,29 @@ export class ResourcesService {
    * row being removed (docs/data-model.md) — rather than `published_by`,
    * which goes null in that case and would undercount.
    *
+   * @param kind - When set, counts only Resources of this Kind — what each
+   * catalog section's hero shows.
    * @returns The total Resource count, the distinct Publisher count, and the
-   * total Install count across every Resource.
+   * total Install count across every Resource, or every Resource of `kind`.
    * @example
    * ```ts
-   * const stats = await resourcesService.getStats();
+   * const stats = await resourcesService.getStats("mcp");
    * ```
    */
-  async getStats(): Promise<ResourceDirectoryStats> {
-    const [counts, installs] = await Promise.all([
-      this.db
-        .selectFrom("resources")
-        .select((eb) => [
-          eb.fn.countAll<number>().as("skills"),
-          eb.fn.count<number>("published_by_email").distinct().as("publishers"),
-        ])
-        .executeTakeFirstOrThrow(),
-      this.analytics.getTotalInstallCount(),
+  async getStats(kind?: string): Promise<ResourceDirectoryStats> {
+    let counts = this.db
+      .selectFrom("resources")
+      .select((eb) => [
+        eb.fn.countAll<number>().as("skills"),
+        eb.fn.count<number>("published_by_email").distinct().as("publishers"),
+      ]);
+    if (kind) counts = counts.where("kind", "=", kind);
+    const [row, installs] = await Promise.all([
+      counts.executeTakeFirstOrThrow(),
+      this.analytics.getTotalInstallCount(kind),
     ]);
 
-    return { ...counts, installs };
+    return { ...row, installs };
   }
 
   /**
@@ -529,15 +598,29 @@ export class ResourcesService {
    * @throws ResourceNotFoundError if no Resource exists by `id`.
    * @example
    * ```ts
-   * const skill = await resourcesService.get(id);
+   * const resource = await resourcesService.get(id);
    * ```
    */
-  async get(id: string): Promise<SkillDetail> {
-    return this.readSkill((eb) => eb("resources.id", "=", id));
+  async get(id: string): Promise<ResourceDetailResult> {
+    const row = await this.db.selectFrom("resources").select("kind").where("id", "=", id).executeTakeFirst();
+    if (!row) throw new ResourceNotFoundError();
+    return this.readByKind(row.kind, (eb) => eb("resources.id", "=", id));
+  }
+
+  /** Reads the Resource matching `identity` in its own Kind's shape. A Kind with no reader of its own reads as a Skill. */
+  private readByKind(kind: string, identity: ResourceIdentity): Promise<ResourceDetailResult> {
+    switch (kind) {
+      case "mcp":
+        return this.readMcp(identity);
+      case "plugin":
+        return this.readPlugin(identity);
+      default:
+        return this.readSkill(identity);
+    }
   }
 
   /**
-   * Reads a single Skill by its exact `(kind, name)`.
+   * Reads a single Resource by its exact `(kind, name)`.
    *
    * @remarks
    * The web keeps `/skills/<name>` as a browser URL, so a reader arriving from
@@ -545,14 +628,14 @@ export class ResourcesService {
    *
    * An indexed equality match on the unique `(kind, namespace, name)` triple,
    * not search: `GET /resources?q=` ranks by recency and caps at one page, and
-   * Postgres's `english` config drops stopwords — which would 404 a real Skill
+   * Postgres's `english` config drops stopwords — which would 404 a real Resource
    * whose name happens to be one (docs/data-model.md allows single-word names).
    *
    * A bare name still reads, which is the point: Namespaces exist to let two
    * parties publish `pdf`, not to make either one harder to look up (ADR-0042).
    * Unqualified, the lookup takes the only candidate when there is one, and
    * otherwise the one published here — so a name that resolved before still
-   * resolves, and to the same Skill. Only a genuine tie between outside
+   * resolves, and to the same Resource. Only a genuine tie between outside
    * parties has no answer, and that refuses rather than guesses.
    *
    * Qualification is what *installing* needs, not what reading needs: an
@@ -564,26 +647,65 @@ export class ResourcesService {
    * CLI, the MCP server — agrees on what an unqualified name means.
    *
    * @param kind - The Kind path segment, not yet known to be registered.
-   * @param name - The Skill's name.
+   * @param name - The Resource's name.
    * @param namespace - Which party named it. Omitted, the rule above applies.
-   * @returns `SkillDetail`
-   * @throws ResourceNotFoundError if `kind` isn't `"skill"`, or no Skill
-   * exists by that name — a route param, so an unrecognised Kind here reads
-   * as "not found" rather than a validation error (unlike the same check on
-   * `publish`, whose `kind` chooses what gets written).
+   * @returns `ResourceDetail`
+   * @throws ResourceNotFoundError if no Resource exists by that name.
    * @throws AmbiguousResourceNameError if the bare name matches several
    * Namespaces and none of them is this Registry's own.
    * @example
    * ```ts
    * await resourcesService.getByName("skill", "code-review");
-   * await resourcesService.getByName("skill", "pdf", "anthropics/skills");
+   * await resourcesService.getByName("mcp", "com.example/server");
    * ```
    */
-  async getByName(kind: string, name: string, namespace?: string): Promise<SkillDetail> {
-    const named = namespace ?? (await this.resolveNamespace(kind, name));
-    return this.readSkill((eb) =>
-      eb.and({ "resources.kind": kind, "resources.namespace": named, "resources.name": name }),
-    );
+  async getByName(kind: string, name: string, namespace?: string): Promise<ResourceDetailResult> {
+    if (kind === "any") {
+      return this.getByNameAnyKind(name, namespace);
+    }
+    try {
+      const named = namespace ?? (await this.resolveNamespace(kind, name));
+      const identity: ResourceIdentity = (eb) =>
+        eb.and({ "resources.kind": kind, "resources.namespace": named, "resources.name": name });
+      return await this.readByKind(kind, identity);
+    } catch (err) {
+      if (err instanceof ResourceNotFoundError && kind === "skill") {
+        return await this.getByNameAnyKind(name, namespace);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Reads a single Resource by its name across all registered Kinds.
+   */
+  async getByNameAnyKind(name: string, namespace?: string): Promise<ResourceDetailResult> {
+    let candidateQuery = this.db
+      .selectFrom("resources")
+      .select(["kind", "namespace"])
+      .where("name", "=", name);
+    if (namespace) {
+      candidateQuery = candidateQuery.where("namespace", "=", namespace);
+    }
+    const candidates = await candidateQuery.execute();
+
+    const [only] = candidates;
+    if (!only) throw new ResourceNotFoundError();
+
+    let chosen = only;
+    if (candidates.length > 1) {
+      const own = registryNamespace(this.publicUrl);
+      const matchOwn = candidates.find((c) => c.namespace === own);
+      if (matchOwn) {
+        chosen = matchOwn;
+      } else {
+        throw new AmbiguousResourceNameError(name, candidates.map((c) => c.namespace).sort());
+      }
+    }
+
+    const identity: ResourceIdentity = (eb) =>
+      eb.and({ "resources.kind": chosen.kind, "resources.namespace": chosen.namespace, "resources.name": name });
+    return this.readByKind(chosen.kind, identity);
   }
 
   /**
@@ -705,6 +827,110 @@ export class ResourcesService {
   }
 
   /**
+   * Reads the one MCP Server matching `identity`.
+   */
+  private async readMcp(identity: ResourceIdentity): Promise<McpServiceDetail> {
+    const resource = await this.db
+      .selectFrom("resources")
+      .leftJoin("users", "users.id", "resources.published_by")
+      .select(skillSelection)
+      .where(identity)
+      .executeTakeFirst();
+    if (!resource) throw new ResourceNotFoundError();
+
+    const [tags, installs] = await Promise.all([
+      this.tags.getSkillTags(resource.id),
+      this.analytics.getInstallCount(resource.id),
+    ]);
+    const payload = resource.payload as McpPayload;
+    return {
+      id: resource.id,
+      kind: "mcp",
+      namespace: resource.namespace,
+      name: resource.name,
+      description: resource.description,
+      body: resource.body,
+      packages: payload.packages ?? null,
+      remotes: payload.remotes ?? null,
+      source: this.resolveSource(resource.source),
+      published_at: resource.published_at,
+      updated_at: resource.updated_at,
+      published_by: {
+        user_id: resource.publisher_user_id,
+        email: resource.published_by_email,
+        first_name: resource.publisher_first_name,
+        last_name: resource.publisher_last_name,
+      },
+      tags,
+      installs,
+    };
+  }
+
+  /** Reads the one Plugin matching `identity`. */
+  private async readPlugin(identity: ResourceIdentity): Promise<PluginServiceDetail> {
+    const resource = await this.db
+      .selectFrom("resources")
+      .leftJoin("users", "users.id", "resources.published_by")
+      .select(skillSelection)
+      .where(identity)
+      .executeTakeFirst();
+    if (!resource) throw new ResourceNotFoundError();
+
+    const [tags, installs] = await Promise.all([
+      this.tags.getSkillTags(resource.id),
+      this.analytics.getInstallCount(resource.id),
+    ]);
+    const payload = resource.payload as PluginPayload;
+    return {
+      id: resource.id,
+      kind: "plugin",
+      namespace: resource.namespace,
+      name: resource.name,
+      description: resource.description,
+      body: resource.body,
+      agents: payload.agents,
+      version: payload.version,
+      license: payload.license,
+      homepage: payload.homepage,
+      components: payload.components ?? null,
+      source: this.resolveSource(resource.source),
+      published_at: resource.published_at,
+      updated_at: resource.updated_at,
+      published_by: {
+        user_id: resource.publisher_user_id,
+        email: resource.published_by_email,
+        first_name: resource.publisher_first_name,
+        last_name: resource.publisher_last_name,
+      },
+      tags,
+      installs,
+    };
+  }
+
+  /**
+   * Deletes the files a new manifest no longer names, then signs one upload URL per file it does.
+   *
+   * @remarks
+   * Shared by every Kind with an Artifact (ADR-0032). Pruning comes first, so
+   * a republish that drops a file never leaves it behind to be served.
+   */
+  private async replaceArtifactUploads(id: string, manifest: ArtifactFile[]): Promise<SkillUpload> {
+    await this.pruneArtifactFiles(id, manifest);
+    const files = await Promise.all(
+      manifest.map(async (file): Promise<ArtifactFileUpload> => ({
+        path: file.path,
+        url: await this.storage.presignUpload(artifactFileKey(id, file.path), {
+          expiresInSeconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS,
+          contentType: ARTIFACT_UPLOAD_CONTENT_TYPE,
+        }),
+        method: "PUT",
+        headers: { "content-type": ARTIFACT_UPLOAD_CONTENT_TYPE },
+      })),
+    );
+    return { files, expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS };
+  }
+
+  /**
    * Publishes a Skill, then returns a presigned URL per declared file to upload
    * its Artifact to.
    *
@@ -806,18 +1032,7 @@ export class ResourcesService {
       .returning("id")
       .executeTakeFirstOrThrow();
 
-    await this.pruneArtifactFiles(row.id, manifest);
-    const uploads = await Promise.all(
-      manifest.map(async (file): Promise<ArtifactFileUpload> => ({
-        path: file.path,
-        url: await this.storage.presignUpload(artifactFileKey(row.id, file.path), {
-          expiresInSeconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS,
-          contentType: ARTIFACT_UPLOAD_CONTENT_TYPE,
-        }),
-        method: "PUT",
-        headers: { "content-type": ARTIFACT_UPLOAD_CONTENT_TYPE },
-      })),
-    );
+    const upload = await this.replaceArtifactUploads(row.id, manifest);
 
     this.logger.info({ skill_name: name, user_id: publisher.id, files: manifest.length }, "skill published");
 
@@ -830,8 +1045,232 @@ export class ResourcesService {
       // ever writes `resource_analytics` (ADR-0012); a brand new Skill simply
       // has neither yet.
       skill: await this.readSkill((eb) => eb("resources.id", "=", row.id)),
-      upload: { files: uploads, expires_in_seconds: ARTIFACT_UPLOAD_EXPIRY_SECONDS },
+      upload,
     };
+  }
+
+  /**
+   * Publishes a Plugin, then returns a presigned URL per declared file to upload its Artifact to.
+   *
+   * @remarks
+   * The same two-phase, idempotent publish as a Skill's: the row is upserted
+   * on `(kind, namespace, name)` and the Artifact replaced (ADR-0002,
+   * ADR-0032). `agents` is the publisher's declaration, already held to the
+   * manifest paths it declared (`PublishPluginBodySchema`).
+   *
+   * @param publisher - The authenticated User publishing the Plugin.
+   * @param name - The Plugin's name, already held to `validatePluginName`.
+   * @param input - The description, README, agents, manifest scalars, and file manifest.
+   * @returns The Plugin as stored, and where to upload each declared file.
+   * @example
+   * ```ts
+   * const { plugin, upload } = await resourcesService.publishPlugin(user, "review-suite", {
+   *   description: "Reviews code.", body: null, agents: ["claude-code"],
+   *   files: [{ path: ".claude-plugin/plugin.json", size: 80 }],
+   * });
+   * ```
+   */
+  async publishPlugin(
+    publisher: UserRow,
+    name: string,
+    input: PublishPluginBody,
+  ): Promise<{ plugin: PluginServiceDetail; upload: SkillUpload }> {
+    const kind = "plugin";
+    const { description, files: manifest } = input;
+    const body = input.body ?? null;
+    const source = input.source ?? null;
+    const namespace = namespaceForSource(source, this.publicUrl);
+    const payload: PluginPayload = {
+      kind,
+      agents: input.agents,
+      version: input.version ?? null,
+      license: input.license ?? null,
+      homepage: input.homepage ?? null,
+      components: input.components,
+    };
+    const published_at = new Date();
+    const published_by_name = `${publisher.first_name} ${publisher.last_name}`;
+
+    const row = await this.db
+      .insertInto("resources")
+      .values({
+        kind,
+        namespace,
+        name,
+        description,
+        body,
+        payload,
+        published_by: publisher.id,
+        published_by_email: publisher.email,
+        published_by_name,
+        published_at,
+        source,
+      })
+      .onConflict((oc) =>
+        oc.columns(["kind", "namespace", "name"]).doUpdateSet({
+          description,
+          body,
+          payload,
+          published_by: publisher.id,
+          published_by_email: publisher.email,
+          published_by_name,
+          published_at,
+          source,
+          updated_at: new Date(),
+        }),
+      )
+      .returning("id")
+      .executeTakeFirstOrThrow();
+
+    const upload = await this.replaceArtifactUploads(row.id, manifest);
+    this.logger.info({ plugin_name: name, user_id: publisher.id, files: manifest.length }, "plugin published");
+    return { plugin: await this.readPlugin((eb) => eb("resources.id", "=", row.id)), upload };
+  }
+
+  /**
+   * Claude Code's marketplace: every Plugin that supports `claude-code`, each
+   * downloadable as a zip from this Registry.
+   *
+   * @remarks
+   * Public, like every read (ADR-0013). Each entry's version adds the last
+   * update time to the manifest's own version, because Claude Code keeps a
+   * cached archive until the version changes and a republish overwrites in
+   * place (ADR-0002). Entry names follow `claudeMarketplaceEntryName`, which
+   * the web's install commands use too.
+   *
+   * @returns The marketplace file's contents.
+   * @example
+   * ```ts
+   * const marketplace = await resourcesService.getClaudeMarketplace();
+   * ```
+   */
+  async getClaudeMarketplace(): Promise<{ name: string; owner: { name: string }; plugins: ClaudeMarketplaceEntry[] }> {
+    const rows = await this.db
+      .selectFrom("resources")
+      .select(["id", "namespace", "name", "description", "payload", "updated_at"])
+      .where("kind", "=", "plugin")
+      .where(sql<boolean>`${sql.ref("payload")}->'agents' ? 'claude-code'`)
+      .orderBy("name")
+      .execute();
+    const own = registryNamespace(this.publicUrl);
+    const base = this.publicUrl.replace(/\/+$/, "");
+    return {
+      name: CLAUDE_MARKETPLACE_NAME,
+      owner: { name: "Skillset" },
+      plugins: rows.map((row) => {
+        const payload = row.payload as PluginPayload;
+        return {
+          name: claudeMarketplaceEntryName(row.name, row.namespace, row.namespace === own),
+          description: row.description,
+          version: `${payload.version ?? "0.0.0"}+${Math.floor(row.updated_at.getTime() / 1000)}`,
+          source: { source: "archive", url: `${base}/api/resources/${row.id}/artifact?source=marketplace` },
+        };
+      }),
+    };
+  }
+
+  /**
+   * Publishes an MCP Server (ADR-0026, ADR-0027).
+   *
+   * @remarks
+   * MCP servers store pure metadata — no Artifact bytes are uploaded or stored.
+   * Publishing is single-phase, returning the created/updated resource immediately.
+   */
+  async publishMcp(
+    publisher: UserRow,
+    name: string,
+    input: PublishMcpBody,
+  ): Promise<{ resource: McpServiceDetail }> {
+    const kind = "mcp";
+    const { description, body } = input;
+    const source = input.source ?? null;
+    const namespace = namespaceForSource(source, this.publicUrl);
+    const mcpPayload = mcpPayloadFrom(input);
+
+    const published_at = new Date();
+    const published_by_name = `${publisher.first_name} ${publisher.last_name}`;
+
+    const row = await this.db
+      .insertInto("resources")
+      .values({
+        kind,
+        namespace,
+        name,
+        description,
+        body: body ?? null,
+        payload: mcpPayload,
+        published_by: publisher.id,
+        published_by_email: publisher.email,
+        published_by_name,
+        published_at,
+        source,
+        updated_at: published_at,
+      })
+      .onConflict((oc) =>
+        oc.columns(["kind", "namespace", "name"]).doUpdateSet({
+          description,
+          body: body ?? null,
+          payload: mcpPayload,
+          published_by: publisher.id,
+          published_by_email: publisher.email,
+          published_by_name,
+          published_at,
+          source,
+          updated_at: new Date(),
+        }),
+      )
+      .returning("id")
+      .executeTakeFirstOrThrow();
+
+    this.logger.info({ mcp_name: name, user_id: publisher.id }, "mcp server published");
+
+    const resource = await this.readMcp((eb) => eb("resources.id", "=", row.id));
+    return { resource };
+  }
+
+  /**
+   * Replaces an existing MCP server's description, documentation, packages,
+   * remotes, and Source, keeping its name and Namespace.
+   *
+   * @remarks
+   * By id, not by name like `publishMcp`: publishing derives the Namespace
+   * from the Source, so adding or changing a repository link there would
+   * create a second server instead of editing this one. Identity is fixed at
+   * first publish; everything else is editable.
+   *
+   * @param publisher - The User making the edit; recorded as the publisher.
+   * @param id - The MCP server's id.
+   * @param input - The full new content, held to the same rules as a publish.
+   * @returns The MCP server as stored after the edit.
+   * @throws ResourceNotFoundError if no Resource exists by `id`.
+   * @throws NotAnMcpServerError if the Resource is of another Kind.
+   * @example
+   * ```ts
+   * await resourcesService.updateMcp(user, id, { description: "Forecasts.", remotes, source: repoUrl });
+   * ```
+   */
+  async updateMcp(publisher: UserRow, id: string, input: PublishMcpBody): Promise<{ resource: McpServiceDetail }> {
+    const existing = await this.db.selectFrom("resources").select("kind").where("id", "=", id).executeTakeFirst();
+    if (!existing) throw new ResourceNotFoundError();
+    if (existing.kind !== "mcp") throw new NotAnMcpServerError();
+
+    await this.db
+      .updateTable("resources")
+      .set({
+        description: input.description,
+        body: input.body ?? null,
+        payload: mcpPayloadFrom(input),
+        source: input.source ?? null,
+        published_by: publisher.id,
+        published_by_email: publisher.email,
+        published_by_name: `${publisher.first_name} ${publisher.last_name}`,
+        updated_at: new Date(),
+      })
+      .where("id", "=", id)
+      .execute();
+
+    this.logger.info({ resource_id: id, user_id: publisher.id }, "mcp server updated");
+    return { resource: await this.readMcp((eb) => eb("resources.id", "=", id)) };
   }
 
   /**
@@ -908,7 +1347,8 @@ export class ResourcesService {
    * ```
    */
   async listArtifactFiles(id: string): Promise<ArtifactFile[]> {
-    await this.getNameOrThrow(id);
+    const resource = await this.getResourceMetaOrThrow(id);
+    if (!kindConfig(resource.kind).hasArtifact) throw new ArtifactMissingError();
     return this.readManifest(id);
   }
 
@@ -949,7 +1389,8 @@ export class ResourcesService {
    * ```
    */
   async readArtifactFile(id: string, rawPath: string): Promise<ArtifactFileContent> {
-    await this.getNameOrThrow(id);
+    const resource = await this.getResourceMetaOrThrow(id);
+    if (!kindConfig(resource.kind).hasArtifact) throw new ArtifactMissingError();
 
     const path = normalizeSkillPath(rawPath);
     validateArtifactPath(path);
@@ -1003,7 +1444,9 @@ export class ResourcesService {
     source: InstallSource,
     clientFingerprint?: string,
   ): Promise<ArtifactArchive> {
-    const name = await this.getNameOrThrow(id);
+    const resource = await this.getResourceMetaOrThrow(id);
+    if (!kindConfig(resource.kind).hasArtifact) throw new ArtifactMissingError();
+    const name = resource.name;
     const manifest = await this.readManifest(id);
 
     // Checked against the sizes *storage* reports, before a single object is
@@ -1071,6 +1514,18 @@ export class ResourcesService {
   async getInstallTrend(id: string): Promise<InstallTrendPoint[]> {
     await this.getNameOrThrow(id);
     return this.analytics.getInstallTimeseries(id, INSTALL_TREND_DAYS);
+  }
+
+  /**
+   * Confirms a Resource exists by id, returning its name and kind.
+   *
+   * @param id - The Resource's id.
+   * @throws ResourceNotFoundError if no Resource exists by `id`.
+   */
+  private async getResourceMetaOrThrow(id: string): Promise<{ name: string; kind: string }> {
+    const row = await this.db.selectFrom("resources").select(["name", "kind"]).where("id", "=", id).executeTakeFirst();
+    if (!row) throw new ResourceNotFoundError();
+    return row;
   }
 
   /**

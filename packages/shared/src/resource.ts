@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { SKILL_DESCRIPTION_MAX_LENGTH, validateSkillName } from "./skill-rules.js";
-import { PublisherSchema, SkillPayloadSchema } from "./skill.js";
+import { PublisherSchema, SkillPayloadSchema, SkillSchema } from "./skill.js";
+import { MCP_DESCRIPTION_MAX_LENGTH, validateMcpName } from "./mcp-rules.js";
+import { McpPayloadSchema, McpSchema } from "./mcp.js";
+import { PLUGIN_DESCRIPTION_MAX_LENGTH, PluginPayloadSchema, PluginSchema, validatePluginName } from "./plugin.js";
 import { TagSchema } from "./tag.js";
 import { timestamp } from "./timestamp.js";
 
@@ -22,9 +25,8 @@ export interface KindConfig {
  * @remarks
  * Plain text, not a Postgres enum or a `z.enum` — the treatment
  * `integrations.provider` already gets against `GIT_PROVIDERS` (ADR-0024).
- * Registering a new Kind is an insert here, not a migration. `skill` is the
- * only one registered in this ticket; `mcp-server` and `plugin` follow later
- * (spec: `.scratch/generic-resources/spec.md`).
+ * Registering a new Kind is an insert here, not a migration. `skill`, `mcp`,
+ * and `plugin` are registered (spec: `.scratch/generic-resources/spec.md`).
  */
 export const KINDS: Record<string, KindConfig> = {
   skill: {
@@ -32,6 +34,18 @@ export const KINDS: Record<string, KindConfig> = {
     descriptionMaxLength: SKILL_DESCRIPTION_MAX_LENGTH,
     hasArtifact: true,
     payloadSchema: SkillPayloadSchema,
+  },
+  mcp: {
+    validateName: validateMcpName,
+    descriptionMaxLength: MCP_DESCRIPTION_MAX_LENGTH,
+    hasArtifact: false,
+    payloadSchema: McpPayloadSchema,
+  },
+  plugin: {
+    validateName: validatePluginName,
+    descriptionMaxLength: PLUGIN_DESCRIPTION_MAX_LENGTH,
+    hasArtifact: true,
+    payloadSchema: PluginPayloadSchema,
   },
 };
 
@@ -78,8 +92,11 @@ export function kindConfig(kind: string): KindConfig {
  * (ADR-0026). `skill` is the only variant in this ticket; a fourth Kind adds
  * one here alongside a `KINDS` entry.
  */
-export const ResourcePayloadSchema = z.discriminatedUnion("kind", [SkillPayloadSchema]);
+export const ResourcePayloadSchema = z.discriminatedUnion("kind", [SkillPayloadSchema, McpPayloadSchema, PluginPayloadSchema]);
 export type ResourcePayload = z.infer<typeof ResourcePayloadSchema>;
+
+export const ResourceDetailSchema = z.discriminatedUnion("kind", [SkillSchema, McpSchema, PluginSchema]);
+export type ResourceDetail = z.infer<typeof ResourceDetailSchema>;
 
 /**
  * The fields every Kind has in common (ADR-0026) — everything else about a

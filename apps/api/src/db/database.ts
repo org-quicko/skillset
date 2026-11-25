@@ -11,7 +11,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type IdentityProviderKind = "github" | "google" | "microsoft";
 
-export type SkillInstallSource = "cli" | "mcp" | "web";
+export type SkillInstallSource = "cli" | "marketplace" | "mcp" | "web";
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 

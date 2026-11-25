@@ -404,3 +404,12 @@ export {
   type Progress,
   type RepositorySkill,
 } from "./repository.js";
+
+export {
+  deriveMcpServerKey,
+  installMcpServer,
+  mcpResourceToConfig,
+  type InstallMcpOptions,
+  type McpInstallReport,
+  type McpServerConfigEntry,
+} from "./mcp-install.js";

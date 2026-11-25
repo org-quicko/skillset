@@ -1,0 +1,68 @@
+/** The catalog sections the top nav switches between, one per Kind the site lists. */
+export type SectionKind = "skill" | "mcp" | "plugin";
+
+export interface Section {
+  kind: SectionKind;
+  /** The nav label and the hero's heading. */
+  title: string;
+  /** Lower-case, for breadcrumbs and empty states. */
+  noun: string;
+  nounPlural: string;
+  description: string;
+  /** Where the section's list lives. */
+  path: string;
+  /** What every detail page in this section sits under. */
+  detailPrefix: string;
+}
+
+export const SECTIONS: Record<SectionKind, Section> = {
+  skill: {
+    kind: "skill",
+    title: "Skills",
+    noun: "skill",
+    nounPlural: "skills",
+    description: "Browse and install skills for research, coding, design, automation, and more.",
+    path: "/",
+    detailPrefix: "/skills/",
+  },
+  mcp: {
+    kind: "mcp",
+    title: "MCP Servers",
+    noun: "MCP server",
+    nounPlural: "MCP servers",
+    description: "Connect your agents to tools and data through Model Context Protocol servers.",
+    path: "/mcp-servers",
+    detailPrefix: "/mcp-servers/",
+  },
+  plugin: {
+    kind: "plugin",
+    title: "Plugins",
+    noun: "plugin",
+    nounPlural: "plugins",
+    description: "Bundles of skills, commands, and MCP servers you install in one step.",
+    path: "/plugins",
+    detailPrefix: "/plugins/",
+  },
+};
+
+export const SECTION_LIST: readonly Section[] = [SECTIONS.skill, SECTIONS.mcp, SECTIONS.plugin];
+
+/**
+ * The section a URL path belongs to — its list or any detail page under it.
+ *
+ * @param pathname - The URL path.
+ * @returns The section; Skills for `/` and for any path no other section claims.
+ */
+export function sectionForPath(pathname: string): Section {
+  return (
+    SECTION_LIST.find(
+      (section) =>
+        section.path !== "/" && (pathname === section.path || pathname.startsWith(section.detailPrefix)),
+    ) ?? SECTIONS.skill
+  );
+}
+
+/** Whether a Resource's `kind` string is one of the site's sections. */
+export function isSectionKind(kind: string): kind is SectionKind {
+  return Object.hasOwn(SECTIONS, kind);
+}

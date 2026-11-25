@@ -233,15 +233,17 @@ interface InstallFlags {
   scope?: string;
   copy?: boolean;
   force?: boolean;
+  kind?: "skill" | "mcp";
 }
 
 program
   .command("install")
   .description(
-    "Install a Skill for a coding Agent: by name from the Registry, or from a GitHub or GitLab URL, cloned with " +
+    "Install a Skill or MCP Server for a coding Agent: by name from the Registry, or from a GitHub or GitLab URL, cloned with " +
       "your own git credentials and submitted to the Registry for approval.",
   )
-  .argument("<target>", "A Skill's name in the Registry, or a GitHub or GitLab URL — a repository, or a folder in one")
+  .argument("<target>", "A Skill or MCP Server's name in the Registry, or a GitHub or GitLab URL — a repository, or a folder in one")
+  .option("--kind <kind>", "Resource kind to install: skill or mcp")
   .option("--name <skill>", "Required with a URL: which Skill to install, by the name in its SKILL.md")
   .option("--namespace <ns>", "Which party named the Skill, when a bare name matches more than one")
   .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
@@ -274,6 +276,7 @@ program
     };
     const options = {
       name: target,
+      kind: opts.kind,
       skillName: opts.name,
       namespace: opts.namespace,
       agent: opts.agent,
@@ -292,6 +295,13 @@ program
     };
     try {
       const report = await runInstall({ ...deps, progress }, options);
+      if ("kind" in report && report.kind === "mcp") {
+        p.log.success(
+          `Installed MCP server ${pc.cyan(report.serverKey)} into ${pc.cyan(report.configPath)}${report.overwritten ? " (replaced existing)" : ""}`,
+        );
+        p.outro("Done");
+        return;
+      }
       p.log.success(`Installed ${pc.cyan(report.skillDirectory)}`);
       if (report.link.kind === "symlink") {
         p.log.message(pc.dim(`${report.agent}: symlinked ${report.link.path}`));

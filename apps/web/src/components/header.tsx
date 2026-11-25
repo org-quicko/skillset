@@ -1,12 +1,10 @@
-import { roleMeets, type User } from "@in-org-quicko/skillset-shared";
-import { LogOutIcon, SettingsIcon, UploadIcon } from "lucide-react";
-import { useState } from "react";
+import type { User } from "@in-org-quicko/skillset-shared";
+import { LogOutIcon, SettingsIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { WordmarkButton } from "@/components/logo";
-import { PublishSkillForm } from "@/components/publish-skill-form";
 import { ThemeSegmentedControl, ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,38 +15,142 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLogout } from "@/hooks/use-auth";
-import { LOGIN_PATH, skillPath } from "@/lib/routes";
+import { LOGIN_PATH } from "@/lib/routes";
+import { SECTION_LIST, sectionForPath, type SectionKind } from "@/lib/sections";
 import { useRouter } from "@/lib/use-router";
-import { userDisplayName, userInitials } from "@/lib/utils";
+import { cn, userDisplayName, userInitials } from "@/lib/utils";
+
+/** The parts of a nav icon that move when its link is hovered. */
+const SHIFT = "transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)]";
+
+function NavIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      aria-hidden
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0 overflow-visible"
+    >
+      {children}
+    </svg>
+  );
+}
+
+/** Stacked cards: the front two slide down-left on hover. */
+function SkillsIcon() {
+  return (
+    <NavIcon>
+      <g className={cn(SHIFT, "group-hover:translate-x-[-4px] group-hover:translate-y-[4px]")}>
+        <path d="M21 7h-3a2 2 0 0 1-2-2V2" />
+        <path d="M21 6v6.5c0 .8-.7 1.5-1.5 1.5h-7c-.8 0-1.5-.7-1.5-1.5v-9c0-.8.7-1.5 1.5-1.5H17Z" />
+      </g>
+      <path
+        d="M7 8v8.8c0 .3.2.6.4.8.2.2.5.4.8.4H15"
+        className={cn(SHIFT, "group-hover:translate-x-[-2px] group-hover:translate-y-[2px]")}
+      />
+      <path d="M3 12v8.8c0 .3.2.6.4.8.2.2.5.4.8.4H11" />
+    </NavIcon>
+  );
+}
+
+/** A block that slots into its frame on hover. */
+function McpIcon() {
+  return (
+    <NavIcon>
+      <rect
+        x="14"
+        y="3"
+        width="7"
+        height="7"
+        rx="1"
+        className={cn(SHIFT, "group-hover:translate-x-[-4px] group-hover:translate-y-[4px]")}
+      />
+      <path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H3" />
+    </NavIcon>
+  );
+}
+
+/** A plug and socket that join on hover, hiding the pins. */
+function PluginsIcon() {
+  return (
+    <NavIcon>
+      <g className={cn(SHIFT, "group-hover:translate-x-[3px] group-hover:translate-y-[-3px]")}>
+        <path d="m2 22 3-3" />
+        <path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z" />
+        <path d="M7.5 13.5 10 11" className="transition-opacity duration-[240ms] group-hover:opacity-0" />
+        <path d="M10.5 16.5 13 14" className="transition-opacity duration-[240ms] group-hover:opacity-0" />
+      </g>
+      <g className={cn(SHIFT, "group-hover:translate-x-[-3px] group-hover:translate-y-[3px]")}>
+        <path d="m19 5 3-3" />
+        <path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z" />
+      </g>
+    </NavIcon>
+  );
+}
+
+const SECTION_ICONS: Record<SectionKind, () => ReactNode> = {
+  skill: SkillsIcon,
+  mcp: McpIcon,
+  plugin: PluginsIcon,
+};
 
 /**
- * The site's top navigation: the wordmark, the Publish a skill action (shown to every
- * visitor able to publish, signed in or not), a standalone theme toggle for signed-out
- * visitors, and the signed-in User's menu, which folds the theme control into itself.
+ * The site's top navigation: the wordmark, the Skills / MCP / Plugins section links, a
+ * Sign in link and standalone theme toggle for signed-out visitors, and the signed-in
+ * User's menu, which folds the theme control into itself. Publishing lives in each
+ * section's hero, not here.
  *
  * @param user - The signed-in User, or `null`/`undefined` for a signed-out visitor.
  * @param onOpenSettings - Called when the User picks Edit personal info or Settings from their menu.
  */
 export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSettings?: () => void }) {
   const logout = useLogout();
-  const { navigate } = useRouter();
-  const [publishOpen, setPublishOpen] = useState(false);
-
-  // Shown to every visitor, signed out or not: clicking it while signed out asks for a
-  // login instead of hiding the option outright (reads never require a session, but
-  // publishing does).
-  const canPublish = !user || roleMeets(user.role, "writer");
+  const { pathname, navigate } = useRouter();
+  // Settings is no section, so no link is marked current there.
+  const current = pathname.startsWith("/settings") ? null : sectionForPath(pathname);
 
   return (
     <header className="w-full border-b bg-background">
       <div className="relative mx-auto flex h-[54px] w-full max-w-[1200px] items-center justify-between px-7">
         <WordmarkButton />
 
+        {/* Centred on the bar, not between its neighbours, as the Top Nav design has it. */}
+        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-[22px]">
+          {SECTION_LIST.map((section) => {
+            const active = current?.kind === section.kind;
+            const Icon = SECTION_ICONS[section.kind];
+            return (
+              <a
+                key={section.kind}
+                href={section.path}
+                aria-current={active ? "page" : undefined}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  navigate(section.path);
+                }}
+                className={cn(
+                  "group flex h-8 items-center gap-[7px] rounded-full px-3 text-sm leading-4 font-medium whitespace-nowrap transition-colors outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50",
+                  active ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                <Icon />
+                {section.title}
+              </a>
+            );
+          })}
+        </nav>
+
         <div className="flex items-center gap-4">
-          {canPublish && (
-            <Button variant="outline" onClick={() => (user ? setPublishOpen(true) : navigate(LOGIN_PATH))}>
-              <UploadIcon />
-              Publish<span className="hidden sm:inline"> a Skill</span>
+          {!user && (
+            <Button variant="outline" onClick={() => navigate(LOGIN_PATH)}>
+              Sign in
             </Button>
           )}
           {!user && <ThemeToggle />}
@@ -93,21 +195,6 @@ export function Header({ user, onOpenSettings }: { user?: User | null; onOpenSet
           ) : null}
         </div>
       </div>
-
-      <FormDialog open={publishOpen} onOpenChange={setPublishOpen} className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl">
-        <FormDialogHeader
-          title="Publish a skill"
-          description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
-        />
-        <FormDialogBody>
-          <PublishSkillForm
-            onPublished={(name, namespace) => {
-              setPublishOpen(false);
-              navigate(skillPath(name, namespace));
-            }}
-          />
-        </FormDialogBody>
-      </FormDialog>
     </header>
   );
 }

@@ -113,13 +113,18 @@ describe("ResourceDirectoryQuerySchema — kind", () => {
   });
 
   it("refuses an unregistered Kind, naming the field and the known Kinds", async () => {
-    const res = await get("?kind=mcp-server");
+    const res = await get("?kind=unknown-kind");
     const body = (await res.json()) as Refusal;
 
     expect(res.status).toBe(400);
     expect(body.error.code).toBe("validation_failed");
     expect(body.error.field).toBe("kind");
-    expect(body.error.message).toBe("kind must be one of: skill.");
+    expect(body.error.message).toBe("kind must be one of: skill, mcp, plugin.");
+  });
+
+  it("accepts kind=mcp", async () => {
+    const parsedQuery = await parsed("?kind=mcp");
+    expect(parsedQuery.kind).toBe("mcp");
   });
 });
 

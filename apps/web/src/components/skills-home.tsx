@@ -1,13 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import type { Role } from "@in-org-quicko/skillset-shared";
-import { SearchIcon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { roleMeets, type Role } from "@in-org-quicko/skillset-shared";
+import { SearchIcon, UploadIcon, XIcon } from "lucide-react";
 import { CountUp } from "@/components/count-up";
+import { PublishMcpForm } from "@/components/publish-mcp-form";
+import { PublishSkillForm } from "@/components/publish-skill-form";
 import { Reveal } from "@/components/reveal";
 import { SkillList } from "@/components/skill-list";
 import { TagFilter } from "@/components/tag-filter";
+import { Button } from "@/components/ui/button";
+import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSkillStats, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { useTags } from "@/hooks/use-tags";
+import { LOGIN_PATH } from "@/lib/routes";
+import type { Section, SectionKind } from "@/lib/sections";
+import { useRouter } from "@/lib/use-router";
 
 /**
  * How long typing has to pause before the search term reaches the URL.
@@ -70,20 +77,80 @@ function HeroStatSkeleton() {
   );
 }
 
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** "a skill", "an MCP server" — the article follows the noun's first sound. */
+function withArticle(noun: string): string {
+  return `${/^(MCP|[aeiou])/i.test(noun) ? "an" : "a"} ${noun}`;
+}
+
+type OnPublished = (name: string, namespace: string) => void;
+
+/** Each section's publish form, and the line under the dialog's title. */
+const PUBLISH_FORMS: Record<SectionKind, (onPublished: OnPublished) => { description: string; form: ReactNode }> = {
+  skill: (onPublished) => ({
+    description: "Upload a Skill's folder or SKILL.md, or import it from GitHub.",
+    form: <PublishSkillForm onPublished={onPublished} />,
+  }),
+  mcp: (onPublished) => ({
+    description: "Describe a package an agent runs, or a remote endpoint it connects to.",
+    form: <PublishMcpForm onPublished={onPublished} />,
+  }),
+  plugin: (onPublished) => ({
+    description: "Upload a plugin's folder, or import it from GitHub. Its agent manifests say which agents it supports.",
+    form: <PublishSkillForm kind="plugin" onPublished={onPublished} />,
+  }),
+};
+
+/** The dialog behind a section's Publish button — the form fits the section's Kind. */
+function PublishDialog({
+  section,
+  open,
+  onOpenChange,
+  onPublished,
+}: {
+  section: Section;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onPublished: (name: string, namespace: string) => void;
+}) {
+  const { description, form } = PUBLISH_FORMS[section.kind](onPublished);
+  return (
+    <FormDialog open={open} onOpenChange={onOpenChange} className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl">
+      <FormDialogHeader title={`Publish ${withArticle(section.noun)}`} description={description} />
+      <FormDialogBody>{form}</FormDialogBody>
+    </FormDialog>
+  );
+}
+
+/**
+ * One catalog section's page (Skills, MCP, or Plugins): a hero with the
+ * section's stats and Publish action, a search box, and its list.
+ */
 export function SkillsHome({
+  section,
   filters,
   onFiltersChange,
   onSelect,
   role,
 }: {
+  section: Section;
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
   /** `namespace` travels with the name so a row that two parties share stays linkable (ADR-0042). */
   onSelect: (name: string, namespace: string) => void;
   role: Role | null;
 }) {
+  const { navigate } = useRouter();
+  const [publishOpen, setPublishOpen] = useState(false);
+  // Shown to signed-out visitors too: clicking asks them to sign in rather
+  // than hiding the option (reads need no session, publishing does).
+  const canPublish = role === null || roleMeets(role, "writer");
+  const openPublish = () => (role ? setPublishOpen(true) : navigate(LOGIN_PATH));
   const tags = useTags();
-  const statsQuery = useSkillStats();
+  const statsQuery = useSkillStats(section.kind);
   const stats = statsQuery.data;
   const searchRef = useRef<HTMLInputElement>(null);
   // Computed once per mount — the platform doesn't change under the user.
@@ -136,19 +203,31 @@ export function SkillsHome({
           <div className="flex flex-col items-start justify-between gap-8 sm:flex-row">
             <div className="flex flex-col gap-4">
               <Reveal delayMs={0} className="text-[32px] leading-none font-medium">
-                <h1>Skills</h1>
+                <h1>{section.title}</h1>
               </Reveal>
               <Reveal
                 delayMs={60}
                 className="max-w-[460px] text-base leading-relaxed text-pretty text-muted-foreground"
               >
-                <p>Browse and install skills for research, coding, design, automation, and more.</p>
+                <p>{section.description}</p>
               </Reveal>
+              {canPublish && (
+                <Reveal delayMs={90}>
+                  <Button onClick={openPublish}>
+                    <UploadIcon />
+                    Publish {withArticle(section.noun)}
+                  </Button>
+                </Reveal>
+              )}
             </div>
             <Reveal delayMs={120} className="shrink-0">
               {stats ? (
                 <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
-                  <HeroStat value={stats.skills} singular="Skill" plural="Skills" />
+                  <HeroStat
+                    value={stats.skills}
+                    singular={capitalize(section.noun)}
+                    plural={capitalize(section.nounPlural)}
+                  />
                   <HeroStat value={stats.publishers} singular="Publisher" plural="Publishers" />
                   <HeroStat value={stats.installs} singular="Install" plural="Installs" />
                 </div>
@@ -172,7 +251,7 @@ export function SkillsHome({
               type="text"
               value={term}
               onChange={(event) => setTerm(event.target.value)}
-              placeholder="Search skills"
+              placeholder={`Search ${section.nounPlural}`}
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             {term && (
@@ -203,6 +282,16 @@ export function SkillsHome({
 
       <div className="h-px bg-border" />
 
+      <PublishDialog
+        section={section}
+        open={publishOpen}
+        onOpenChange={setPublishOpen}
+        onPublished={(name, namespace) => {
+          setPublishOpen(false);
+          onSelect(name, namespace);
+        }}
+      />
+
       <Reveal
         delayMs={220}
         className="mx-auto flex w-full max-w-[1200px] flex-col gap-3.5 px-7 pt-5 pb-10"
@@ -225,7 +314,13 @@ export function SkillsHome({
         </div>
 
         <div className="overflow-hidden rounded-xl border">
-          <SkillList filters={filters} onFiltersChange={onFiltersChange} onSelect={onSelect} role={role} />
+          <SkillList
+            section={section}
+            filters={filters}
+            onFiltersChange={onFiltersChange}
+            onSelect={onSelect}
+            onPublish={canPublish ? openPublish : undefined}
+          />
         </div>
       </Reveal>
     </div>

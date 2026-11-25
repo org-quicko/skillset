@@ -10,6 +10,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   postgres:
     image: postgres:18-alpine
@@ -26,5 +28,40 @@ services:
       timeout: 3s
       retries: 30
 
+  minio:
+    image: pgsty/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_ACCESS_KEY:-minioadmin123}
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio-init:
+    image: pgsty/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "${STORAGE_ACCESS_KEY_ID:-minioadmin}" "${STORAGE_SECRET_ACCESS_KEY:-minioadmin123}"
+        mc mb --ignore-existing "local/${STORAGE_BUCKET:-skill-registry}"
+        mc version enable "local/${STORAGE_BUCKET:-skill-registry}"
+
 volumes:
   postgres-data:
+  minio-data:
+

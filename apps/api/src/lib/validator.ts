@@ -1,5 +1,10 @@
 import { zValidator } from "@hono/zod-validator";
-import { SkillValidationError, TagValidationError } from "@in-org-quicko/skillset-shared";
+import {
+  McpValidationError,
+  PluginValidationError,
+  SkillValidationError,
+  TagValidationError,
+} from "@in-org-quicko/skillset-shared";
 import type { ValidationTargets } from "hono";
 import { z } from "zod";
 import { AppError, ValidationError } from "./errors.js";
@@ -105,7 +110,15 @@ export function ruleSchema<T>(check: (value: unknown) => T) {
     try {
       return check(value);
     } catch (error) {
-      if (!(error instanceof SkillValidationError || error instanceof TagValidationError)) throw error;
+      if (
+        !(
+          error instanceof SkillValidationError ||
+          error instanceof TagValidationError ||
+          error instanceof McpValidationError ||
+          error instanceof PluginValidationError
+        )
+      )
+        throw error;
       ctx.addIssue({ code: "custom", message: error.message, params: { rule: error.rule, field: error.field } });
       return z.NEVER;
     }

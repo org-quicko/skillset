@@ -1,24 +1,20 @@
 import {
   importedSource,
-  roleMeets,
-  type Role,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
 } from "@in-org-quicko/skillset-shared";
 import { ArrowDownIcon, ArrowUpIcon, SearchXIcon, UploadIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { PublishSkillForm } from "@/components/publish-skill-form";
+import { useEffect, useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSkillDirectory, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { LOGIN_PATH, skillPath } from "@/lib/routes";
-import { useRouter } from "@/lib/use-router";
+import { skillPath } from "@/lib/routes";
+import type { Section } from "@/lib/sections";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /** How many of a Skill's Tags show as their own chip before the rest collapse into a "+N" one. */
@@ -63,7 +59,7 @@ function SkillListSkeleton() {
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className={cn("w-10", HEAD_CLASS)}>#</TableHead>
-            <TableHead className={HEAD_CLASS}>Skill</TableHead>
+            <TableHead className={HEAD_CLASS}>Name</TableHead>
             <TableHead className={cn("w-44", HEAD_CLASS)}>Publisher</TableHead>
             <TableHead className={cn("w-28", HEAD_CLASS)}>Updated</TableHead>
             <TableHead className={cn("w-24 text-right", HEAD_CLASS)}>Installs</TableHead>
@@ -128,29 +124,25 @@ function SortHeader({
  *
  * @param filters - The active search term, Tag ids, and sort choice.
  * @param onFiltersChange - Called with the full new filter set when a sort header or Tag chip is clicked.
- * @param onSelect - Called with a Skill's name and Namespace when its row is clicked, or when a Skill is published from the empty state.
- * @param role - The signed-in visitor's Role, or `null` when signed out — gates the empty state's Publish action the same way `Header` does.
+ * @param section - The catalog section, which picks the Kind listed and the words used.
+ * @param onSelect - Called with a row's name and Namespace when it is clicked.
+ * @param onPublish - Opens the section's Publish dialog from the empty state; omitted for visitors who cannot publish.
  */
 export function SkillList({
+  section,
   filters,
   onFiltersChange,
   onSelect,
-  role,
+  onPublish,
 }: {
+  section: Section;
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
   onSelect: (name: string, namespace: string) => void;
-  role: Role | null;
+  onPublish?: () => void;
 }) {
-  const skills = useSkillDirectory(filters);
+  const skills = useSkillDirectory(filters, section.kind);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const [publishOpen, setPublishOpen] = useState(false);
-  const { navigate } = useRouter();
-
-  // Signed out visitors can see the Publish action too, same as `Header`'s —
-  // clicking it while signed out asks for a login instead of hiding the
-  // option outright.
-  const canPublish = role === null || roleMeets(role, "writer");
 
   const rows = skills.data?.pages.flatMap((page) => page.items) ?? [];
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = skills;
@@ -180,42 +172,20 @@ export function SkillList({
       <div className="fill-mode-both flex animate-in flex-col items-center gap-2 px-5 py-14 text-center fade-in-0 duration-300 motion-reduce:animate-none">
         <SearchXIcon className="size-6 text-ring" />
         <p className="text-sm text-muted-foreground">
-          {hasFilters ? `No skills match “${filters.q || "that filter"}”` : "Publish your first skill"}
+          {hasFilters
+            ? `No ${section.nounPlural} match “${filters.q || "that filter"}”`
+            : `Publish your first ${section.noun}`}
         </p>
         {hasFilters ? (
-          <p className="text-sm text-muted-foreground">Try a skill name, tag or publisher.</p>
+          <p className="text-sm text-muted-foreground">Try a name, tag or publisher.</p>
         ) : (
-          canPublish && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-1"
-              onClick={() => (role ? setPublishOpen(true) : navigate(LOGIN_PATH))}
-            >
+          onPublish && (
+            <Button variant="outline" size="sm" className="mt-1" onClick={onPublish}>
               <UploadIcon />
-              Publish a Skill
+              Publish
             </Button>
           )
         )}
-
-        <FormDialog
-          open={publishOpen}
-          onOpenChange={setPublishOpen}
-          className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl"
-        >
-          <FormDialogHeader
-            title="Publish a Skill"
-            description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
-          />
-          <FormDialogBody>
-            <PublishSkillForm
-              onPublished={(name, namespace) => {
-                setPublishOpen(false);
-                onSelect(name, namespace);
-              }}
-            />
-          </FormDialogBody>
-        </FormDialog>
       </div>
     );
   }
@@ -226,7 +196,7 @@ export function SkillList({
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground">#</TableHead>
-          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Skill</TableHead>
+          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Name</TableHead>
           <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground">
             Publisher
           </TableHead>
@@ -256,7 +226,7 @@ export function SkillList({
                       and honours modifier-clicks; the row's own onClick stays for
                       pointer users clicking anywhere else in it. */}
                   <a
-                    href={skillPath(skill.name, skill.namespace)}
+                    href={skillPath(skill.name, skill.namespace, skill.kind)}
                     onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                       event.preventDefault();

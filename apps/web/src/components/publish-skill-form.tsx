@@ -1,6 +1,7 @@
 import {
   parseSkillSourceUrl,
   resourceSourceUrl,
+  PluginValidationError,
   SkillValidationError,
   type SkillFile,
   type SkillSourceLocation,
@@ -23,10 +24,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SkillUploadError, usePublishSkill } from "@/hooks/use-skills";
+import { PluginFolderUpload } from "@/components/publish-plugin-form";
+import { SkillUploadError, usePublishPlugin, usePublishSkill } from "@/hooks/use-skills";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { discoverSkillSources, fetchSkillFilesAt } from "@/lib/read-source-files";
+import { discoverSkillSources, fetchSkillFilesAt, type SourceKind } from "@/lib/read-source-files";
 import { readDroppedFiles, readPickedFiles } from "@/lib/read-skill-files";
 
 /**
@@ -96,7 +98,7 @@ type ImportOutcome =
   | { path: string; status: "failed"; message: string };
 
 function describeFailure(error: unknown): string {
-  if (error instanceof SkillValidationError) {
+  if (error instanceof SkillValidationError || error instanceof PluginValidationError) {
     return error.field ? `${error.message} (${error.field})` : error.message;
   }
   if (error instanceof SkillUploadError) return error.message;
@@ -342,7 +344,32 @@ function CandidateRow({
   );
 }
 
-export function PublishSkillForm({ onPublished }: { onPublished: (name: string, namespace: string) => void }) {
+/** The words the form uses for each kind. */
+const NOUNS: Record<SourceKind, { one: string; many: string }> = {
+  skill: { one: "Skill", many: "Skills" },
+  plugin: { one: "plugin", many: "plugins" },
+};
+
+/**
+ * Publishes Skills or Plugins: from a folder on disk, or imported from a
+ * repository at a Git Provider.
+ *
+ * @remarks
+ * The GitHub tab is the same for both kinds; `kind` decides what the
+ * discovery walk looks for (a `SKILL.md`, or an agent manifest) and which
+ * publish runs. The upload tab is the kind's own.
+ *
+ * @param kind - What to publish. Defaults to Skills.
+ * @param onPublished - Called with the stored name and Namespace when exactly one was published.
+ */
+export function PublishSkillForm({
+  kind = "skill",
+  onPublished,
+}: {
+  kind?: SourceKind;
+  onPublished: (name: string, namespace: string) => void;
+}) {
+  const noun = NOUNS[kind];
   const [isDragging, setIsDragging] = useState(false);
   // A read failure (a file vanishes mid-drag, a permission error, an import
   // that 404s) happens before the mutation is ever invoked, so it can't live
@@ -355,6 +382,10 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
   const [selectedPaths, setSelectedPaths] = useState<ReadonlySet<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const publish = usePublishSkill();
+  const publishPlugin = usePublishPlugin();
+  // One of the two hooks, chosen by kind; both take the same input and answer with a name and Namespace.
+  const publishAsync = (input: { files: SkillFile[]; source: string }) =>
+    kind === "plugin" ? publishPlugin.mutateAsync(input) : publish.mutateAsync(input);
   // Also read for the repository-selection remedy's URL (built server-side
   // from the Integration's app slug this form cannot see) and to tell a
   // connected GitHub picker from a bare "Connect GitHub" prompt.
@@ -368,7 +399,8 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
   const TypedSourceIcon = typedSource ? GIT_PROVIDER_ICONS[typedSource.provider] : undefined;
   const manageAccessUrl = (provider: string) =>
     connections.data?.connectable.find((entry) => entry.provider === provider)?.manage_access_url ?? null;
-  const isBusy = publish.isPending || step.kind === "reading" || step.kind === "publishing";
+  const isBusy =
+    publish.isPending || publishPlugin.isPending || step.kind === "reading" || step.kind === "publishing";
 
   function handleFiles(files: SkillFile[]) {
     setReadError(null);
@@ -409,8 +441,13 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
       setStep({ kind: "publishing", source, total: chosen.length, done: index });
       try {
         const files = await fetchSkillFilesAt(location);
-        const skill = await publish.mutateAsync({ files, source: resourceSourceUrl(location) });
-        outcomes.push({ path: location.path, status: "published", name: skill.name, namespace: skill.namespace });
+        const published = await publishAsync({ files, source: resourceSourceUrl(location) });
+        outcomes.push({
+          path: location.path,
+          status: "published",
+          name: published.name,
+          namespace: published.namespace,
+        });
       } catch (error) {
         outcomes.push({ path: location.path, status: "failed", message: describeFailure(error) });
       }
@@ -446,7 +483,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
     setReadError(null);
     setStep({ kind: "reading", source });
     try {
-      const found = await discoverSkillSources(withScheme(url));
+      const found = await discoverSkillSources(withScheme(url), kind);
       if (found.length === 1) {
         await publishLocations(source, found);
       } else {
@@ -506,61 +543,67 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
       </TabsList>
 
       <TabsContent value="upload" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
-        <button
-          type="button"
-          disabled={isBusy}
-          onDragOver={(event) => {
-            event.preventDefault();
-            if (!isDragging) setIsDragging(true);
-          }}
-          onDragLeave={(event) => {
-            // `dragleave` fires when the pointer crosses onto a child element
-            // too, not just when it leaves the drop zone entirely — only
-            // clear the highlight once it's genuinely outside.
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
-          }}
-          onDrop={handleDrop}
-          // Dropping is read via `webkitGetAsEntry` and accepts a folder or a
-          // lone SKILL.md either way (see `readDroppedFiles`). Clicking opens
-          // a native dialog, which can only ever be in one mode or the
-          // other — `webkitdirectory` below picks folder-picking mode, so a
-          // single markdown file has to be dragged in instead.
-          onClick={() => fileInputRef.current?.click()}
-          className={cn(
-            "flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
-            isDragging ? "border-primary bg-accent" : "border-border",
-            isBusy ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/50",
-          )}
-        >
-          <UploadIcon className="size-5 text-muted-foreground" />
-          <p className="text-sm text-pretty text-muted-foreground">
-            Drag and drop a Skill&apos;s folder or a SKILL.md file here, or{" "}
-            <span className="text-foreground underline underline-offset-2">browse for a folder</span>
-          </p>
-        </button>
-        {/* Kept outside the button — HTML doesn't allow interactive content
-            nested inside one — but still hidden and driven entirely by
-            `fileInputRef`, so it needs no layout of its own. */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handlePicked}
-          // Nonstandard but universally supported attribute for picking a
-          // folder from the file dialog — not in React's JSX typings.
-          {...{ webkitdirectory: "true", directory: "true" }}
-        />
-        <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-          <li>A folder must include a SKILL.md file</li>
-          <li>A markdown file must have its skill name and description in YAML frontmatter</li>
-        </ul>
-        {readError && <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />}
-        {/* Only this tab publishes through `publish.mutate` directly. Every
-            GitHub failure lands in an `ImportOutcome` instead, so the two
-            can't report the same error twice. */}
-        {publish.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
-        {publish.isError && <p className="text-sm text-pretty text-destructive">{describeFailure(publish.error)}</p>}
+        {kind === "plugin" ? (
+          <PluginFolderUpload onPublished={onPublished} />
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={isBusy}
+              onDragOver={(event) => {
+                event.preventDefault();
+                if (!isDragging) setIsDragging(true);
+              }}
+              onDragLeave={(event) => {
+                // `dragleave` fires when the pointer crosses onto a child element
+                // too, not just when it leaves the drop zone entirely — only
+                // clear the highlight once it's genuinely outside.
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
+              }}
+              onDrop={handleDrop}
+              // Dropping is read via `webkitGetAsEntry` and accepts a folder or a
+              // lone SKILL.md either way (see `readDroppedFiles`). Clicking opens
+              // a native dialog, which can only ever be in one mode or the
+              // other — `webkitdirectory` below picks folder-picking mode, so a
+              // single markdown file has to be dragged in instead.
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                "flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors duration-150 ease-out",
+                isDragging ? "border-primary bg-accent" : "border-border",
+                isBusy ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/50",
+              )}
+            >
+              <UploadIcon className="size-5 text-muted-foreground" />
+              <p className="text-sm text-pretty text-muted-foreground">
+                Drag and drop a Skill&apos;s folder or a SKILL.md file here, or{" "}
+                <span className="text-foreground underline underline-offset-2">browse for a folder</span>
+              </p>
+            </button>
+            {/* Kept outside the button — HTML doesn't allow interactive content
+                nested inside one — but still hidden and driven entirely by
+                `fileInputRef`, so it needs no layout of its own. */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handlePicked}
+              // Nonstandard but universally supported attribute for picking a
+              // folder from the file dialog — not in React's JSX typings.
+              {...{ webkitdirectory: "true", directory: "true" }}
+            />
+            <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+              <li>A folder must include a SKILL.md file</li>
+              <li>A markdown file must have its skill name and description in YAML frontmatter</li>
+            </ul>
+            {readError && <ReadErrorNotice failure={readError} manageAccessUrl={manageAccessUrl} />}
+            {/* Only this tab publishes through `publish.mutate` directly. Every
+                GitHub failure lands in an `ImportOutcome` instead, so the two
+                can't report the same error twice. */}
+            {publish.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
+            {publish.isError && <p className="text-sm text-pretty text-destructive">{describeFailure(publish.error)}</p>}
+          </>
+        )}
       </TabsContent>
 
       <TabsContent value="github" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
@@ -657,7 +700,8 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
 
                       {!githubConnectable && !typedSource && (
                         <p className="px-6 py-7 text-center text-sm text-pretty text-muted-foreground">
-                          Paste a repository URL to publish a Skill from GitHub or GitLab.
+                          Paste a repository URL to publish {kind === "plugin" ? "a plugin" : "a Skill"} from GitHub or
+                          GitLab.
                         </p>
                       )}
                     </>
@@ -683,7 +727,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
                     <div className="animate-in fade-in-0 duration-150 ease-out">
                       <div className="flex min-h-10 items-center justify-between gap-2 px-2 pt-1">
                         <p className="truncate text-xs text-muted-foreground">
-                          <span className="tabular-nums">{step.found.length}</span> Skills found in{" "}
+                          <span className="tabular-nums">{step.found.length}</span> {noun.many} found in{" "}
                           {sourceTitle(step.source)}
                         </p>
                         <label
@@ -749,7 +793,7 @@ export function PublishSkillForm({ onPublished }: { onPublished: (name: string, 
                   <span className="tabular-nums">
                     {selectedPaths.size === 0
                       ? "Publish"
-                      : `Publish ${selectedPaths.size} ${selectedPaths.size === 1 ? "Skill" : "Skills"}`}
+                      : `Publish ${selectedPaths.size} ${selectedPaths.size === 1 ? noun.one : noun.many}`}
                   </span>
                 </Button>
               </div>
