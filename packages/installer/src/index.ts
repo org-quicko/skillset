@@ -431,3 +431,17 @@ export {
   type PluginInstallReport,
   type RunCommand,
 } from "./plugin-install.js";
+
+export {
+  installRegistryPlugin,
+  PLUGIN_RECORDS_FILE,
+  resolveConfigPath,
+  servesHostedMarketplace,
+  updateRegistryPlugins,
+  type PluginRegistry,
+  type PluginUpdateFilter,
+  type PluginUpdateOutcome,
+  type PluginVia,
+  type RegistryPluginContext,
+  type RegistryPluginInstallReport,
+} from "./registry-plugins.js";

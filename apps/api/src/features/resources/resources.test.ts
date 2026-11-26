@@ -1460,6 +1460,71 @@ describe("Falling back to fuzzy matching (ADR-0040)", () => {
   });
 });
 
+describe("Searching by Kind: what each Kind's search matches", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  function seed(kind: string, name: string, description: string, body: string) {
+    const at = new Date(Date.UTC(2026, 5, 1));
+    return {
+      kind,
+      namespace: TEST_NAMESPACE,
+      name,
+      description,
+      body,
+      payload: kind === "skill" ? BLANK_SKILL_PAYLOAD : { kind },
+      published_by: null,
+      published_by_email: "grace@example.com",
+      published_by_name: "Grace Hopper",
+      published_at: at,
+      updated_at: at,
+    };
+  }
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.db.insertInto("resources").values([
+      seed("mcp", "weather-server", "Forecasts for any city.", "Reads barometer pressure from a station."),
+      seed("plugin", "review-suite", "Lints terraform modules.", "Covers kubernetes manifests."),
+    ]).execute();
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function names(params: Record<string, string>): Promise<string[]> {
+    const res = await context.app.request(`/api/resources?${new URLSearchParams(params).toString()}`);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as ApiPage).items.map((item) => item.name);
+  }
+
+  it("matches an MCP Server on its name, description, and README", async () => {
+    for (const q of ["weather", "forecasts", "barometer"]) {
+      expect(await names({ q, kind: "mcp" })).toEqual(["weather-server"]);
+    }
+  });
+
+  it("does not match an MCP Server on its publisher", async () => {
+    expect(await names({ q: "hopper", kind: "mcp" })).toEqual([]);
+  });
+
+  it("matches a Plugin on its name only", async () => {
+    expect(await names({ q: "review", kind: "plugin" })).toEqual(["review-suite"]);
+    for (const q of ["terraform", "kubernetes", "hopper"]) {
+      expect(await names({ q, kind: "plugin" })).toEqual([]);
+    }
+  });
+
+  it("falls back to fuzzy matching on a Plugin's name, but not its description", async () => {
+    expect(await names({ q: "reviw", kind: "plugin" })).toEqual(["review-suite"]);
+    expect(await names({ q: "terrafom", kind: "plugin" })).toEqual([]);
+  });
+});
+
 /**
  * Seam 1 again: the redirect target itself is a presigned URL from the fake
  * storage adapter, not something a request test asserts the shape of — what

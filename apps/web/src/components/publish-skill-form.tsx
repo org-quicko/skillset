@@ -12,7 +12,7 @@ import { connectHref, useConnections, useRepositories } from "@/hooks/use-connec
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FormDialogBody, FormDialogFooter } from "@/components/ui/dialog";
+import { FormDialogBody } from "@/components/ui/dialog";
 import {
   Command,
   CommandEmpty,
@@ -360,29 +360,26 @@ const NOUNS: Record<SourceKind, { one: string; many: string }> = {
  * discovery walk looks for (a `SKILL.md`, or an agent manifest) and which
  * publish runs. The upload tab is the kind's own.
  *
- * Renders a {@link FormDialog}'s body and footer, so it goes straight inside
- * one, after its header. Only a staged plugin folder has a footer: a dropped
- * Skill publishes at once, and an import publishes from its own list.
+ * Renders a {@link FormDialog}'s body, so it goes straight inside one, after
+ * its header. It has no footer: a dropped Skill or plugin folder publishes at
+ * once, and an import publishes from its own list.
  *
  * @param kind - What to publish. Defaults to Skills.
  * @param onPublished - Called with the stored name and Namespace when exactly one was published.
- * @param onCancel - Called when the footer's Cancel is pressed.
  * @example
  * ```tsx
  * <FormDialog open={open} onOpenChange={setOpen}>
  *   <FormDialogHeader title="Publish a plugin" />
- *   <PublishSkillForm kind="plugin" onPublished={goTo} onCancel={() => setOpen(false)} />
+ *   <PublishSkillForm kind="plugin" onPublished={goTo} />
  * </FormDialog>
  * ```
  */
 export function PublishSkillForm({
   kind = "skill",
   onPublished,
-  onCancel,
 }: {
   kind?: SourceKind;
   onPublished: (name: string, namespace: string) => void;
-  onCancel: () => void;
 }) {
   const noun = NOUNS[kind];
   const [isDragging, setIsDragging] = useState(false);
@@ -401,7 +398,6 @@ export function PublishSkillForm({
   // Its own mutation, so a GitHub import's failure never shows under a staged folder.
   const publishStaged = usePublishPlugin();
   const [tab, setTab] = useState("upload");
-  const [stagedPlugin, setStagedPlugin] = useState<StagedPlugin>();
   // One of the two hooks, chosen by kind; both take the same input and answer with a name and Namespace.
   const publishAsync = (input: { files: SkillFile[]; source: string }) =>
     kind === "plugin" ? publishPlugin.mutateAsync(input) : publish.mutateAsync(input);
@@ -554,9 +550,14 @@ export function PublishSkillForm({
     }
   }
 
-  function stagePlugin(staged: StagedPlugin | undefined) {
+  function publishPluginFolder(staged: StagedPlugin | undefined) {
     publishStaged.reset();
-    setStagedPlugin(staged);
+    if (!staged) return;
+    // No `source`, as for a dropped Skill: the Registry records itself as the origin (ADR-0041).
+    publishStaged.mutate(
+      { files: staged.files },
+      { onSuccess: (plugin) => onPublished(plugin.name, plugin.namespace) },
+    );
   }
 
   return (
@@ -575,7 +576,8 @@ export function PublishSkillForm({
           <TabsContent value="upload" className={cn("mt-4 flex flex-col gap-3", TAB_CONTENT_MIN_HEIGHT)}>
             {kind === "plugin" ? (
               <>
-                <PluginFolderUpload staged={stagedPlugin} onStage={stagePlugin} disabled={publishStaged.isPending} />
+                <PluginFolderUpload onStage={publishPluginFolder} disabled={publishStaged.isPending} />
+                {publishStaged.isPending && <p className="text-sm text-muted-foreground">Publishing…</p>}
                 {publishStaged.isError && (
                   <p className="text-sm text-pretty text-destructive">{apiErrorMessage(publishStaged.error)}</p>
                 )}
@@ -909,22 +911,6 @@ export function PublishSkillForm({
           </TabsContent>
         </Tabs>
       </FormDialogBody>
-      {kind === "plugin" && tab === "upload" && stagedPlugin && (
-        <FormDialogFooter
-          onCancel={onCancel}
-          cancelDisabled={publishStaged.isPending}
-          submit={{
-            label: "Publish plugin",
-            pendingLabel: "Publishing…",
-            pending: publishStaged.isPending,
-            onClick: () =>
-              publishStaged.mutate(
-                { files: stagedPlugin.files },
-                { onSuccess: (plugin) => onPublished(plugin.name, plugin.namespace) },
-              ),
-          }}
-        />
-      )}
     </>
   );
 }

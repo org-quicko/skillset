@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { z } from "zod";
 
 /** Stored at rest and, field for field, what env vars can override. */
@@ -23,31 +23,7 @@ export interface RegistryAccess {
   token?: string;
 }
 
-/**
- * Decides where the config file lives.
- *
- * @param env - The process environment; `SKILLSET_CONFIG_PATH` wins, then the conventional
- * per-OS location (`%APPDATA%\\skillset\\config.json` on Windows,
- * `$XDG_CONFIG_HOME/skillset/config.json` or `~/.config/skillset/config.json` elsewhere).
- * @returns An absolute path, which need not exist yet.
- *
- * @remarks
- * Reads only from `env` so it stays pure and testable without touching the real
- * filesystem or `os.homedir()`.
- *
- * @example
- * ```ts
- * resolveConfigPath({ XDG_CONFIG_HOME: "/home/dev/.config" });
- * // -> "/home/dev/.config/skillset/config.json"
- * ```
- */
-export function resolveConfigPath(env: NodeJS.ProcessEnv): string {
-  if (env.SKILLSET_CONFIG_PATH) return env.SKILLSET_CONFIG_PATH;
-  if (env.APPDATA) return join(env.APPDATA, "skillset", "config.json");
-
-  const configDir = env.XDG_CONFIG_HOME || join(env.HOME ?? env.USERPROFILE ?? "", ".config");
-  return join(configDir, "skillset", "config.json");
-}
+export { resolveConfigPath } from "@in-org-quicko/skillset-installer";
 
 /**
  * Loads the stored Registry location and Token.

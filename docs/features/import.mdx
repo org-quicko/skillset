@@ -4,7 +4,7 @@ sidebarTitle: "Import"
 description: "Import copies Skills and Plugins from Git into the Registry once — not a sync. Covers the web and CLI paths, Namespace assignment, and Submission workflow."
 ---
 
-Import is how you bring Skills and Plugins that already live in a Git repository into the Skillset Registry without moving them to disk first. An Import is a one-time copy — the Registry reads the files at the moment of import and stores them as an Artifact, then records the repository URL as the Resource's Source. Nothing is ever re-read from that URL; the Source is provenance, not a live link. This page covers the two import paths, what they can each reach, and how the Submission workflow applies when installing directly from a URL.
+Import is how you bring Skills and Plugins that already live in a Git repository into the Skillset Registry without moving them to disk first. An Import is a one-time copy — the Registry reads the files at the moment of import and stores them as an Artifact, then records the repository URL as the Resource's Source. Nothing re-reads that URL on its own; the Source is provenance, not a live link. The one exception is a Plugin, which a writer can re-Import on demand from its page (**Publish a new version → From repository**; ADR-0046). This page covers the two import paths, what they can each reach, and how the Submission workflow applies when installing directly from a URL.
 
 ## Import vs. publish from disk
 

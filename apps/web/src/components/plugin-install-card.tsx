@@ -68,17 +68,14 @@ export function PluginInstallCard({ plugin }: { plugin: Plugin }) {
         )
       }
     >
-      <ol className="flex flex-col gap-3">
-        {guide.steps.map((step, index) => (
-          <li key={step.text} className="flex flex-col gap-1.5">
-            <span className="text-sm text-muted-foreground">
-              {guide.steps.length > 1 ? `${index + 1}. ` : ""}
-              {step.text}
-            </span>
+      <div className="flex flex-col gap-3">
+        {guide.steps.map((step) => (
+          <div key={step.text} className="flex flex-col gap-1.5">
+            <span className="text-sm text-muted-foreground">{step.text}</span>
             {step.command && <CopyableCode code={step.command} wrap />}
-          </li>
+          </div>
         ))}
-      </ol>
+      </div>
       {guide.note && <p className="mt-3 text-xs text-pretty text-muted-foreground">{guide.note}</p>}
     </Panel>
   );

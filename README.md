@@ -131,7 +131,8 @@ Run directly with `npx`, or add it to an agent's MCP client config:
 
 It exposes `search_skills` and `read_skill` for the Registry's catalog, `installed_skills`,
 `update_skills` and `remove_skills` for what this project actually uses, plus `install_skills`
-and `publish_skill` (which needs `--token` / `SKILLSET_TOKEN`). See
+and `publish_skill` (which needs `--token` / `SKILLSET_TOKEN`), and `search_plugins`, `install_plugin`,
+`update_plugins`, `search_mcp_servers` and `install_mcp_server` for the Registry's Plugins and MCP Servers. See
 [`apps/mcp/README.md`](apps/mcp/README.md).
 
 ## Development

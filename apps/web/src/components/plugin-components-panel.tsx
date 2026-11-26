@@ -75,7 +75,7 @@ export function PluginComponentsPanel({
                 title={`Open ${component.path}`}
                 className="flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted/60"
               >
-                <span className="font-mono text-[13px]">
+                <span className="text-sm">
                   {active.prefix}
                   {component.name}
                 </span>

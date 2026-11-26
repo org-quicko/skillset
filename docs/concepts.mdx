@@ -142,7 +142,7 @@ A Source appears in the UI only when it points somewhere the reader cannot alrea
 
 ### Import
 
-An **Import** is a one-time copy of a Skill's or Plugin's files out of a Git Provider and into the Registry. It is **not a sync** — nothing is ever re-read, and nothing updates automatically.
+An **Import** is a one-time copy of a Skill's or Plugin's files out of a Git Provider and into the Registry. It is **not a sync** — nothing is re-read on its own, and nothing updates automatically. A writer can re-Import a Plugin on demand from its page (ADR-0046).
 
 - The web UI imports through the writer's **Connection** (their personal grant of repo access to the Registry).
 - The CLI imports by cloning with the writer's own git credentials — so any repository the writer can clone works, including private ones.

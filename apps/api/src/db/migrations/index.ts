@@ -2,6 +2,7 @@ import type { Kysely } from "kysely";
 import * as baseline from "./0000_baseline.js";
 import * as marketplaceInstallSource from "./0001_marketplace_install_source.js";
 import * as marketplaceSettings from "./0002_marketplace_settings.js";
+import * as searchByKind from "./0003_search_by_kind.js";
 
 /**
  * A migration, handed the schema it runs in alongside a client already scoped
@@ -16,4 +17,5 @@ export const migrations: Record<string, SchemaMigration> = {
   "0000_baseline": baseline,
   "0001_marketplace_install_source": marketplaceInstallSource,
   "0002_marketplace_settings": marketplaceSettings,
+  "0003_search_by_kind": searchByKind,
 };

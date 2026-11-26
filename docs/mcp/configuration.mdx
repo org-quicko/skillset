@@ -107,6 +107,8 @@ Open the resulting `.mcpb` file with your host's extension installer. The instal
 - **Registry URL** (required) — the Skillset Registry the server should talk to
 - **Token** (optional) — a writer Token, needed only if you want `publish_skill` to work
 
+The bundle runs the server with `--scope user`, so `install_skills` installs Skills to your home directory, not to a project.
+
 <Note>
   **The extension will not activate until you fill in the Registry URL.** A host that requires configuration (Claude Desktop, at least) installs the bundle but leaves it disabled until its required settings are supplied. If the model never sees the tools, check the host's logs for "has missing required configuration, not enabling automatically" — then open the extension's own settings panel (not the chat) and enter the Registry URL there. No chat message can enable a disabled extension.
 </Note>

@@ -351,7 +351,7 @@ Every install is recorded in `plugins.json` beside the CLI's config, for `plugin
 
 <Accordion title="plugins update — Update Plugins installed with the CLI">
 
-Checks every Plugin installed with `skillset plugins install` from the configured Registry, or the one named, and reinstalls those republished since. A Plugin whose version and publish time are unchanged is left alone.
+Checks every Plugin installed with `skillset plugins install` (or the MCP server's `install_plugin`) from the configured Registry, or the one named, and reinstalls those republished since. A Plugin whose version and publish time are unchanged is left alone.
 
 ```bash
 skillset plugins update [name] [--agent <id>] [--namespace <ns>] [--force] [--json]

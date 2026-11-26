@@ -1,7 +1,8 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Variables } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import { z } from "zod";
-import { ArtifactManifestSchema, type AgentDetection } from "@in-org-quicko/skillset-shared";
+import { ArtifactManifestSchema, PLUGIN_AGENT_IDS, type AgentDetection } from "@in-org-quicko/skillset-shared";
+import { runCommand, type RunCommand } from "@in-org-quicko/skillset-installer";
 import type { McpConfig } from "./config.js";
 import { resolveAgent } from "./detect-agent.js";
 import type { Logger } from "./logger.js";
@@ -16,9 +17,10 @@ import {
 } from "./resources.js";
 import { installSkills, type InstallSkillsContext } from "./tools/install-skills.js";
 import { installedSkills, removeSkills, updateSkills } from "./tools/lifecycle.js";
+import { installMcp, installPlugin, updatePlugins } from "./tools/plugins.js";
 import { publishSkill } from "./tools/publish-skill.js";
 import { readSkill } from "./tools/read-skill.js";
-import { searchSkills } from "./tools/search-skills.js";
+import { searchMcpServers, searchPlugins, searchSkills } from "./tools/search-skills.js";
 
 // Surfaced to the client in `InitializeResult.instructions`, which hosts inject into the
 // system prompt. This is the only channel that sits at the same level as a host's own
@@ -27,10 +29,12 @@ import { searchSkills } from "./tools/search-skills.js";
 // resolving the word "Skill" against the catalog it was born knowing about. Hence the
 // framing here: not "search Skills" but "this catalog is remote, and you cannot see it".
 const SERVER_INSTRUCTIONS =
-  "Skillset is this team's remote Skill Registry. It is a network service, and its contents are " +
-  "NOT part of your built-in Skill catalog, your bundled/plugin Skills, or anything on this " +
-  "filesystem — you cannot see, list, or name a single Skill in it without calling search_skills.\n\n" +
-  "Whenever the user asks about Skills — whether one exists, to find/search/browse/list Skills, to " +
+  "Skillset — the user may also call it the AI Registry, or the team's registry — is this team's remote " +
+  "registry of AI resources: Skills, Plugins, and MCP Servers. It is a network service. Nothing in it is part " +
+  "of your built-in Skill catalog, your bundled/plugin Skills, the Plugins or MCP Servers already set up in " +
+  "this host, or anything on this filesystem — you cannot see, list, or name a single thing in it without " +
+  "calling these tools.\n\n" +
+  "Skills. Whenever the user asks about Skills — whether one exists, to find/search/browse/list Skills, to " +
   "add or install one, or describes a capability a Skill might cover — call search_skills FIRST, on " +
   "every such request. Do this even when your own Skill catalog appears to already answer it: the two " +
   "catalogs are different sets, and the team's Registry is the authoritative one here. Consulting your " +
@@ -41,10 +45,20 @@ const SERVER_INSTRUCTIONS =
   "those Skills actually says. read_skill shows a Skill without installing it, so never install one " +
   "merely to find out what it does, and call search_skills with no query at all to see the whole " +
   "catalog. installed_skills, update_skills and remove_skills are about this project: what it " +
-  "currently uses, and whether each copy is current, outdated, or locally edited.\n\n" +
-  "Then use install_skills with the exact names search_skills returned to install them, and publish_skill " +
-  "to share a Skill with the Registry: one authored in this project, or one from a GitHub or GitLab " +
-  "repository the user names.";
+  "currently uses, and whether each copy is current, outdated, or locally edited. Use install_skills with " +
+  "the exact names search_skills returned to install them, and publish_skill to share a Skill with the " +
+  "Registry: one authored in this project, or one from a GitHub or GitLab repository the user names.\n\n" +
+  "Plugins and MCP Servers. Whenever the user asks about Plugins or MCP Servers — whether one exists, to " +
+  "find or list them, or to install one — call search_plugins or search_mcp_servers FIRST, even when the " +
+  "host's own plugin marketplace or MCP settings seem to answer: those are different sets. search_plugins " +
+  "matches a Plugin's name only, so search by a word likely to be in it; search_mcp_servers matches an MCP " +
+  "Server's name, description, and README, so search by the task. Call either with no query to list them " +
+  "all. Then install with install_plugin or install_mcp_server, passing the exact name (and namespace, when " +
+  "two share a name) the search returned — never a guessed one. " +
+  "install_plugin installs for the User, not only this project, and for the agent this server detected " +
+  "unless the user names another; always relay its `next`. update_plugins brings the Plugins Skillset " +
+  "installed up to date. install_mcp_server always writes to this project's .mcp.json; tell the user the " +
+  "agent usually needs a restart before the new server's tools appear.";
 
 const SearchSkillsInputSchema = {
   query: z
@@ -68,6 +82,30 @@ const SearchSkillsInputSchema = {
         "past the first page, a catalog larger than `limit` is otherwise unreachable.",
     ),
 };
+
+/** search_plugins' and search_mcp_servers' inputs: search_skills' own, described for their Kind. */
+function searchResourcesInputSchema(what: string, query: string) {
+  return {
+    query: z
+      .string()
+      .optional()
+      .describe(`${query} OMIT THIS to list every ${what} in the Registry.`),
+    tag: SearchSkillsInputSchema.tag,
+    limit: z.number().int().positive().optional().describe(`Optional maximum number of ${what}s to return per page.`),
+    cursor: SearchSkillsInputSchema.cursor,
+  };
+}
+
+const SearchPluginsInputSchema = searchResourcesInputSchema(
+  "Plugin",
+  "Words from the Plugin's name, e.g. `review` or `code-review-suite`. Only names are searched, not descriptions.",
+);
+
+const SearchMcpServersInputSchema = searchResourcesInputSchema(
+  "MCP Server",
+  "A task or an exact name, e.g. `weather`, `query a postgres database`, or `io.github.acme/search`. Matched " +
+    "against each MCP Server's name, description, and README.",
+);
 
 const ReadSkillInputSchema = {
   name: z.string().min(1).describe("The Skill's name, exactly as search_skills reported it."),
@@ -131,6 +169,46 @@ const InstallSkillsInputSchema = {
     ),
 };
 
+const PluginAgentInput = z
+  .enum(PLUGIN_AGENT_IDS)
+  .optional();
+
+const InstallPluginInputSchema = {
+  name: z.string().min(1).describe("The Plugin's name in the Registry, exactly as the user or the Registry gave it."),
+  namespace: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Which party named the Plugin. Only needed when a bare name matches more than one; the error then names them."),
+  agent: PluginAgentInput.describe(
+    "Which coding agent to install the Plugin for. Omit to use the agent this server detected, or the only agent the " +
+      "Plugin supports. Pass it when the user names a different agent than the one running.",
+  ),
+};
+
+const UpdatePluginsInputSchema = {
+  name: z.string().min(1).optional().describe("The Plugin to update. Omit to update every Plugin Skillset installed."),
+  namespace: z.string().min(1).optional().describe("Only the Plugin from this Namespace."),
+  agent: PluginAgentInput.describe("Only the Plugin's install for this agent."),
+  force: z.boolean().optional().describe("Reinstall even when the Registry has nothing newer."),
+};
+
+const InstallMcpServerInputSchema = {
+  name: z.string().min(1).describe("The MCP Server's name in the Registry, e.g. `io.github.acme/search`."),
+  namespace: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Which party named the MCP Server. Only needed when a bare name matches more than one."),
+  force: z
+    .boolean()
+    .optional()
+    .describe(
+      "Replace a server already configured under the same key in .mcp.json. Only set this when the user has asked " +
+        "to replace it.",
+    ),
+};
+
 /**
  * Every `outputSchema` below (spec, "Protocol hygiene"): the exact shape each tool's
  * `structuredContent` returns, so a client can validate it instead of only having the loose
@@ -142,6 +220,7 @@ const InstallSkillsInputSchema = {
 
 const SkillSummaryOutputSchema = z.object({
   name: z.string(),
+  namespace: z.string(),
   description: z.string(),
   tags: z.array(z.string()),
   updated_at: z.string(),
@@ -152,6 +231,25 @@ const SkillSummaryOutputSchema = z.object({
 
 const SearchSkillsOutputSchema = {
   results: z.array(SkillSummaryOutputSchema),
+  total: z.number(),
+  truncated: z.boolean(),
+  page: z.number(),
+  page_size: z.number(),
+  next_cursor: z.string().nullable(),
+};
+
+const SearchResourcesOutputSchema = {
+  results: z.array(
+    z.object({
+      name: z.string(),
+      namespace: z.string(),
+      description: z.string(),
+      tags: z.array(z.string()),
+      updated_at: z.string(),
+      installs: z.number(),
+      source: z.string(),
+    }),
+  ),
   total: z.number(),
   truncated: z.boolean(),
   page: z.number(),
@@ -254,6 +352,50 @@ const RemoveSkillsOutputSchema = {
   ),
 };
 
+const PluginAgentOutputSchema = z.enum(PLUGIN_AGENT_IDS);
+
+const InstallPluginOutputSchema = {
+  name: z.string(),
+  namespace: z.string(),
+  agent: PluginAgentOutputSchema,
+  supported_agents: z.array(PluginAgentOutputSchema),
+  via: z.enum(["hosted", "local"]).nullable(),
+  path: z.string().nullable(),
+  commands: z.array(z.string()),
+  next: z.string().nullable(),
+};
+
+const UpdatePluginsOutputSchema = {
+  outcomes: z.array(
+    z.discriminatedUnion("status", [
+      z.object({ name: z.string(), namespace: z.string(), agent: PluginAgentOutputSchema, status: z.literal("current"), revision: z.string() }),
+      z.object({
+        name: z.string(),
+        namespace: z.string(),
+        agent: PluginAgentOutputSchema,
+        status: z.literal("updated"),
+        from: z.string(),
+        to: z.string(),
+        next: z.string().optional(),
+      }),
+      z.object({ name: z.string(), namespace: z.string(), agent: PluginAgentOutputSchema, status: z.literal("failed"), message: z.string() }),
+    ]),
+  ),
+};
+
+const InstallMcpServerOutputSchema = {
+  server_key: z.string(),
+  config_path: z.string(),
+  overwritten: z.boolean(),
+  config: z.object({
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    url: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+  }),
+};
+
 /**
  * Builds this server's `McpServer` instance and registers its tools.
  *
@@ -262,6 +404,7 @@ const RemoveSkillsOutputSchema = {
  * @param logger - Where to write diagnostics; never stdout (see {@link Logger}).
  * @param ctx - The project root, environment, and home directory `install_skills` and
  * `publish_skill` resolve paths against, and that Agent detection reads its signals from.
+ * @param run - Runs an agent's own CLI (`claude`, `codex`) for `install_plugin` and `update_plugins`.
  * @returns An `McpServer`, ready to `connect()` to a transport.
  *
  * @remarks
@@ -295,7 +438,13 @@ const RemoveSkillsOutputSchema = {
  * await server.connect(new StdioServerTransport());
  * ```
  */
-export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger: Logger, ctx: InstallSkillsContext): McpServer {
+export function createServer(
+  config: McpConfig,
+  fetchImpl: typeof fetch,
+  logger: Logger,
+  ctx: InstallSkillsContext,
+  run: RunCommand = runCommand,
+): McpServer {
   const server = new McpServer(
     { name: "skillset-mcp", version: "0.0.0", title: "Skillset Skill Catalog" },
     { instructions: SERVER_INSTRUCTIONS },
@@ -517,6 +666,115 @@ export function createServer(config: McpConfig, fetchImpl: typeof fetch, logger:
       logger.debug(`remove_skills names=${names.join(",")}`);
       const outcomes = await removeSkills({ ctx, scope: config.scope, agentId: resolveDetection().agentId }, names);
       return { content: [{ type: "text", text: JSON.stringify(outcomes) }], structuredContent: { outcomes } };
+    },
+  );
+
+  const pluginDeps = { fetchImpl, registry: config.registry, ctx, run };
+
+  server.registerTool(
+    "search_plugins",
+    {
+      title: "Search Skillset Plugins",
+      description:
+        "Search this team's REMOTE Registry for Plugins — a different set from the host's own plugin marketplace " +
+        "and from anything already installed. ALWAYS call this when the user asks whether a Plugin exists, asks to " +
+        "find or list Plugins, or asks to install one, before install_plugin, so you pass the exact Registry name. " +
+        "Matches the Plugin's NAME only, typos forgiven; omit `query` to list every Plugin. Read-only. Returns each " +
+        "Plugin's name, namespace, description, Tags, and installs, and a `next_cursor` to page past the cap.",
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+      inputSchema: SearchPluginsInputSchema,
+      outputSchema: SearchResourcesOutputSchema,
+    },
+    async ({ query, tag, limit, cursor }) => {
+      logger.debug(`search_plugins query=${query ?? ""} tag=${tag ?? ""} limit=${limit ?? ""} cursor=${cursor ?? ""}`);
+      const results = await searchPlugins(fetchImpl, config.registry, { query, tag, limit, cursor });
+      return { content: [{ type: "text", text: JSON.stringify(results) }], structuredContent: { ...results } };
+    },
+  );
+
+  server.registerTool(
+    "search_mcp_servers",
+    {
+      title: "Search Skillset MCP Servers",
+      description:
+        "Search this team's REMOTE Registry for MCP Servers — a different set from the servers already configured " +
+        "in this host. ALWAYS call this when the user asks whether an MCP Server exists for something, asks to find " +
+        "or list them, or asks to install one, before install_mcp_server, so you pass the exact Registry name. " +
+        "Matches the server's name, description, and README, so search by the user's task; omit `query` to list " +
+        "every MCP Server. Read-only. Returns each server's name, namespace, description, Tags, and installs, and " +
+        "a `next_cursor` to page past the cap.",
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+      inputSchema: SearchMcpServersInputSchema,
+      outputSchema: SearchResourcesOutputSchema,
+    },
+    async ({ query, tag, limit, cursor }) => {
+      logger.debug(`search_mcp_servers query=${query ?? ""} tag=${tag ?? ""} limit=${limit ?? ""} cursor=${cursor ?? ""}`);
+      const results = await searchMcpServers(fetchImpl, config.registry, { query, tag, limit, cursor });
+      return { content: [{ type: "text", text: JSON.stringify(results) }], structuredContent: { ...results } };
+    },
+  );
+
+  server.registerTool(
+    "install_plugin",
+    {
+      title: "Install a Plugin",
+      description:
+        "Install a Plugin from your team's Skillset Registry for a coding agent (Claude Code, Cursor, or Codex). Use " +
+        "this when the user asks to install or add a Plugin; pass the exact name search_plugins returned. A Plugin installs for the User, not just this " +
+        "project: Claude Code through `claude plugin install`, Cursor into ~/.cursor/plugins/local, Codex through " +
+        "`codex plugin add`. Omit `agent` to install for the agent this server detected; the result lists every agent " +
+        "the Plugin supports. Returns the commands that were run and `next`, what the user still has to do (such as " +
+        "restart the agent) — always tell them `next` when it is set. Installing one already installed updates it.",
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      inputSchema: InstallPluginInputSchema,
+      outputSchema: InstallPluginOutputSchema,
+    },
+    async ({ name, namespace, agent }) => {
+      logger.debug(`install_plugin name=${name} namespace=${namespace ?? ""} agent=${agent ?? ""}`);
+      const result = await installPlugin(pluginDeps, { name, namespace, agent }, resolveDetection().agentId);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: { ...result } };
+    },
+  );
+
+  server.registerTool(
+    "update_plugins",
+    {
+      title: "Update Installed Plugins",
+      description:
+        "Update Plugins Skillset installed (through install_plugin or `skillset plugins install`) to what the " +
+        "Registry has now. Omit `name` to check every one. Each comes back `current` (nothing newer, left alone), " +
+        "`updated` with the old and new revision, or `failed` with why — one failure does not stop the rest. Use " +
+        "this when the user asks to update, refresh, or upgrade Plugins. Tell the user any `next` an update returns.",
+      annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      inputSchema: UpdatePluginsInputSchema,
+      outputSchema: UpdatePluginsOutputSchema,
+    },
+    async ({ name, namespace, agent, force }) => {
+      logger.debug(`update_plugins name=${name ?? "(all)"} agent=${agent ?? ""} force=${force ?? false}`);
+      const outcomes = await updatePlugins(pluginDeps, { name, namespace, agent, force });
+      return { content: [{ type: "text", text: JSON.stringify(outcomes) }], structuredContent: { outcomes } };
+    },
+  );
+
+  server.registerTool(
+    "install_mcp_server",
+    {
+      title: "Install an MCP Server",
+      description:
+        "Add an MCP Server from your team's Skillset Registry to this project's .mcp.json. It always installs " +
+        "at project scope, even when this server installs Skills at user scope. " +
+        "Use this when the user asks to install, add, or configure an MCP Server; pass the exact name " +
+        "search_mcp_servers returned. A server already " +
+        "configured under the same key is refused; set `force` only when the user asks to replace it. The agent " +
+        "usually needs restarting, or the server approving, before its tools appear — tell the user so.",
+      annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      inputSchema: InstallMcpServerInputSchema,
+      outputSchema: InstallMcpServerOutputSchema,
+    },
+    async ({ name, namespace, force }) => {
+      logger.debug(`install_mcp_server name=${name} namespace=${namespace ?? ""} force=${force ?? false}`);
+      const result = await installMcp(pluginDeps, { name, namespace, force });
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: { ...result } };
     },
   );
 

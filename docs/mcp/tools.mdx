@@ -262,6 +262,101 @@ Uninstall Skills from the current project: their files, the agent's symlink to e
 
 ---
 
+## Plugin and MCP Server tools
+
+These search and install the Registry's other two Kinds. The install tools do the same as `skillset plugins install`, `skillset plugins update`, and `skillset mcp install`.
+
+### `search_plugins`
+
+Search the Registry's Plugins, or list them all by omitting the query. Matches the Plugin's **name only**, with the same typo-tolerant fallback as `search_skills`. Call it before `install_plugin` so you pass the exact Registry name.
+
+### `search_mcp_servers`
+
+Search the Registry's MCP Servers, or list them all by omitting the query. Matches the server's name, description, and README, so a search by task works. Call it before `install_mcp_server`.
+
+Both take the same parameters as `search_skills` (`query`, `tag`, `limit`, `cursor`) and return the same page shape. Each result has `name`, `namespace`, `description`, `tags`, `updated_at`, `installs`, and `source`; there is no `allowed_tools`.
+
+---
+
+### `install_plugin`
+
+Install a Plugin for one coding agent it has a manifest for. Plugins install per User, not per project: Claude Code through `claude plugin install` (from the Registry's hosted marketplace when it is public HTTPS, otherwise a local one), Cursor into `~/.cursor/plugins/local/<name>/`, and Codex through `codex plugin add`. Installing a Plugin already installed updates it.
+
+The install is recorded in `plugins.json` beside the CLI's config file, so `update_plugins` and `skillset plugins update` both see it.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="name" type="string" required>
+      The Plugin's name in the Registry.
+    </ParamField>
+    <ParamField path="namespace" type="string">
+      Which party named the Plugin. Only needed when a bare name matches more than one.
+    </ParamField>
+    <ParamField path="agent" type="string">
+      `claude-code`, `cursor`, or `codex`. Omit to use the detected agent, or the only agent the Plugin supports. The tool fails, naming the supported agents, when the chosen agent has no manifest in the Plugin.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    `name`, `namespace`, the `agent` it was installed for, `supported_agents`, `via` (`hosted` or `local` for Claude Code, otherwise `null`), `path` (where files were written, or `null`), the `commands` that were run, and `next` — what the user still has to do, such as restart the agent, or `null`.
+  </Tab>
+</Tabs>
+
+---
+
+### `update_plugins`
+
+Update Plugins Skillset installed from this Registry. A Plugin whose revision (manifest version plus publish time) is unchanged is left alone. One failure does not stop the rest.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="name" type="string">
+      The Plugin to update. Omit to check every installed Plugin.
+    </ParamField>
+    <ParamField path="namespace" type="string">
+      Only the Plugin from this Namespace.
+    </ParamField>
+    <ParamField path="agent" type="string">
+      Only the Plugin's install for this agent.
+    </ParamField>
+    <ParamField path="force" type="boolean">
+      Reinstall even when the Registry has nothing newer.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    <ResponseField name="outcomes" type="array">
+      One outcome per installed Plugin and agent:
+      - **`current`** — nothing newer. Includes `revision`.
+      - **`updated`** — reinstalled. Includes `from`, `to`, and `next` when the user has something to do.
+      - **`failed`** — includes `message`.
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+---
+
+### `install_mcp_server`
+
+Add an MCP Server from the Registry to the project's `.mcp.json`. MCP Servers always install at project scope, even when the server installs Skills at user scope, as the MCPB bundle does. A server already configured under the same key is refused unless `force` is set.
+
+<Tabs>
+  <Tab title="Parameters">
+    <ParamField path="name" type="string" required>
+      The MCP Server's name in the Registry, e.g. `io.github.acme/search`.
+    </ParamField>
+    <ParamField path="namespace" type="string">
+      Which party named the MCP Server. Only needed when a bare name matches more than one.
+    </ParamField>
+    <ParamField path="force" type="boolean">
+      Replace a server already configured under the same key.
+    </ParamField>
+  </Tab>
+  <Tab title="Returns">
+    `server_key` (the key in `mcpServers`), `config_path`, `overwritten`, and `config` — the entry that was written.
+  </Tab>
+</Tabs>
+
+---
+
 ## MCP resources
 
 Two URI template resources are registered directly on the server. They are accessible to any MCP host that supports the `resources/list` and `resources/read` primitives — no tool call required.
@@ -301,3 +396,8 @@ skillset://tags/documentation
 | `installed_skills` | ✅ | ✅ | ✅ |
 | `update_skills` | ❌ | ❌ | ✅ |
 | `remove_skills` | ❌ | ✅ | ❌ |
+| `search_plugins` | ✅ | ✅ | ✅ |
+| `search_mcp_servers` | ✅ | ✅ | ✅ |
+| `install_plugin` | ❌ | ✅ | ✅ |
+| `update_plugins` | ❌ | ❌ | ✅ |
+| `install_mcp_server` | ❌ | ❌ | ✅ |

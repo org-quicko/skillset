@@ -8,7 +8,7 @@ The Skillset MCP server (`@in-org-quicko/skillset-mcp`) connects any MCP-capable
 
 ## What the server provides
 
-The MCP server gives an agent two groups of tools and two MCP resource templates — all without any local installation step, because it runs directly via `npx`.
+The MCP server gives an agent three groups of tools and two MCP resource templates — all without any local installation step, because it runs directly via `npx`.
 
 ### Tool groups
 
@@ -18,6 +18,9 @@ The MCP server gives an agent two groups of tools and two MCP resource templates
   </Card>
   <Card title="Local Tools" icon="folder">
     Operate on the current project's installed copies. `installed_skills`, `update_skills`, and `remove_skills` read and write the local `skillset-lock.json` Lockfile without contacting the Registry (except to compare versions).
+  </Card>
+  <Card title="Plugin and MCP Server Tools" icon="puzzle-piece">
+    Search and install the Registry's other Kinds. `search_plugins` and `search_mcp_servers` find them, `install_plugin` and `update_plugins` install Plugins for Claude Code, Cursor, or Codex, sharing install records with `skillset plugins`. `install_mcp_server` adds an MCP Server to the project's `.mcp.json`.
   </Card>
 </CardGroup>
 
@@ -52,7 +55,7 @@ Detection is lazy: it runs on the first tool call that needs an agent identity, 
   Do **not** use any server key containing the word `skillset` when registering this server in an MCP host config. Some hosts (observed on Claude Code) reserve that string internally and will refuse to start a server registered under it, with the error "Its name collides with a reserved internal server name." This applies to substrings too — `skillset-registry` collides. Use `skill-registry` instead.
 </Warning>
 
-The package's own `manifest.json` uses the name `skill-registry` and the display name "Skill Registry" for exactly this reason.
+The MCPB bundle's own `manifest.json` uses the name `ai-registry-by-labs-at-quicko` and the display name "AI Resource Registry by Labs@Quicko" — no `skillset` substring in either, for the same reason.
 
 ## Quick start
 

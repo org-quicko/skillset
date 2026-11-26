@@ -1,4 +1,10 @@
-import { resolveTagIdByName, SkillDirectoryPageSchema, TagListSchema, type Tag } from "@in-org-quicko/skillset-shared";
+import {
+  resolveTagIdByName,
+  SkillDirectoryPageSchema,
+  TagListSchema,
+  type SkillDirectoryEntry,
+  type Tag,
+} from "@in-org-quicko/skillset-shared";
 
 /** What a caller of {@link searchSkills} may narrow a search by. */
 export interface SearchSkillsParams {
@@ -91,8 +97,8 @@ async function resolveTagId(fetchImpl: typeof fetch, registryUrl: string, name: 
  * @throws ZodError if a 2xx body does not match the expected page shape.
  *
  * @remarks
- * A thin projection of `GET /resources`, filtered to the `skill` Kind — the only Kind this
- * server serves. Sends no `authorization` header: the Registry's reads need none (ADR-0013),
+ * A thin projection of `GET /resources`, filtered to the `skill` Kind; {@link searchPlugins}
+ * and {@link searchMcpServers} do the same for the other two. Sends no `authorization` header: the Registry's reads need none (ADR-0013),
  * and this server holds no credential to send.
  *
  * Two things here exist because the caller is an Agent rather than a browser. `query` is
@@ -125,8 +131,102 @@ export async function searchSkills(
   registryUrl: string,
   params: SearchSkillsParams,
 ): Promise<SearchSkillsResponse> {
+  const { page, items } = await searchDirectory(fetchImpl, registryUrl, "skill", params);
+  return {
+    ...page,
+    results: items.map((item) => ({ ...summarise(item), allowed_tools: item.allowed_tools })),
+  };
+}
+
+/** One matching Plugin or MCP Server. A Skill's result adds `allowed_tools`, which neither of these has. */
+export type SearchResourcesResult = Omit<SearchSkillsResult, "allowed_tools">;
+
+/** What {@link searchPlugins} and {@link searchMcpServers} answer; paged as {@link SearchSkillsResponse} is. */
+export type SearchResourcesResponse = Omit<SearchSkillsResponse, "results"> & { results: SearchResourcesResult[] };
+
+/**
+ * Searches — or, with no query, lists — the Registry's Plugins.
+ *
+ * @remarks
+ * The Registry matches a Plugin's search term against its name only, with the same typo-tolerant
+ * fallback a Skill search has. Paging, `tag`, and `limit` behave as in {@link searchSkills}.
+ *
+ * @param fetchImpl - The `fetch` implementation to send the request with.
+ * @param registryUrl - The Registry's base URL.
+ * @param params - An optional `query`, Tag name, page size, and `cursor`.
+ * @returns The page of matching Plugins, how many matched, and a `next_cursor`.
+ * @throws Error if the Registry answers with a non-2xx status, or if `tag` names no Tag.
+ * @throws ZodError if a 2xx body does not match the expected page shape.
+ * @example
+ * ```ts
+ * await searchPlugins(fetch, "https://registry.example", { query: "review" });
+ * ```
+ */
+export function searchPlugins(
+  fetchImpl: typeof fetch,
+  registryUrl: string,
+  params: SearchSkillsParams,
+): Promise<SearchResourcesResponse> {
+  return searchSummaries(fetchImpl, registryUrl, "plugin", params);
+}
+
+/**
+ * Searches — or, with no query, lists — the Registry's MCP Servers.
+ *
+ * @remarks
+ * The Registry matches an MCP Server's search term against its name, description, and README.
+ * Paging, `tag`, and `limit` behave as in {@link searchSkills}.
+ *
+ * @param fetchImpl - The `fetch` implementation to send the request with.
+ * @param registryUrl - The Registry's base URL.
+ * @param params - An optional `query`, Tag name, page size, and `cursor`.
+ * @returns The page of matching MCP Servers, how many matched, and a `next_cursor`.
+ * @throws Error if the Registry answers with a non-2xx status, or if `tag` names no Tag.
+ * @throws ZodError if a 2xx body does not match the expected page shape.
+ * @example
+ * ```ts
+ * await searchMcpServers(fetch, "https://registry.example", { query: "weather" });
+ * ```
+ */
+export function searchMcpServers(
+  fetchImpl: typeof fetch,
+  registryUrl: string,
+  params: SearchSkillsParams,
+): Promise<SearchResourcesResponse> {
+  return searchSummaries(fetchImpl, registryUrl, "mcp", params);
+}
+
+async function searchSummaries(
+  fetchImpl: typeof fetch,
+  registryUrl: string,
+  kind: "plugin" | "mcp",
+  params: SearchSkillsParams,
+): Promise<SearchResourcesResponse> {
+  const { page, items } = await searchDirectory(fetchImpl, registryUrl, kind, params);
+  return { ...page, results: items.map(summarise) };
+}
+
+function summarise(item: SkillDirectoryEntry): SearchResourcesResult {
+  return {
+    name: item.name,
+    description: item.description,
+    tags: item.tags.map((tag) => tag.name),
+    updated_at: item.updated_at,
+    installs: item.installs,
+    namespace: item.namespace,
+    source: item.source,
+  };
+}
+
+/** One page of `GET /resources` for one Kind, with its paging projected to what every search tool returns. */
+async function searchDirectory(
+  fetchImpl: typeof fetch,
+  registryUrl: string,
+  kind: "skill" | "plugin" | "mcp",
+  params: SearchSkillsParams,
+): Promise<{ page: Omit<SearchSkillsResponse, "results">; items: SkillDirectoryEntry[] }> {
   const url = new URL("/api/resources", registryUrl);
-  url.searchParams.set("kind", "skill");
+  url.searchParams.set("kind", kind);
 
   const query = params.query?.trim();
   if (query) url.searchParams.set("q", query);
@@ -142,20 +242,13 @@ export async function searchSkills(
   const page = SkillDirectoryPageSchema.parse(await res.json());
   const hasMore = page.page * page.page_size < page.total;
   return {
-    page: page.page,
-    page_size: page.page_size,
-    truncated: hasMore,
-    next_cursor: hasMore ? String(page.page + 1) : null,
-    results: page.items.map((item) => ({
-      name: item.name,
-      description: item.description,
-      tags: item.tags.map((tag) => tag.name),
-      updated_at: item.updated_at,
-      installs: item.installs,
-      allowed_tools: item.allowed_tools,
-      namespace: item.namespace,
-      source: item.source,
-    })),
-    total: page.total,
+    page: {
+      page: page.page,
+      page_size: page.page_size,
+      truncated: hasMore,
+      next_cursor: hasMore ? String(page.page + 1) : null,
+      total: page.total,
+    },
+    items: page.items,
   };
 }

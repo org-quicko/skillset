@@ -355,7 +355,9 @@ interface SearchMatcher {
  *
  * No weight array is passed, so Postgres's default `{0.1, 0.2, 0.4, 1.0}`
  * for `{D, C, B, A}` applies — and `resources.search` is built with exactly
- * that ordering in mind: name A, description B, body C, publisher D.
+ * that ordering in mind: name A, description B, body C, publisher D. Which of
+ * those a Resource's vector holds depends on its Kind: a Plugin's holds only
+ * its name, and an MCP Server's leaves out the publisher (migration 0003).
  */
 function buildExactMatcher(query: string): SearchMatcher {
   const tsQuery = buildTsQuery(query);
@@ -385,7 +387,8 @@ const FUZZY_MATCH_THRESHOLD = 0.4;
  * term against the best-matching extent *within* the target, which is the
  * question actually being asked.
  *
- * Name and description only. The body is in the full-text vector but not here:
+ * Name and description only, and a Plugin's name alone, matching what its
+ * full-text vector holds. The body is in the full-text vector but not here:
  * trigram-scanning 14 KB of prose per row is expensive, and a typo's nearest
  * match is overwhelmingly a Skill's name.
  *
@@ -398,7 +401,9 @@ const FUZZY_MATCH_THRESHOLD = 0.4;
  * and a `gin_trgm_ops` index, together.
  */
 function buildFuzzyMatcher(query: string): SearchMatcher {
-  const best = sql<number>`GREATEST(word_similarity(${query}, ${sql.ref("resource_directory.name")}), word_similarity(${query}, ${sql.ref("resource_directory.description")}))`;
+  const name = sql<number>`word_similarity(${query}, ${sql.ref("resource_directory.name")})`;
+  const description = sql<number>`word_similarity(${query}, ${sql.ref("resource_directory.description")})`;
+  const best = sql<number>`CASE WHEN ${sql.ref("resource_directory.kind")} = 'plugin' THEN ${name} ELSE GREATEST(${name}, ${description}) END`;
   return { condition: sql<SqlBool>`${best} >= ${FUZZY_MATCH_THRESHOLD}`, rank: best };
 }
 

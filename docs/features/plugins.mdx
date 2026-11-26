@@ -86,8 +86,17 @@ The CLI publishes a directory as a `plugin` when its root holds `.claude-plugin/
 </Warning>
 
 <Note>
-  A Plugin is published from a folder on disk. Publishing straight from a GitHub or GitLab URL takes Skills only, for now.
+  The web interface imports Plugins from GitHub or GitLab too (**Publish → Plugin → GitHub**). The CLI's `skillset publish <url>` takes Skills only, for now.
 </Note>
+
+### Publishing a new version
+
+A Plugin is never versioned side by side: publishing it again replaces it (ADR-0002). On a Plugin's page, writers have **Publish a new version** in the **⋯** menu, which republishes that Plugin and nothing else:
+
+- **From repository** — for a Plugin Imported from GitHub or GitLab, reads the latest from the repository it came from and finds the Plugin's folder again by the name in its manifest (ADR-0046).
+- **Drag and drop** — a new copy of the Plugin's folder. An Imported Plugin keeps its Source, so it stays in its Namespace.
+
+The new files must name the same Plugin; a folder with a different `name` is refused, because it would publish a second Plugin. Once published, the Claude Code marketplace lists the new version straight away, and `skillset plugins update` picks it up for every agent. The CLI's `skillset publish <dir>` republishes a Plugin from disk the same way.
 
 ## Supported agents
 

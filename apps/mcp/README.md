@@ -26,8 +26,9 @@ Or configure it in an MCP client's config, e.g.:
 The server key is yours to pick, but avoid any name containing `skillset` — some hosts (observed on
 Claude Code / Cowork) reserve it internally and refuse to start a server registered under it, with
 "Its name collides with a reserved internal server name". Not just the bare word: `skillset-registry`
-collided too. `manifest.json`'s `name`/`display_name` were renamed to `skill-registry` / "Skill
-Registry" for the same reason — no `skillset` substring at all.
+collided too. The MCPB bundle's own `manifest.json` uses the name `ai-registry-by-labs-at-quicko` and the display
+name "AI Resource Registry by Labs@Quicko", with no `skillset` substring in either (#65). The name is kept short
+because hosts prefix every tool with it (`mcp__<name>__<tool>`), and the result must fit in 64 characters.
 
 ### Installing as an MCPB extension
 
@@ -43,7 +44,8 @@ into one `.mcpb` file with no `node_modules` inside it. The bundle's `manifest.j
 at pack time (`src/mcpb.ts`): its version and description come from `package.json`, and its tools
 from the server itself, so there is no manifest in the repository to keep in step. Open the
 resulting file with the host's extension installer, which will prompt for the two settings the
-manifest declares: the Registry URL, and, optionally, a writer Token for `publish_skill`.
+manifest declares: the Registry URL, and, optionally, a writer Token for `publish_skill`. The
+bundle runs the server with `--scope user`, so `install_skills` installs to the home directory.
 
 Unlike `npx`, an installed bundle does **not** update itself — reinstall it to pick up a new
 version (see `docs/adr/0037-mcpb-packaging-is-an-additional-pinned-channel.md`).
@@ -95,6 +97,16 @@ This project:
 - `installed_skills` — what is installed here, each as `current`, `outdated`, `modified`, or `missing`
 - `update_skills` — re-download whatever the Registry has moved on from
 - `remove_skills` — uninstall Skills from this project
+
+Plugins and MCP Servers:
+
+- `search_plugins` — search the Registry's Plugins by name, or list them all
+- `search_mcp_servers` — search the Registry's MCP Servers by name, description, or README, or list them all
+- `install_plugin` — install a Plugin for Claude Code, Cursor, or Codex; for the detected Agent
+  unless `agent` names another. Plugins install per User, through the agent's own CLI
+- `update_plugins` — update Plugins installed with `install_plugin` or `skillset plugins install`;
+  both record installs in the same `plugins.json` beside the CLI's config
+- `install_mcp_server` — add an MCP Server to this project's `.mcp.json` (project scope only)
 
 `install_skills` and `update_skills` record what they wrote in a `skillset-lock.json` at the
 project root (or the home directory, under `--scope user`). That is what `installed_skills`

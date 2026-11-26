@@ -39,7 +39,7 @@ Returns a paginated, optionally filtered and sorted directory of all Resources. 
 </ParamField>
 
 <ParamField query="q" type="string">
-  Full-text search term. Matches against name and description. Falls back to trigram matching when no full-text matches exist, so a mistyped query still finds the right Skill.
+  Full-text search term. What it matches depends on the Kind: a Skill's name, description, body, and publisher; an MCP Server's name, description, and README; a Plugin's name only. Falls back to trigram matching on the name (and, except for a Plugin, the description) when no full-text matches exist, so a mistyped query still finds the right Resource.
 </ParamField>
 
 <ParamField query="tag_id" type="string">

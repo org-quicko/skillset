@@ -40,28 +40,25 @@ export function StagedPluginSummary({ staged }: { staged: StagedPlugin }) {
 }
 
 /**
- * The upload tab of the Plugin publish form: drop or pick a folder, then check
- * the name and agents read from its manifests.
+ * A drop zone for a plugin's folder: drop or pick one, and it is read and
+ * built into a bundle from its agent manifests.
  *
  * @remarks
- * The folder is read once, and the bundle built from it is shown before
- * anything is sent, so a wrong folder costs nothing. Publishing is the
- * dialog footer's job, so the staged folder lives with the parent.
+ * What happens to the folder is the parent's call: the publish dialog
+ * publishes it at once, and the new-version form holds it for its footer.
+ * A folder that cannot be read or has no manifest is reported here.
  *
- * @param staged - The folder read so far, if any.
  * @param onStage - Called with a newly read folder, or `undefined` when one could not be read.
- * @param disabled - True while the staged folder is publishing.
+ * @param disabled - True while a folder is publishing.
  * @example
  * ```tsx
- * <PluginFolderUpload staged={staged} onStage={setStaged} disabled={disabled} />
+ * <PluginFolderUpload onStage={(staged) => staged && publish(staged)} disabled={publishing} />
  * ```
  */
 export function PluginFolderUpload({
-  staged,
   onStage,
   disabled,
 }: {
-  staged?: StagedPlugin;
   onStage: (staged: StagedPlugin | undefined) => void;
   disabled: boolean;
 }) {
@@ -137,13 +134,18 @@ export function PluginFolderUpload({
         // Nonstandard but universally supported folder-picking attribute — not in React's JSX typings.
         {...{ webkitdirectory: "true", directory: "true" }}
       />
-      <p className="text-xs text-muted-foreground">
-        The folder needs an agent manifest at its root: {MANIFEST_PATHS.join(" or ")}.
+      <p className="text-xs text-pretty text-muted-foreground">
+        The folder needs an agent manifest at its root:{" "}
+        {MANIFEST_PATHS.map((path, index) => (
+          <span key={path}>
+            {index > 0 && " or "}
+            <span className="whitespace-nowrap">{path}</span>
+          </span>
+        ))}
+        .
       </p>
 
       {readError && <p className="text-sm text-pretty text-destructive">{readError}</p>}
-
-      {staged && <StagedPluginSummary staged={staged} />}
     </div>
   );
 }

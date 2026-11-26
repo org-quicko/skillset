@@ -1,8 +1,8 @@
 {
   "name": "skillset-mcp",
   "title": "Skillset Skill Catalog",
-  "description": "MCP server for searching, installing, and publishing Skills on a Skillset Registry.",
-  "instructions": "Skillset is this team's remote Skill Registry. It is a network service, and its contents are NOT part of your built-in Skill catalog, your bundled/plugin Skills, or anything on this filesystem — you cannot see, list, or name a single Skill in it without calling search_skills.\n\nWhenever the user asks about Skills — whether one exists, to find/search/browse/list Skills, to add or install one, or describes a capability a Skill might cover — call search_skills FIRST, on every such request. Do this even when your own Skill catalog appears to already answer it: the two catalogs are different sets, and the team's Registry is the authoritative one here. Consulting your built-in catalog instead of calling search_skills is always a mistake, and answering \"no such Skill exists\" without having called search_skills is always wrong.\n\nThe Registry and this project are two different sets of Skills, and there is a tool for each. search_skills and read_skill are about the Registry: what the team has published, and what one of those Skills actually says. read_skill shows a Skill without installing it, so never install one merely to find out what it does, and call search_skills with no query at all to see the whole catalog. installed_skills, update_skills and remove_skills are about this project: what it currently uses, and whether each copy is current, outdated, or locally edited.\n\nThen use install_skills with the exact names search_skills returned to install them, and publish_skill to share a Skill with the Registry: one authored in this project, or one from a GitHub or GitLab repository the user names.",
+  "description": "MCP server for searching, installing, and publishing Skills, and installing Plugins and MCP Servers, on a Skillset Registry.",
+  "instructions": "Skillset — the user may also call it the AI Registry, or the team's registry — is this team's remote registry of AI resources: Skills, Plugins, and MCP Servers. It is a network service. Nothing in it is part of your built-in Skill catalog, your bundled/plugin Skills, the Plugins or MCP Servers already set up in this host, or anything on this filesystem — you cannot see, list, or name a single thing in it without calling these tools.\n\nSkills. Whenever the user asks about Skills — whether one exists, to find/search/browse/list Skills, to add or install one, or describes a capability a Skill might cover — call search_skills FIRST, on every such request. Do this even when your own Skill catalog appears to already answer it: the two catalogs are different sets, and the team's Registry is the authoritative one here. Consulting your built-in catalog instead of calling search_skills is always a mistake, and answering \"no such Skill exists\" without having called search_skills is always wrong.\n\nThe Registry and this project are two different sets of Skills, and there is a tool for each. search_skills and read_skill are about the Registry: what the team has published, and what one of those Skills actually says. read_skill shows a Skill without installing it, so never install one merely to find out what it does, and call search_skills with no query at all to see the whole catalog. installed_skills, update_skills and remove_skills are about this project: what it currently uses, and whether each copy is current, outdated, or locally edited. Use install_skills with the exact names search_skills returned to install them, and publish_skill to share a Skill with the Registry: one authored in this project, or one from a GitHub or GitLab repository the user names.\n\nPlugins and MCP Servers. Whenever the user asks about Plugins or MCP Servers — whether one exists, to find or list them, or to install one — call search_plugins or search_mcp_servers FIRST, even when the host's own plugin marketplace or MCP settings seem to answer: those are different sets. search_plugins matches a Plugin's name only, so search by a word likely to be in it; search_mcp_servers matches an MCP Server's name, description, and README, so search by the task. Call either with no query to list them all. Then install with install_plugin or install_mcp_server, passing the exact name (and namespace, when two share a name) the search returned — never a guessed one. install_plugin installs for the User, not only this project, and for the agent this server detected unless the user names another; always relay its `next`. update_plugins brings the Plugins Skillset installed up to date. install_mcp_server always writes to this project's .mcp.json; tell the user the agent usually needs a restart before the new server's tools appear.",
   "distribution": {
     "npx": {
       "package": "@in-org-quicko/skillset-mcp",
@@ -55,6 +55,9 @@
                 "name": {
                   "type": "string"
                 },
+                "namespace": {
+                  "type": "string"
+                },
                 "description": {
                   "type": "string"
                 },
@@ -82,6 +85,7 @@
               },
               "required": [
                 "name",
+                "namespace",
                 "description",
                 "tags",
                 "updated_at",
@@ -1081,6 +1085,607 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "search_plugins",
+      "title": "Search Skillset Plugins",
+      "description": "Search this team's REMOTE Registry for Plugins — a different set from the host's own plugin marketplace and from anything already installed. ALWAYS call this when the user asks whether a Plugin exists, asks to find or list Plugins, or asks to install one, before install_plugin, so you pass the exact Registry name. Matches the Plugin's NAME only, typos forgiven; omit `query` to list every Plugin. Read-only. Returns each Plugin's name, namespace, description, Tags, and installs, and a `next_cursor` to page past the cap.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Words from the Plugin's name, e.g. `review` or `code-review-suite`. Only names are searched, not descriptions. OMIT THIS to list every Plugin in the Registry.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Optional Tag NAME to narrow the search, e.g. `testing`. Not an id — names are what the Registry shows.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional maximum number of Plugins to return per page.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "cursor": {
+            "description": "Opaque pagination token from a previous search_skills call's `next_cursor`. Omit for the first page — past the first page, a catalog larger than `limit` is otherwise unreachable.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "updated_at": {
+                  "type": "string"
+                },
+                "installs": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "namespace",
+                "description",
+                "tags",
+                "updated_at",
+                "installs",
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "number"
+          },
+          "page_size": {
+            "type": "number"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "results",
+          "total",
+          "truncated",
+          "page",
+          "page_size",
+          "next_cursor"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "search_mcp_servers",
+      "title": "Search Skillset MCP Servers",
+      "description": "Search this team's REMOTE Registry for MCP Servers — a different set from the servers already configured in this host. ALWAYS call this when the user asks whether an MCP Server exists for something, asks to find or list them, or asks to install one, before install_mcp_server, so you pass the exact Registry name. Matches the server's name, description, and README, so search by the user's task; omit `query` to list every MCP Server. Read-only. Returns each server's name, namespace, description, Tags, and installs, and a `next_cursor` to page past the cap.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "A task or an exact name, e.g. `weather`, `query a postgres database`, or `io.github.acme/search`. Matched against each MCP Server's name, description, and README. OMIT THIS to list every MCP Server in the Registry.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Optional Tag NAME to narrow the search, e.g. `testing`. Not an id — names are what the Registry shows.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional maximum number of MCP Servers to return per page.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "cursor": {
+            "description": "Opaque pagination token from a previous search_skills call's `next_cursor`. Omit for the first page — past the first page, a catalog larger than `limit` is otherwise unreachable.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "updated_at": {
+                  "type": "string"
+                },
+                "installs": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "namespace",
+                "description",
+                "tags",
+                "updated_at",
+                "installs",
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "number"
+          },
+          "page_size": {
+            "type": "number"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "results",
+          "total",
+          "truncated",
+          "page",
+          "page_size",
+          "next_cursor"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "install_plugin",
+      "title": "Install a Plugin",
+      "description": "Install a Plugin from your team's Skillset Registry for a coding agent (Claude Code, Cursor, or Codex). Use this when the user asks to install or add a Plugin; pass the exact name search_plugins returned. A Plugin installs for the User, not just this project: Claude Code through `claude plugin install`, Cursor into ~/.cursor/plugins/local, Codex through `codex plugin add`. Omit `agent` to install for the agent this server detected; the result lists every agent the Plugin supports. Returns the commands that were run and `next`, what the user still has to do (such as restart the agent) — always tell them `next` when it is set. Installing one already installed updates it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Plugin's name in the Registry, exactly as the user or the Registry gave it."
+          },
+          "namespace": {
+            "description": "Which party named the Plugin. Only needed when a bare name matches more than one; the error then names them.",
+            "type": "string",
+            "minLength": 1
+          },
+          "agent": {
+            "description": "Which coding agent to install the Plugin for. Omit to use the agent this server detected, or the only agent the Plugin supports. Pass it when the user names a different agent than the one running.",
+            "type": "string",
+            "enum": [
+              "claude-code",
+              "cursor",
+              "codex"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string",
+            "enum": [
+              "claude-code",
+              "cursor",
+              "codex"
+            ]
+          },
+          "supported_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "claude-code",
+                "cursor",
+                "codex"
+              ]
+            }
+          },
+          "via": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hosted",
+                  "local"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "namespace",
+          "agent",
+          "supported_agents",
+          "via",
+          "path",
+          "commands",
+          "next"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "update_plugins",
+      "title": "Update Installed Plugins",
+      "description": "Update Plugins Skillset installed (through install_plugin or `skillset plugins install`) to what the Registry has now. Omit `name` to check every one. Each comes back `current` (nothing newer, left alone), `updated` with the old and new revision, or `failed` with why — one failure does not stop the rest. Use this when the user asks to update, refresh, or upgrade Plugins. Tell the user any `next` an update returns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The Plugin to update. Omit to update every Plugin Skillset installed.",
+            "type": "string",
+            "minLength": 1
+          },
+          "namespace": {
+            "description": "Only the Plugin from this Namespace.",
+            "type": "string",
+            "minLength": 1
+          },
+          "agent": {
+            "description": "Only the Plugin's install for this agent.",
+            "type": "string",
+            "enum": [
+              "claude-code",
+              "cursor",
+              "codex"
+            ]
+          },
+          "force": {
+            "description": "Reinstall even when the Registry has nothing newer.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "agent": {
+                      "type": "string",
+                      "enum": [
+                        "claude-code",
+                        "cursor",
+                        "codex"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "current"
+                    },
+                    "revision": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "namespace",
+                    "agent",
+                    "status",
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "agent": {
+                      "type": "string",
+                      "enum": [
+                        "claude-code",
+                        "cursor",
+                        "codex"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "updated"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "namespace",
+                    "agent",
+                    "status",
+                    "from",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "agent": {
+                      "type": "string",
+                      "enum": [
+                        "claude-code",
+                        "cursor",
+                        "codex"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "failed"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "namespace",
+                    "agent",
+                    "status",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "outcomes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "install_mcp_server",
+      "title": "Install an MCP Server",
+      "description": "Add an MCP Server from your team's Skillset Registry to this project's .mcp.json. It always installs at project scope, even when this server installs Skills at user scope. Use this when the user asks to install, add, or configure an MCP Server; pass the exact name search_mcp_servers returned. A server already configured under the same key is refused; set `force` only when the user asks to replace it. The agent usually needs restarting, or the server approving, before its tools appear — tell the user so.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The MCP Server's name in the Registry, e.g. `io.github.acme/search`."
+          },
+          "namespace": {
+            "description": "Which party named the MCP Server. Only needed when a bare name matches more than one.",
+            "type": "string",
+            "minLength": 1
+          },
+          "force": {
+            "description": "Replace a server already configured under the same key in .mcp.json. Only set this when the user has asked to replace it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "server_key": {
+            "type": "string"
+          },
+          "config_path": {
+            "type": "string"
+          },
+          "overwritten": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "type": "string"
+              },
+              "headers": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "server_key",
+          "config_path",
+          "overwritten",
+          "config"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
       },
       "execution": {
         "taskSupport": "forbidden"

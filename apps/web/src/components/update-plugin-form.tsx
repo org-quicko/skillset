@@ -115,7 +115,7 @@ export function UpdatePluginForm({
       <FormDialogBody>
         {/* A Plugin with no repository to read again has only the one way in, so no tabs. */}
         {!repository ? (
-          <PluginFolderUpload staged={staged} onStage={stage} disabled={publish.isPending} />
+          <PluginFolderUpload onStage={stage} disabled={publish.isPending} />
         ) : (
           <Tabs value={tab} onValueChange={switchTab}>
             <TabsList className="grid w-full grid-cols-2">
@@ -150,27 +150,17 @@ export function UpdatePluginForm({
                     {staged ? "Read again" : "Read latest"}
                   </Button>
                 </div>
-                <p className="text-xs text-pretty text-muted-foreground">
-                  Reads the plugin named {plugin.name} from the repository&apos;s default branch.
-                </p>
                 {staged && <StagedPluginSummary staged={staged} />}
               </>
             </TabsContent>
 
             <TabsContent value="upload" className="mt-4 flex flex-col gap-3">
-              <PluginFolderUpload staged={staged} onStage={stage} disabled={publish.isPending} />
+              <PluginFolderUpload onStage={stage} disabled={publish.isPending} />
             </TabsContent>
           </Tabs>
         )}
 
         <div className="mt-3 flex flex-col gap-1.5">
-          {staged && !mismatch && (
-            <p className="text-xs text-muted-foreground">
-              {plugin.version ?? "No version"} → {staged.bundle.request.version ?? "no version"}.
-              Installs pick this up with skillset plugins update, and the Claude Code marketplace
-              lists it at once.
-            </p>
-          )}
           {mismatch && (
             <p className="text-sm text-pretty text-destructive">
               This folder is the plugin &quot;{mismatch}&quot;, not &quot;{plugin.name}&quot;.

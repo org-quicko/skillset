@@ -245,7 +245,10 @@ export function SkillDetail({
       </Reveal>
 
       <Reveal delayMs={50} className="flex items-start justify-between gap-3">
-        <h1 className="min-w-0 text-3xl font-medium tracking-tight break-words text-balance">{data.name}</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="min-w-0 text-3xl font-medium tracking-tight break-words text-balance">{data.name}</h1>
+          {data.kind === "plugin" && <AgentIcons agents={data.agents} />}
+        </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {/* An MCP server has no Artifact to download (ADR-0027). */}
           {data.kind !== "mcp" && (
@@ -402,9 +405,6 @@ export function SkillDetail({
             )}
             {data.kind === "plugin" && (
               <>
-                <DetailRow label="Agents">
-                  <AgentIcons agents={data.agents} />
-                </DetailRow>
                 {data.version && <DetailRow label="Version">{data.version}</DetailRow>}
                 {data.license && <DetailRow label="License">{data.license}</DetailRow>}
                 {data.homepage && (
