@@ -11,7 +11,7 @@
     },
     "apps/api": {
       "name": "@in-org-quicko/skillset-api",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "dependencies": {
         "@hono/zod-validator": "0.9.1",
         "@in-org-quicko/skillset-shared": "workspace:*",
@@ -71,7 +71,7 @@
     },
     "apps/web": {
       "name": "@in-org-quicko/skillset-web",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "dependencies": {
         "@fontsource-variable/instrument-sans": "^5.3.0",
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
@@ -110,7 +110,7 @@
     },
     "packages/installer": {
       "name": "@in-org-quicko/skillset-installer",
-      "version": "0.0.0",
+      "version": "2.0.0",
       "dependencies": {
         "@in-org-quicko/skillset-shared": "workspace:*",
         "zod": "^4.4.3",
@@ -122,7 +122,7 @@
     },
     "packages/shared": {
       "name": "@in-org-quicko/skillset-shared",
-      "version": "0.0.0",
+      "version": "2.0.0",
       "dependencies": {
         "fflate": "^0.8.3",
         "yaml": "^2.9.0",
