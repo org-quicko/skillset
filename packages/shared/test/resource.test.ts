@@ -24,13 +24,14 @@ describe("KINDS", () => {
   });
 
   it("lists exactly the registered Kind keys", () => {
-    expect(KIND_KEYS).toEqual(["skill"]);
+    expect(KIND_KEYS).toEqual(["skill", "mcp", "plugin"]);
   });
 });
 
 describe("isKind / kindConfig", () => {
   it("recognises a registered Kind and refuses one that isn't", () => {
     expect(isKind("skill")).toBe(true);
+    expect(isKind("mcp")).toBe(true);
     expect(isKind("mcp-server")).toBe(false);
     expect(isKind("")).toBe(false);
   });
@@ -42,7 +43,7 @@ describe("isKind / kindConfig", () => {
   });
 
   it("throws, naming the known Kinds, for an unregistered one", () => {
-    expect(() => kindConfig("plugin")).toThrow(/Unknown Kind "plugin"/);
+    expect(() => kindConfig("agent")).toThrow(/Unknown Kind "agent"/);
   });
 });
 
@@ -72,6 +73,41 @@ describe("ResourcePayloadSchema", () => {
       allowed_tools: null,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts an MCP payload with packages", () => {
+    const result = ResourcePayloadSchema.safeParse({
+      kind: "mcp",
+      packages: [
+        {
+          registry_name: "npm",
+          name: "@modelcontextprotocol/server-filesystem",
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts an MCP payload with remotes", () => {
+    const result = ResourcePayloadSchema.safeParse({
+      kind: "mcp",
+      remotes: [
+        {
+          transport_type: "sse",
+          url: "https://mcp.example.com/sse",
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an MCP payload without packages or remotes", () => {
+    const result = ResourcePayloadSchema.safeParse({
+      kind: "mcp",
+      packages: [],
+      remotes: [],
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects a payload naming a kind no variant is registered for", () => {

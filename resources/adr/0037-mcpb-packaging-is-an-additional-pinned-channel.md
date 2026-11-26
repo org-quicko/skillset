@@ -19,6 +19,14 @@ rather than re-litigated. What ADR-0033 still holds: no tool writes without a To
 
 ## Decision
 
+> **Amended (#65):** the bundle's `name` is now `ai-registry-by-labs-at-quicko` and its `display_name` is "AI
+> Resource Registry by Labs@Quicko", since the Registry now holds Plugins and MCP Servers as well as Skills.
+> `skillset-by-labs-at-quicko` was tried first and collided on the Claude Code desktop app exactly as
+> Consequences below describes, so neither name contains `skillset`. The name is also kept short: a
+> host shows each tool as `mcp__<name>__<tool>`, which the Claude API caps at 64 characters. Tests hold
+> both. `mcp_config` now passes `--scope user`: a bundle is installed once per host, not per project,
+> so its Skills go to the home directory. MCP Servers still install to the project's `.mcp.json`.
+
 > **Amended:** `manifest.json` is no longer kept in the repository. `bun run package:mcpb` now
 > generates it (`apps/mcp/src/mcpb.ts`) — version, description, and license from `package.json`,
 > and a `tools` list with full descriptions read from the running server, the same source as

@@ -12,12 +12,17 @@ describe("resources/mcp.json, the discovery document GET /mcp serves", () => {
     const document = await buildDiscoveryDocument();
 
     expect(document.tools.map((tool) => tool.name).sort()).toEqual([
+      "install_mcp_server",
+      "install_plugin",
       "install_skills",
       "installed_skills",
       "publish_skill",
       "read_skill",
       "remove_skills",
+      "search_mcp_servers",
+      "search_plugins",
       "search_skills",
+      "update_plugins",
       "update_skills",
     ]);
     const publish = document.tools.find((tool) => tool.name === "publish_skill");

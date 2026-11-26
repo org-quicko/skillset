@@ -35,7 +35,7 @@ export function SkillInstallCard({ name, namespace }: { name: string; namespace?
   const qualifier = namespace ? ` --namespace ${namespace}` : "";
   // The scoped package name, not the `skillset` bin name: npx resolves what it
   // is given as a package, and `skillset` on npm is somebody else's.
-  const command = `npx ${CLI_PACKAGE} install ${name}${qualifier}`;
+  const command = `npx ${CLI_PACKAGE} skills install ${name}${qualifier}`;
   const prompt = namespace
     ? `Install the ${name} skill from ${namespace} on the Skillset registry.`
     : `Install the ${name} skill from the Skillset registry.`;
@@ -74,9 +74,11 @@ export function SkillInstallCard({ name, namespace }: { name: string; namespace?
         </div>
       }
     >
-      <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3">
+      <div className="flex items-start gap-3 rounded-lg border bg-background px-4 py-3">
         {tab === "command" && <span className="font-mono text-[13px] text-ring">$</span>}
-        <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{text}</code>
+        <code className="min-w-0 flex-1 font-mono text-[13px] whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {text}
+        </code>
         <button
           type="button"
           aria-label="Copy to clipboard"

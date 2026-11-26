@@ -1,21 +1,30 @@
 import {
   ArtifactManifestSchema,
+  isKind,
+  McpPublishedSchema,
+  PluginPublishedSchema,
+  ResourceDetailSchema,
   SkillDirectoryPageSchema,
   SkillDirectoryStatsSchema,
   SkillInstallTrendSchema,
   SkillPublishedSchema,
-  SkillSchema,
   SkillTagsSchema,
 } from "@in-org-quicko/skillset-shared";
 import { createRouter } from "../../lib/factory.js";
-import { uuidParam, validate } from "../../lib/validator.js";
+import { parseValue, uuidParam, validate } from "../../lib/validator.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { ARTIFACT_ARCHIVE_CONTENT_TYPE } from "../../storage/keys.js";
 import type { InstallSource } from "../analytics/analytics.service.js";
 import { installFingerprint } from "../analytics/fingerprint.js";
 import { ResourceDirectoryQuerySchema } from "./resource-directory-query.js";
 import { ResourceNotFoundError } from "./resources.errors.js";
-import { PublishBodySchema, PublishParamsSchema, SetTagsBodySchema } from "./resources.schemas.js";
+import {
+  PublishBodySchema,
+  PublishMcpBodySchema,
+  PublishParamsSchema,
+  PublishPluginBodySchema,
+  SetTagsBodySchema,
+} from "./resources.schemas.js";
 
 /**
  * Path segments shaped so no two routes below can match the same valid request,
@@ -29,7 +38,7 @@ const KIND = ":kind{[a-z]+(?:-[a-z]+)*}";
 const resourceId = uuidParam("id", () => new ResourceNotFoundError());
 
 /** Every value `?source=` on `GET /resources/:id/artifact` recognises. */
-const INSTALL_SOURCES: readonly InstallSource[] = ["web", "cli", "mcp"];
+const INSTALL_SOURCES: readonly InstallSource[] = ["web", "cli", "mcp", "marketplace"];
 
 function isInstallSource(value: string): value is InstallSource {
   return (INSTALL_SOURCES as readonly string[]).includes(value);
@@ -82,25 +91,37 @@ export const resourcesRoutes = createRouter()
   .get("/", validate("query", ResourceDirectoryQuerySchema), async (c) => {
     return c.json(SkillDirectoryPageSchema.parse(await c.var.services.resources.list(c.req.valid("query"))));
   })
-  // The catalog's hero stats — unfiltered, unlike `total` on the list above.
+  // The catalog's hero stats — narrowed by `?kind=` alone, never by a search
+  // term or Tag, unlike `total` on the list above. An unknown Kind counts as
+  // no filter rather than a refusal: these are display numbers, not a query.
   .get("/stats", async (c) => {
-    return c.json(SkillDirectoryStatsSchema.parse(await c.var.services.resources.getStats()));
+    const kind = c.req.query("kind");
+    const stats = await c.var.services.resources.getStats(kind && isKind(kind) ? kind : undefined);
+    return c.json(SkillDirectoryStatsSchema.parse(stats));
   })
   // `namespace` is a query parameter rather than more path segments: it may
   // itself contain a slash (`anthropics/skills`), and a Namespace is compared
   // whole and never split (ADR-0042) — so a path would have to be parsed back
   // apart on a "the last segment is the name" rule that nothing else needs.
   // Omitted means this Registry's own, which `getByName` supplies.
-  .get(`/${KIND}/by-name/:name`, async (c) => {
-    const skill = await c.var.services.resources.getByName(
+  .get(`/by-name/:name{.+}`, async (c) => {
+    const resource = await c.var.services.resources.getByNameAnyKind(
+      c.req.param("name"),
+      c.req.query("namespace"),
+    );
+    return c.json(ResourceDetailSchema.parse(resource));
+  })
+  .get(`/${KIND}/by-name/:name{.+}`, async (c) => {
+    const resource = await c.var.services.resources.getByName(
       c.req.param("kind"),
       c.req.param("name"),
       c.req.query("namespace"),
     );
-    return c.json(SkillSchema.parse(skill));
+    return c.json(ResourceDetailSchema.parse(resource));
   })
   .get(`/${ID}`, resourceId, async (c) => {
-    return c.json(SkillSchema.parse(await c.var.services.resources.get(c.req.valid("param").id)));
+    const resource = await c.var.services.resources.get(c.req.valid("param").id);
+    return c.json(ResourceDetailSchema.parse(resource));
   })
   // Fetched apart from the Resource itself, since most reads never need it.
   .get(`/${ID}/installs/trend`, resourceId, async (c) => {
@@ -108,14 +129,43 @@ export const resourcesRoutes = createRouter()
     return c.json(SkillInstallTrendSchema.parse({ points }));
   })
   .put(
-    `/${KIND}/:name`,
+    `/${KIND}/:name{.+}`,
     requireAuth(),
     requireRole("writer"),
     validate("param", PublishParamsSchema),
-    validate("json", PublishBodySchema),
     async (c) => {
-      const result = await c.var.services.resources.publish(c.var.user, c.req.valid("param").name, c.req.valid("json"));
+      const { kind, name } = c.req.valid("param");
+      const rawJson = await c.req.json();
+      if (kind === "mcp") {
+        const body = parseValue(rawJson, PublishMcpBodySchema);
+        const result = await c.var.services.resources.publishMcp(c.var.user, name, body);
+        return c.json(McpPublishedSchema.parse(result));
+      }
+      if (kind === "plugin") {
+        const body = parseValue(rawJson, PublishPluginBodySchema);
+        const result = await c.var.services.resources.publishPlugin(c.var.user, name, body);
+        return c.json(PluginPublishedSchema.parse(result));
+      }
+      const body = parseValue(rawJson, PublishBodySchema);
+      const result = await c.var.services.resources.publish(c.var.user, name, body);
       return c.json(SkillPublishedSchema.parse(result));
+    },
+  )
+  // Editing an MCP server by id keeps its name and Namespace, which a
+  // republish by name would not once the Source changes (see `updateMcp`).
+  .patch(
+    `/${ID}`,
+    requireAuth(),
+    requireRole("writer"),
+    resourceId,
+    validate("json", PublishMcpBodySchema),
+    async (c) => {
+      const result = await c.var.services.resources.updateMcp(
+        c.var.user,
+        c.req.valid("param").id,
+        c.req.valid("json"),
+      );
+      return c.json(McpPublishedSchema.parse(result));
     },
   )
   .put(

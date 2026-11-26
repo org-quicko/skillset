@@ -4,7 +4,7 @@ sidebarTitle: "Commands"
 description: "Full reference for every Skillset CLI command: login, search, install, publish, and more — with all flags, defaults, and examples."
 ---
 
-The Skillset CLI exposes ten commands that cover the full lifecycle of a Skill: authenticating against a Registry, searching and reading the catalog, installing and managing Skills locally, and publishing new ones. Every command accepts `--json` for machine-readable output; see [CI & Automation](/cli/ci-automation) for non-interactive usage.
+The Skillset CLI exposes thirteen commands that cover the full lifecycle of a Skill, MCP Server, or Plugin: authenticating against a Registry, searching and reading the catalog, installing and managing Skills locally, and publishing new ones. Every command accepts `--json` for machine-readable output; see [CI & Automation](/cli/ci-automation) for non-interactive usage.
 
 <Note>
   **`--json` mode** replaces all formatted output with a structured JSON payload on stdout. Errors go to stderr as `{"error": {"code", "message"}}` with a non-zero exit code. `--json` never prompts — see each command for which flags become required.
@@ -215,13 +215,15 @@ When `--files` is passed, `files` is an array of `{ "path": string, "size": numb
 
 </Accordion>
 
-<Accordion title="install — Install a Skill for a coding agent">
+<Accordion title="skills install — Install a Skill for a coding agent">
 
 Installs a Skill by name from the Registry, or directly from a GitHub or GitLab URL. Skills are written into `.agents/skills/<name>` and linked (or copied) into the chosen agent's own directory. The Lockfile (`skillset-lock.json`) is updated to record the installed state.
 
 ```bash
-skillset install <name|url> [--name <skill>] [--namespace <ns>] [--agent <id>] [--scope <scope>] [--copy] [--force] [--json]
+skillset skills install <name|url> [--name <skill>] [--namespace <ns>] [--agent <id>] [--scope <scope>] [--copy] [--force] [--json]
 ```
+
+`skillset install` is the shortcut for `skillset skills install` and takes the same flags. MCP Servers install with `skillset mcp install`.
 
 **Flags**
 
@@ -261,19 +263,19 @@ skillset install <name|url> [--name <skill>] [--namespace <ns>] [--agent <id>] [
 
 ```bash
 # Install by name (prompts for agent and scope)
-skillset install code-review
+skillset skills install code-review
 
 # Install a Skill from a specific namespace
-skillset install pdf --namespace anthropics/skills
+skillset skills install pdf --namespace anthropics/skills
 
 # Install directly from a GitHub repository
-skillset install https://github.com/acme/skills --name pdf
+skillset skills install https://github.com/acme/skills --name pdf
 
 # Install a specific folder in a repository
-skillset install https://github.com/acme/skills/tree/main/pdf --name pdf
+skillset skills install https://github.com/acme/skills/tree/main/pdf --name pdf
 
 # Non-interactive install for CI
-skillset install code-review --agent claude-code --scope project --json
+skillset skills install code-review --agent claude-code --scope project --json
 ```
 
 **URL installs and Submissions**
@@ -285,6 +287,92 @@ Until approved, `skillset update` reports the Skill as `pending`. Once approved,
 **Namespace collisions**
 
 A project holds one `.agents/skills/<name>` directory regardless of how many publishers use that name. Installing a Skill over one installed from a *different* namespace is refused — pass `--force` to replace it explicitly.
+
+</Accordion>
+
+<Accordion title="mcp install — Install an MCP Server into this project">
+
+Installs an MCP Server from the Registry by writing (or merging) its configuration into the project's `.mcp.json`. MCP Servers install at project scope only. Reads need no Token.
+
+```bash
+skillset mcp install <name> [--namespace <ns>] [--force] [--json]
+```
+
+<ParamField path="--namespace" type="string">
+  Which party named the MCP Server, when a bare name matches more than one.
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Replace a server of the same name already in `.mcp.json`.
+</ParamField>
+
+```bash
+skillset mcp install io.github.modelcontextprotocol/server-everything
+```
+
+</Accordion>
+
+<Accordion title="plugins install — Install a Plugin for an agent">
+
+Installs a Plugin from the Registry for one of the agents it supports: the agents whose manifest it holds (`.claude-plugin`, `.cursor-plugin`, `.codex-plugin`). Reads need no Token.
+
+```bash
+skillset plugins install <name> [--agent <id>] [--namespace <ns>] [--json]
+```
+
+<ParamField path="--agent" type="string">
+  `claude-code`, `cursor`, or `codex`. Refused when the Plugin has no manifest for it. When omitted, the only agent the Plugin supports is used; if it supports several, you are asked, and under `--json` or with no terminal it is an error naming them.
+</ParamField>
+
+<ParamField path="--namespace" type="string">
+  Which party named the Plugin, when a bare name matches more than one publisher.
+</ParamField>
+
+- `claude-code` adds the Registry's `/.claude-plugin/marketplace.json` to Claude Code and runs `claude plugin install <name>@<marketplace>` when the Registry is public HTTPS. Otherwise it writes the Plugin to a local marketplace under `~/.claude/plugins/local/skillset/` and installs `<name>@skillset-local`.
+- `cursor` copies the Plugin to `~/.cursor/plugins/local/<name>/`.
+- `codex` writes it to a local marketplace under `~/.agents/plugins/local/skillset/`, then runs `codex plugin marketplace add` and `codex plugin add <name>@skillset`.
+
+```json Output (--json)
+{
+  "agent": "cursor",
+  "path": "/Users/me/.cursor/plugins/local/code-review-suite",
+  "commands": [],
+  "next": "Restart Cursor, or run \"Developer: Reload Window\", to load it.",
+  "name": "code-review-suite",
+  "namespace": "skills.example.com",
+  "supported_agents": ["claude-code", "cursor", "codex"],
+  "via": null
+}
+```
+
+Every install is recorded in `plugins.json` beside the CLI's config, for `plugins update`. Installing a Plugin already installed updates it.
+
+</Accordion>
+
+<Accordion title="plugins update — Update Plugins installed with the CLI">
+
+Checks every Plugin installed with `skillset plugins install` (or the MCP server's `install_plugin`) from the configured Registry, or the one named, and reinstalls those republished since. A Plugin whose version and publish time are unchanged is left alone.
+
+```bash
+skillset plugins update [name] [--agent <id>] [--namespace <ns>] [--force] [--json]
+```
+
+<ParamField path="--agent" type="string">
+  Only update the Plugin's install for this agent.
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Reinstall even when the Registry has nothing newer.
+</ParamField>
+
+One Plugin failing does not stop the rest; the command exits with code 1 when any failed.
+
+```json Output (--json)
+[
+  { "name": "code-review-suite", "namespace": "skills.example.com", "agent": "cursor", "status": "updated", "from": "1.2.0+1795600000", "to": "1.2.1+1795700000", "next": "Restart Cursor, or run \"Developer: Reload Window\", to load it." },
+  { "name": "code-review-suite", "namespace": "skills.example.com", "agent": "codex", "status": "current", "revision": "1.2.1+1795700000" }
+]
+```
 
 </Accordion>
 
@@ -462,9 +550,11 @@ Fields are `null` or `false` when there was nothing to remove (e.g. `skillDirect
 
 </Accordion>
 
-<Accordion title="publish — Publish a Skill to the Registry">
+<Accordion title="publish — Publish a Skill or Plugin to the Registry">
 
-Publishes a Skill from a local path or directly from a GitHub or GitLab URL. When the target is a directory that contains multiple Skills, all are discovered (up to maximum depth) and published as a batch. Requires Writer role or higher.
+Publishes a Skill from a local path or directly from a GitHub or GitLab URL, or a Plugin from a local path. When the target is a directory that contains multiple Skills, all are discovered (up to maximum depth) and published as a batch. Requires Writer role or higher.
+
+A path whose root holds `.claude-plugin/plugin.json` is published as that one Plugin. The Skills inside it are not searched for or published on their own. A directory holding both `SKILL.md` and a Plugin manifest is refused.
 
 ```bash
 skillset publish [target] [--name <skill>] [--yes] [--json]
@@ -505,6 +595,9 @@ skillset publish ./skills --yes
 
 # Publish from a GitHub repository
 skillset publish https://github.com/acme/skills --name pdf
+
+# Publish the Plugin at a path
+skillset publish ./plugins/code-review-suite
 ```
 
 **Single-Skill `--json` output**

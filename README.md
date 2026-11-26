@@ -88,7 +88,9 @@ npm install -g @in-org-quicko/skillset-cli
 skillset login --registry <url>
 skillset search [query]      # what the team has published
 skillset info <name>         # read a Skill without installing it
-skillset install <name>      # install a Skill for a coding agent
+skillset skills install <name>   # install a Skill for a coding agent (or just `skillset install`)
+skillset mcp install <name>      # add an MCP Server to this project's .mcp.json
+skillset plugins install <name>  # install a Plugin for Claude Code, Cursor, or Codex
 skillset list                # what's installed here, and whether it's current
 skillset update [names...]   # re-download whatever the Registry has moved on from
 skillset remove <name>       # uninstall a Skill
@@ -129,7 +131,8 @@ Run directly with `npx`, or add it to an agent's MCP client config:
 
 It exposes `search_skills` and `read_skill` for the Registry's catalog, `installed_skills`,
 `update_skills` and `remove_skills` for what this project actually uses, plus `install_skills`
-and `publish_skill` (which needs `--token` / `SKILLSET_TOKEN`). See
+and `publish_skill` (which needs `--token` / `SKILLSET_TOKEN`), and `search_plugins`, `install_plugin`,
+`update_plugins`, `search_mcp_servers` and `install_mcp_server` for the Registry's Plugins and MCP Servers. See
 [`apps/mcp/README.md`](apps/mcp/README.md).
 
 ## Development

@@ -223,7 +223,7 @@ export const SkillDirectoryEntrySchema = z.object({
   // identifies the row: two entries may share a `name` and are told apart only
   // by this (ADR-0042).
   namespace: z.string(),
-  name: SkillNameSchema,
+  name: z.string().min(1).max(200),
   description: z.string().max(SKILL_DESCRIPTION_MAX_LENGTH),
   published_by_name: z.string(),
   updated_at: timestamp,

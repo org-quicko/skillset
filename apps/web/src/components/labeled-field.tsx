@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** A form field with the small uppercase label the Sign in and Settings pages share. */
+/** A form field with the small label the Sign in and Settings pages share. */
 export function LabeledField({
   label,
   htmlFor,
@@ -14,7 +14,7 @@ export function LabeledField({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={htmlFor} className="text-xs tracking-[0.1em] text-foreground uppercase">
+      <label htmlFor={htmlFor} className="text-xs text-foreground">
         {label}
       </label>
       {children}

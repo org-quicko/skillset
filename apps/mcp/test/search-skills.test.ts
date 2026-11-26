@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { searchSkills } from "../src/tools/search-skills.js";
+import { searchMcpServers, searchPlugins, searchSkills } from "../src/tools/search-skills.js";
 import { jsonResponse, stubFetch } from "./helpers.js";
 
 const UPDATED_AT = "2026-09-20T00:00:00.000Z";
@@ -204,5 +204,42 @@ describe("searchSkills", () => {
     const { fetch: fetchImpl } = stubFetch(() => new Response("nope", { status: 500 }));
 
     await expect(searchSkills(fetchImpl, "https://registry.example", { query: "review" })).rejects.toThrow();
+  });
+});
+
+describe.each([
+  ["searchPlugins", searchPlugins, "plugin"],
+  ["searchMcpServers", searchMcpServers, "mcp"],
+] as const)("%s", (_name, search, kind) => {
+  it(`searches only the ${kind} Kind and returns each match without allowed_tools`, async () => {
+    const { fetch: fetchImpl, calls } = stubRegistry(
+      fakePage([fakeEntry({ kind, name: "review-suite", tags: [{ id: "t1", name: "quality" }] })], 1),
+    );
+
+    const response = await search(fetchImpl, "https://registry.example", { query: "review" });
+
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.searchParams.get("kind")).toBe(kind);
+    expect(url.searchParams.get("q")).toBe("review");
+    expect(response.results).toEqual([
+      {
+        name: "review-suite",
+        description: "Reviews code for style and correctness.",
+        tags: ["quality"],
+        updated_at: UPDATED_AT,
+        installs: 3,
+        namespace: "registry.example",
+        source: "com.example.registry",
+      },
+    ]);
+  });
+
+  it("lists every one with no query, and pages past the cap", async () => {
+    const { fetch: fetchImpl, calls } = stubRegistry(fakePage([fakeEntry({ kind })], 25, 1, 10));
+
+    const response = await search(fetchImpl, "https://registry.example", {});
+
+    expect(new URL(calls[0]?.url ?? "").searchParams.has("q")).toBe(false);
+    expect(response).toMatchObject({ total: 25, truncated: true, next_cursor: "2" });
   });
 });

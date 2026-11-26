@@ -886,6 +886,37 @@ describe("Reading the Skill directory's hero stats (GET /resources/stats)", () =
     expect(stats.installs).toBe(3);
   });
 
+  it("counts only Resources of the Kind that `?kind=` names", async () => {
+    const before = (await (await context.app.request("/api/resources/stats?kind=mcp")).json()) as {
+      skills: number;
+    };
+    await context.db
+      .insertInto("resources")
+      .values({
+        kind: "mcp",
+        namespace: TEST_NAMESPACE,
+        name: "io.example/stats-mcp",
+        description: "An MCP server.",
+        body: null,
+        payload: { kind: "mcp", remotes: [{ transport_type: "http", url: "https://mcp.example.com" }] },
+        published_by: null,
+        published_by_email: "linus@example.com",
+        published_by_name: "Linus",
+      })
+      .execute();
+
+    const mcp = (await (await context.app.request("/api/resources/stats?kind=mcp")).json()) as {
+      skills: number;
+      publishers: number;
+    };
+    const skills = (await (await context.app.request("/api/resources/stats?kind=skill")).json()) as {
+      skills: number;
+    };
+    const all = (await (await context.app.request("/api/resources/stats")).json()) as { skills: number };
+    expect(mcp.skills).toBe(before.skills + 1);
+    expect(all.skills).toBe(skills.skills + mcp.skills);
+  });
+
   it("is readable without a session, same as every other Skill read (ADR-0013)", async () => {
     const res = await context.app.request("/api/resources/stats");
     expect(res.status).toBe(200);
@@ -1426,6 +1457,71 @@ describe("Falling back to fuzzy matching (ADR-0040)", () => {
   it("honours an explicit sort over the fuzzy ranking", async () => {
     const page = await search({ q: "angulr", sort_by: "updated_at" });
     expect(page.items.map((s) => s.name)).toContain("building-angular-applications");
+  });
+});
+
+describe("Searching by Kind: what each Kind's search matches", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+
+  function seed(kind: string, name: string, description: string, body: string) {
+    const at = new Date(Date.UTC(2026, 5, 1));
+    return {
+      kind,
+      namespace: TEST_NAMESPACE,
+      name,
+      description,
+      body,
+      payload: kind === "skill" ? BLANK_SKILL_PAYLOAD : { kind },
+      published_by: null,
+      published_by_email: "grace@example.com",
+      published_by_name: "Grace Hopper",
+      published_at: at,
+      updated_at: at,
+    };
+  }
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+
+    await context.db.insertInto("resources").values([
+      seed("mcp", "weather-server", "Forecasts for any city.", "Reads barometer pressure from a station."),
+      seed("plugin", "review-suite", "Lints terraform modules.", "Covers kubernetes manifests."),
+    ]).execute();
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  async function names(params: Record<string, string>): Promise<string[]> {
+    const res = await context.app.request(`/api/resources?${new URLSearchParams(params).toString()}`);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as ApiPage).items.map((item) => item.name);
+  }
+
+  it("matches an MCP Server on its name, description, and README", async () => {
+    for (const q of ["weather", "forecasts", "barometer"]) {
+      expect(await names({ q, kind: "mcp" })).toEqual(["weather-server"]);
+    }
+  });
+
+  it("does not match an MCP Server on its publisher", async () => {
+    expect(await names({ q: "hopper", kind: "mcp" })).toEqual([]);
+  });
+
+  it("matches a Plugin on its name only", async () => {
+    expect(await names({ q: "review", kind: "plugin" })).toEqual(["review-suite"]);
+    for (const q of ["terraform", "kubernetes", "hopper"]) {
+      expect(await names({ q, kind: "plugin" })).toEqual([]);
+    }
+  });
+
+  it("falls back to fuzzy matching on a Plugin's name, but not its description", async () => {
+    expect(await names({ q: "reviw", kind: "plugin" })).toEqual(["review-suite"]);
+    expect(await names({ q: "terrafom", kind: "plugin" })).toEqual([]);
   });
 });
 
@@ -2144,5 +2240,267 @@ describe("Namespaces (ADR-0042)", () => {
     // stays where it is, which is why a bare read now prefers ours.
     const rows = await context.db.selectFrom("resources").selectAll().where("name", "=", "moved").execute();
     expect(rows.map((row) => row.namespace).sort()).toEqual(["anthropics/skills", TEST_NAMESPACE].sort());
+  });
+});
+
+describe("Publishing and editing MCP servers", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let writer: Session;
+  let reader: Session;
+
+  interface ApiMcp {
+    id: string;
+    namespace: string;
+    name: string;
+    description: string;
+    source: string;
+    packages: unknown[] | null;
+  }
+
+  async function publishMcp(session: Session, name: string, body: Record<string, unknown>): Promise<Response> {
+    return context.app.request(`/api/resources/mcp/${name.split("/").map(encodeURIComponent).join("/")}`, {
+      method: "PUT",
+      headers: { cookie: session.cookie, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function editMcp(session: Session, id: string, body: Record<string, unknown>): Promise<Response> {
+    return context.app.request(`/api/resources/${id}`, {
+      method: "PATCH",
+      headers: { cookie: session.cookie, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  const PACKAGE = { packages: [{ registry_name: "npm", name: "@acme/weather-mcp" }] };
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ first_name: "Ada", last_name: "Lovelace", email: "ada@example.com", password: PASSWORD }),
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+    reader = await createUserAndLogIn(context, {
+      first_name: "Margaret",
+      last_name: "Hamilton",
+      email: "margaret@example.com",
+      password: PASSWORD,
+      role: "reader",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("accepts any non-blank name, reverse-DNS or not", async () => {
+    for (const name of ["weather", "Acme Weather", "com.acme/weather/v2"]) {
+      const res = await publishMcp(writer, name, { description: "Forecasts.", ...PACKAGE });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { resource: ApiMcp }).resource.name).toBe(name);
+    }
+  });
+
+  it("stores a package server's repository link as its Source", async () => {
+    const res = await publishMcp(writer, "linked-weather", {
+      description: "Forecasts.",
+      source: "https://github.com/acme/weather-mcp",
+      ...PACKAGE,
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { resource: ApiMcp }).resource.source).toBe("https://github.com/acme/weather-mcp");
+  });
+
+  it("edits a server in place: new content, same id, name, and Namespace, even when a repository link is added", async () => {
+    const created = ((await (await publishMcp(writer, "editable", { description: "First.", ...PACKAGE })).json()) as {
+      resource: ApiMcp;
+    }).resource;
+
+    const res = await editMcp(writer, created.id, {
+      description: "Second.",
+      source: "https://github.com/acme/editable",
+      remotes: [{ transport_type: "http", url: "https://mcp.acme.com/mcp" }],
+    });
+    expect(res.status).toBe(200);
+    const edited = ((await res.json()) as { resource: ApiMcp }).resource;
+    expect(edited).toMatchObject({
+      id: created.id,
+      name: "editable",
+      namespace: created.namespace,
+      description: "Second.",
+      source: "https://github.com/acme/editable",
+      packages: null,
+    });
+
+    const rows = await context.db.selectFrom("resources").select("id").where("name", "=", "editable").execute();
+    expect(rows.length).toBe(1);
+  });
+
+  it("serves a server's README as markdown at its page's URL plus /README.md", async () => {
+    const created = ((await (await publishMcp(writer, "acme/readme-weather", {
+      description: "Forecasts.",
+      body: "# Weather\n",
+      ...PACKAGE,
+    })).json()) as { resource: ApiMcp }).resource;
+
+    const res = await context.app.request(
+      `/mcp-servers/${encodeURIComponent("acme/readme-weather")}/README.md?namespace=${encodeURIComponent(created.namespace)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toStartWith("text/markdown");
+    expect(await res.text()).toBe("# Weather\n");
+  });
+
+  it("answers 404 for a server with no README, and for no such server", async () => {
+    await publishMcp(writer, "no-readme", { description: "Forecasts.", ...PACKAGE });
+    expect((await context.app.request("/mcp-servers/no-readme/README.md")).status).toBe(404);
+    expect((await context.app.request("/mcp-servers/never-published/README.md")).status).toBe(404);
+  });
+
+  it("refuses an edit from a reader", async () => {
+    const created = ((await (await publishMcp(writer, "reader-cannot-edit", { description: "First.", ...PACKAGE })).json()) as {
+      resource: ApiMcp;
+    }).resource;
+    const res = await editMcp(reader, created.id, { description: "Second.", ...PACKAGE });
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses to edit a Skill as an MCP server", async () => {
+    const skill = await publish(context, writer, "not-an-mcp", { description: "A Skill.", body: "Body.\n" });
+    const { skill: published } = (await skill.json()) as ApiPublished;
+    const res = await editMcp(writer, published.id, { description: "Second.", ...PACKAGE });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as ApiError).error.code).toBe("kind_mismatch");
+  });
+});
+
+describe("Publishing and reading Plugins", () => {
+  let container: StartedPostgreSqlContainer;
+  let context: TestContext;
+  let writer: Session;
+
+  const MANIFEST_PATH = ".claude-plugin/plugin.json";
+
+  interface ApiPlugin {
+    id: string;
+    kind: string;
+    name: string;
+    namespace: string;
+    description: string;
+    body: string | null;
+    agents: string[];
+    version: string | null;
+  }
+
+  async function publishPlugin(name: string, body: Record<string, unknown>): Promise<Response> {
+    return context.app.request(`/api/resources/plugin/${name}`, {
+      method: "PUT",
+      headers: { cookie: writer.cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        description: "Reviews code.",
+        body: "# Review suite",
+        agents: ["claude-code"],
+        components: {
+          skills: [],
+          commands: [{ name: "review", description: "Review a diff.", path: "commands/review.md" }],
+          agents: [],
+          hooks: [],
+          mcp_servers: [],
+        },
+        files: [
+          { path: MANIFEST_PATH, size: 60 },
+          { path: "commands/review.md", size: 7 },
+        ],
+        ...body,
+      }),
+    });
+  }
+
+  beforeAll(async () => {
+    const started = await startTestContext();
+    container = started.container;
+    context = started.context;
+    await context.app.request("/api/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ first_name: "Ada", last_name: "Lovelace", email: "ada@example.com", password: PASSWORD }),
+    });
+    writer = await createUserAndLogIn(context, {
+      first_name: "Grace",
+      last_name: "Hopper",
+      email: "grace@example.com",
+      password: PASSWORD,
+      role: "writer",
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await stopTestContext(context, container);
+  });
+
+  it("publishes a Plugin, hands back an upload per file, and reads it back by name, id, and in the list", async () => {
+    const res = await publishPlugin("review-suite", { version: "1.2.0" });
+    expect(res.status).toBe(200);
+    const published = (await res.json()) as { plugin: ApiPlugin; upload: { files: ApiUploadTarget[] } };
+    expect(published.plugin).toMatchObject({
+      kind: "plugin",
+      name: "review-suite",
+      agents: ["claude-code"],
+      version: "1.2.0",
+      body: "# Review suite",
+    });
+    expect((published.plugin as ApiPlugin & { components: { commands: unknown[] } }).components.commands).toEqual([
+      { name: "review", description: "Review a diff.", path: "commands/review.md" },
+    ]);
+    expect(published.upload.files.map((f) => f.path)).toEqual([MANIFEST_PATH, "commands/review.md"]);
+
+    const byName = (await (await context.app.request("/api/resources/plugin/by-name/review-suite")).json()) as ApiPlugin;
+    const byId = (await (await context.app.request(`/api/resources/${published.plugin.id}`)).json()) as ApiPlugin;
+    expect(byName.id).toBe(published.plugin.id);
+    expect(byId.kind).toBe("plugin");
+
+    const list = (await (await context.app.request("/api/resources?kind=plugin")).json()) as ApiPage;
+    expect(list.items.map((item) => item.name)).toContain("review-suite");
+  });
+
+  it("refuses a Plugin with no agent manifest or agents that do not match it, and accepts a claude- name", async () => {
+    const noManifest = await publishPlugin("no-manifest", { files: [{ path: "README.md", size: 3 }] });
+    expect(noManifest.status).toBe(400);
+    expect(((await noManifest.json()) as ApiError).error.code).toBe("manifest_missing");
+
+    const wrongAgents = await publishPlugin("wrong-agents", { agents: [] });
+    expect(wrongAgents.status).toBe(400);
+    expect(((await wrongAgents.json()) as ApiError).error.code).toBe("agents_invalid");
+
+    const claudeNamed = await publishPlugin("claude-md-management", {});
+    expect(claudeNamed.status).toBe(200);
+  });
+
+  it("lists Claude Code Plugins in the marketplace, each as a zip from this Registry with a version that moves on republish", async () => {
+    await publishPlugin("market-suite", { version: "2.0.0" });
+    const res = await context.app.request("/.claude-plugin/marketplace.json");
+    expect(res.status).toBe(200);
+    const marketplace = (await res.json()) as {
+      name: string;
+      plugins: { name: string; version: string; source: { source: string; url: string } }[];
+    };
+    expect(marketplace.name).toBe("skillset");
+    const entry = marketplace.plugins.find((p) => p.name === "market-suite");
+    expect(entry?.version).toMatch(/^2\.0\.0\+\d+$/);
+    expect(entry?.source.source).toBe("archive");
+    expect(entry?.source.url).toStartWith(`${TEST_PUBLIC_URL.replace(/\/+$/, "")}/api/resources/`);
+    expect(entry?.source.url).toEndWith("/artifact?source=marketplace");
   });
 });

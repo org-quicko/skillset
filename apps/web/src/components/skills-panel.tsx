@@ -10,8 +10,10 @@ import {
 import { SkillDetail } from "@/components/skill-detail";
 import { SkillsHome } from "@/components/skills-home";
 import type { SkillDirectoryFilters } from "@/hooks/use-skills";
-import { namespaceFromSearch, SKILL_PATH_PREFIX, skillPath } from "@/lib/routes";
+import { namespaceFromSearch, skillPath } from "@/lib/routes";
+import { sectionForPath } from "@/lib/sections";
 import { useRouter } from "@/lib/use-router";
+import { cn } from "@/lib/utils";
 
 // `sort_by` has no single default — it is `relevance` while a search term is
 // active and `updated_at` otherwise, which is the rule the API applies to the
@@ -44,8 +46,12 @@ function filtersFromSearch(search: URLSearchParams): SkillDirectoryFilters {
   };
 }
 
-/** The inverse of `filtersFromSearch` — omits anything already at its default, so the ordinary unfiltered view's URL stays plain. */
-function searchFromFilters(filters: SkillDirectoryFilters): string {
+/**
+ * The inverse of `filtersFromSearch` — omits anything already at its default, so the ordinary unfiltered view's URL stays plain.
+ *
+ * @param basePath - The section's list path the query string is added to.
+ */
+function searchFromFilters(filters: SkillDirectoryFilters, basePath: string): string {
   const params = new URLSearchParams();
   if (filters.q) params.set("q", filters.q);
   for (const tagId of filters.tagIds) params.append("tag_id", tagId);
@@ -55,12 +61,18 @@ function searchFromFilters(filters: SkillDirectoryFilters): string {
   if (filters.sortBy !== defaultSkillDirectorySortField(filters.q)) params.set("sort_by", filters.sortBy);
   if (filters.sortOrder !== DEFAULT_SORT_ORDER) params.set("sort_order", filters.sortOrder);
   const query = params.toString();
-  return query ? `/?${query}` : "/";
+  return query ? `${basePath}?${query}` : basePath;
 }
 
-/** `role` is `null` for a signed-out visitor — they can browse and search, but no write action is offered. */
+/**
+ * The catalog: the section the URL names (Skills, MCP, or Plugins), as its
+ * list or as one entry's detail page.
+ *
+ * @param role - `null` for a signed-out visitor; they can browse and search, but no write action is offered.
+ */
 export function SkillsPanel({ role }: { role: Role | null }) {
   const { pathname, search, navigate, replace } = useRouter();
+  const section = sectionForPath(pathname);
 
   const filters = filtersFromSearch(search);
 
@@ -68,13 +80,19 @@ export function SkillsPanel({ role }: { role: Role | null }) {
   // refinement of the same view, not a transition the back button should
   // have to step back through one at a time.
   function handleFiltersChange(next: SkillDirectoryFilters) {
-    replace(searchFromFilters(next));
+    replace(searchFromFilters(next, section.path));
   }
 
-  if (pathname.startsWith(SKILL_PATH_PREFIX)) {
-    const name = decodeURIComponent(pathname.slice(SKILL_PATH_PREFIX.length));
+  if (pathname.startsWith(section.detailPrefix)) {
+    const name = decodeURIComponent(pathname.slice(section.detailPrefix.length));
     return (
-      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1200px] flex-col px-7 pt-6 pb-10">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[1200px] flex-col px-7 pt-6 pb-10",
+          // Matches SkillDetail: only a Skill's page fills the viewport, and only at `lg`.
+          section.kind === "skill" && "lg:h-full lg:min-h-0",
+        )}
+      >
         <SkillDetail
           name={name}
           // Undefined for a bare `/skills/<name>`, which the Registry resolves
@@ -82,8 +100,8 @@ export function SkillsPanel({ role }: { role: Role | null }) {
           namespace={namespaceFromSearch(search)}
           canDelete={role !== null && roleMeets(role, "admin")}
           canEditTags={role !== null && roleMeets(role, "writer")}
-          onBack={() => navigate("/")}
-          onDeleted={() => navigate("/")}
+          onBack={() => navigate(section.path)}
+          onDeleted={() => navigate(section.path)}
         />
       </div>
     );
@@ -91,9 +109,12 @@ export function SkillsPanel({ role }: { role: Role | null }) {
 
   return (
     <SkillsHome
+      // Keyed so switching sections starts fresh: search field, open dialog, and entry animations.
+      key={section.kind}
+      section={section}
       filters={filters}
       onFiltersChange={handleFiltersChange}
-      onSelect={(name, namespace) => navigate(skillPath(name, namespace))}
+      onSelect={(name, namespace) => navigate(skillPath(name, namespace, section.kind))}
       role={role}
     />
   );

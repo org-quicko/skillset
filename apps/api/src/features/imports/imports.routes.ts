@@ -65,6 +65,14 @@ export const importsRoutes = createRouter()
     const items = await c.var.services.imports.listSkillFolders(c.var.user.id, location);
     return c.json(SkillSourcesSchema.parse({ items }));
   })
+  // A Plugin's files are read through `/skill-files` above, which returns a
+  // folder whatever it holds; only finding Plugin roots needs its own route.
+  .post("/:provider/plugins", validate("json", JsonObjectSchema), async (c) => {
+    const location = parseValue({ ...c.req.valid("json"), provider: c.req.param("provider") }, SkillSourceLocationSchema);
+
+    const items = await c.var.services.imports.listSkillFolders(c.var.user.id, location, undefined, "plugin");
+    return c.json(SkillSourcesSchema.parse({ items }));
+  })
   // Refused here, before any lookup, so an unknown provider is this route's
   // 400 rather than a 409 that reads as "nobody configured this".
   .get("/:provider/repositories", validate("param", GitProviderParamSchema), async (c) => {

@@ -15,6 +15,16 @@ Search is a two-stage pipeline:
 
 Because the fallback only activates on a zero-result full-text response, well-formed queries are never penalised by the fuzzier trigram scoring.
 
+### What each Kind is matched on
+
+| Kind | Full-text search | Trigram fallback |
+|---|---|---|
+| Skill | Name, description, `SKILL.md` body, publisher name | Name, description |
+| MCP Server | Name, description, README | Name, description |
+| Plugin | Name only | Name only |
+
+Fields are weighted in the order listed, so a match on the name ranks above a match on the description, and so on.
+
 <Note>
   The trigram fallback requires the `pg_trgm` Postgres extension. The baseline migration creates it automatically at startup. On managed Postgres, `CREATE EXTENSION` may require a privileged role — see [Deployment → Database](/deployment/database) if the migration fails.
 </Note>
@@ -32,7 +42,7 @@ GET /api/resources?q=code+review&kind=skill&tag_id=<id>&page=1&page_size=20
 </ParamField>
 
 <ParamField query="kind" type="string">
-  Narrow results to one Kind: `skill`, `mcp-server`, or `plugin`. Omit to return all Kinds. An unrecognised value is rejected with a 400.
+  Narrow results to one Kind: `skill`, `mcp`, or `plugin`. Omit to return all Kinds. An unrecognised value is rejected with a 400.
 </ParamField>
 
 <ParamField query="tag_id" type="string">
@@ -102,7 +112,7 @@ skillset search code-review --json
 The `--tag` flag accepts a Tag name; the CLI resolves it to a Tag id by fetching `GET /api/tags` before sending the search request. If the name does not match any Tag, the CLI lists the available Tags in the error message.
 
 <Note>
-  The `skillset search` command always searches **Skills only** — the CLI sends `kind=skill` with every request. To search MCP Servers or Plugins, query the API directly: `GET /api/resources?kind=mcp-server` or `GET /api/resources?kind=plugin`.
+  The `skillset search` command always searches **Skills only** — the CLI sends `kind=skill` with every request. To search MCP Servers or Plugins, use the MCP server's `search_mcp_servers` and `search_plugins` tools, or query the API directly: `GET /api/resources?kind=mcp` or `GET /api/resources?kind=plugin`.
 </Note>
 
 ## MCP
@@ -138,6 +148,8 @@ The `search_skills` tool on the bundled MCP server exposes the same catalog sear
 </ParamField>
 
 Each result in `search_skills` includes `allowed_tools`, so what a Skill claims the right to access is visible before any install decision — you do not need to call `read_skill` first.
+
+`search_plugins` and `search_mcp_servers` take the same four arguments and return the same page shape for their Kind, without `allowed_tools`. `search_plugins` matches Plugin names only; `search_mcp_servers` matches an MCP Server's name, description, and README.
 
 ## Sorting behaviour
 

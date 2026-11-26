@@ -31,6 +31,34 @@ function fakeSkill(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function fakeMcp(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "mcp-1",
+    kind: "mcp",
+    name: "io.github.modelcontextprotocol/server-everything",
+    description: "MCP test server.",
+    body: "Reference server.",
+    published_by: { user_id: "u1", email: "writer@example.com", first_name: "A", last_name: "B" },
+    published_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    license: "MIT",
+    compatibility: null,
+    metadata: null,
+    allowed_tools: null,
+    namespace: "registry.example",
+    source: "com.example.registry",
+    tags: [],
+    installs: 0,
+    packages: [
+      {
+        registry_name: "npm",
+        name: "@modelcontextprotocol/server-everything",
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function validArtifactZip(): Uint8Array {
   return zipSync({ "SKILL.md": encoder.encode("---\nname: code-review\ndescription: Reviews code.\n---\nBody.\n") });
 }
@@ -399,6 +427,75 @@ describe("runInstall and Namespaces (ADR-0042)", () => {
 
       await runInstall(deps, { name: "code-review", namespace: IMPORTED, scope: "project", agent: "codex" });
       expect(await lockedNamespace(cwd)).toBe(IMPORTED);
+    });
+  });
+
+  describe("mcp server install", () => {
+    function stubMcpRegistry(mcpData = fakeMcp()) {
+      return stubFetch((url) => {
+        if (
+          url ===
+          "https://registry.example/api/resources/mcp/by-name/io.github.modelcontextprotocol%2Fserver-everything"
+        ) {
+          return jsonResponse(200, mcpData);
+        }
+        throw new Error(`Unexpected request to ${url}`);
+      });
+    }
+
+    it("installs an MCP Server into .mcp.json", async () => {
+      await withTempDirs(async ({ configDir, cwd }) => {
+        const { fetch: fetchImpl } = stubMcpRegistry();
+        const deps = depsFor(configDir, cwd, fetchImpl);
+
+        const report = await runInstall(deps, {
+          name: "io.github.modelcontextprotocol/server-everything",
+          kind: "mcp",
+        });
+
+        expect(report.kind).toBe("mcp");
+        if (report.kind === "mcp") {
+          expect(report.serverKey).toBe("server-everything");
+          expect(report.configPath).toBe(join(cwd, ".mcp.json"));
+          expect(report.overwritten).toBe(false);
+          expect(report.config.command).toBe("npx");
+        }
+
+        const mcpJson = JSON.parse(await readFile(join(cwd, ".mcp.json"), "utf8"));
+        expect(mcpJson.mcpServers["server-everything"]).toBeDefined();
+        expect(mcpJson.mcpServers["server-everything"].command).toBe("npx");
+      });
+    });
+
+    it("installs a slashed name as a Skill unless told otherwise, naming the command for an MCP Server", async () => {
+      await withTempDirs(async ({ configDir, cwd }) => {
+        // The Registry answers a Skill lookup with whatever Kind has the name.
+        const { fetch: fetchImpl, calls } = stubFetch((url) => {
+          if (url.includes("/resources/skill/by-name/")) return jsonResponse(200, fakeMcp());
+          throw new Error(`Unexpected request to ${url}`);
+        });
+        const deps = depsFor(configDir, cwd, fetchImpl);
+
+        await expect(
+          runInstall(deps, { name: "io.github.modelcontextprotocol/server-everything", scope: "project" }),
+        ).rejects.toThrow(/is an MCP Server, not a Skill — run `skillset mcp install/);
+        expect(calls.some((call) => call.url.includes("/resources/mcp/"))).toBe(false);
+      });
+    });
+
+    it("rejects MCP server installation with --scope user", async () => {
+      await withTempDirs(async ({ configDir, cwd }) => {
+        const { fetch: fetchImpl } = stubMcpRegistry();
+        const deps = depsFor(configDir, cwd, fetchImpl);
+
+        await expect(
+          runInstall(deps, {
+            name: "io.github.modelcontextprotocol/server-everything",
+            kind: "mcp",
+            scope: "user",
+          }),
+        ).rejects.toThrow(/MCP Server installation is project scope only/);
+      });
     });
   });
 });

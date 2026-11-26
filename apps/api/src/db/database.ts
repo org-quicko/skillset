@@ -11,7 +11,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type IdentityProviderKind = "github" | "google" | "microsoft";
 
-export type SkillInstallSource = "cli" | "mcp" | "web";
+export type SkillInstallSource = "cli" | "marketplace" | "mcp" | "web";
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -69,6 +69,15 @@ export interface Integrations {
   display_name: string;
   id: Generated<string>;
   provider: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MarketplaceSettings {
+  description: string | null;
+  id: Generated<boolean>;
+  name: string;
+  owner_email: string | null;
+  owner_name: string;
   updated_at: Generated<Timestamp>;
 }
 
@@ -204,6 +213,7 @@ export interface DB {
   connections: Connections;
   identity_providers: IdentityProviders;
   integrations: Integrations;
+  marketplace_settings: MarketplaceSettings;
   rate_limits: RateLimits;
   resource_analytics: ResourceAnalytics;
   resource_directory: ResourceDirectory;

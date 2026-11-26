@@ -69,45 +69,99 @@ The `.claude-plugin/plugin.json` manifest is the only file the Registry requires
 
 ## Publishing a Plugin
 
-Plugins are published the same way as Skills — via the CLI `publish` command or the web interface Import. The same Artifact limits apply (1,000 files, 25 MB uncompressed, 10 MB compressed).
+Publish a Plugin by uploading its folder in the web interface, or with the CLI's `publish` command from a local directory. The same Artifact limits apply as for Skills (1,000 files, 25 MB uncompressed, 10 MB compressed).
 
-<CodeGroup>
-  ```bash From a local directory
-  # Publish the current directory as a Plugin
-  skillset publish
+```bash
+# Publish the Plugin in the current directory
+skillset publish
 
-  # Publish from an explicit path
-  skillset publish ./my-plugin
-  ```
+# Publish from an explicit path
+skillset publish ./my-plugin
+```
 
-  ```bash From a Git repository
-  # Clone and publish from a remote repository
-  skillset publish https://github.com/acme/plugins --name code-review-suite
-  ```
-</CodeGroup>
-
-The `kind` is inferred from the presence of `.claude-plugin/plugin.json` — a directory containing that file is published as a `plugin`, not a `skill`. A directory containing `SKILL.md` at its root is published as a `skill`.
+The CLI publishes a directory as a `plugin` when its root holds `.claude-plugin/plugin.json`, and as a `skill` when its root holds `SKILL.md`. The Plugin's name, description, version, license and homepage come from the manifest. Publishing the same name again replaces the Plugin.
 
 <Warning>
   A directory that contains both `SKILL.md` and `.claude-plugin/plugin.json` will be rejected as ambiguous. Use a separate directory for each Resource.
 </Warning>
 
+<Note>
+  The web interface imports Plugins from GitHub or GitLab too (**Publish → Plugin → GitHub**). The CLI's `skillset publish <url>` takes Skills only, for now.
+</Note>
+
+### Publishing a new version
+
+A Plugin is never versioned side by side: publishing it again replaces it (ADR-0002). On a Plugin's page, writers have **Publish a new version** in the **⋯** menu, which republishes that Plugin and nothing else:
+
+- **From repository** — for a Plugin Imported from GitHub or GitLab, reads the latest from the repository it came from and finds the Plugin's folder again by the name in its manifest (ADR-0046).
+- **Drag and drop** — a new copy of the Plugin's folder. An Imported Plugin keeps its Source, so it stays in its Namespace.
+
+The new files must name the same Plugin; a folder with a different `name` is refused, because it would publish a second Plugin. Once published, the Claude Code marketplace lists the new version straight away, and `skillset plugins update` picks it up for every agent. The CLI's `skillset publish <dir>` republishes a Plugin from disk the same way.
+
+## Supported agents
+
+A Plugin supports an agent when it holds that agent's manifest. The Registry reads this from the folders present and shows them as the Plugin's **Agents**, with one install tab each.
+
+| Folder | Agent |
+|---|---|
+| `.claude-plugin/plugin.json` | Claude Code |
+| `.cursor-plugin/plugin.json` | Cursor |
+| `.codex-plugin/plugin.json` | Codex |
+
+A Plugin can hold several. Every manifest must give the same `name`. A Plugin is never offered for an agent it has no manifest for, even one that could load another agent's format.
+
 ## Installing a Plugin
 
-Installing a Plugin downloads its Artifact and writes the files to the agent's directory, just as a Skill install does.
-
 ```bash
-# Install a Plugin by name
-skillset install code-review-suite
+# Install for the only agent the Plugin supports, or pick from the ones it does
+skillset plugins install code-review-suite
+
+# Install for one agent
+skillset plugins install code-review-suite --agent cursor
 ```
 
-The installed files include everything in the Artifact — the manifest, skills, commands, agents, hooks, and MCP configuration. The agent's own resolution of those contents is outside Skillset's scope.
+Each agent installs differently:
+
+- **Claude Code:** when the Registry is served over HTTPS on a public host, the CLI adds its hosted marketplace (`claude plugin marketplace add <registry>/.claude-plugin/marketplace.json`) and runs `claude plugin install <name>@<marketplace>`, and Claude Code downloads the Plugin itself. Anywhere else (plain HTTP, `localhost`, a private address), Claude Code refuses the hosted marketplace's archives, so the CLI downloads the Plugin into a local marketplace at `~/.claude/plugins/local/skillset/`, adds that, and runs `claude plugin install <name>@skillset-local`.
+- **Cursor:** the CLI downloads the Plugin and copies it to `~/.cursor/plugins/local/<name>/`. Restart Cursor, or run "Developer: Reload Window", to load it.
+- **Codex:** the CLI downloads the Plugin into a local Skillset marketplace at `~/.agents/plugins/local/skillset/`, adds that marketplace to Codex, and runs `codex plugin add <name>@skillset`.
+
+A Plugin's page has an Installation panel with a dropdown of the agents it supports. Each one shows the `skillset plugins install` command for that agent, ready to copy.
+
+Claude Code and Codex need their own CLIs (`claude`, `codex`) on your `PATH`.
+
+### Updating a Plugin
+
+The CLI remembers every Plugin it installs, in `plugins.json` beside its config file. `skillset plugins update` checks each against the Registry and reinstalls the ones republished since, the same way for every agent:
+
+```bash
+skillset plugins update                      # every Plugin installed with the CLI
+skillset plugins update code-review-suite    # one Plugin, for every agent it was installed for
+skillset plugins update code-review-suite --agent cursor --force
+```
+
+A Plugin counts as new when its manifest version or its publish time changes, so republishing without bumping the version still reaches users. Plugins installed some other way, such as straight from Claude Code's `/plugin` browser, are not tracked: Claude Code updates those itself. To keep Plugins current without remembering to run the command, run it from a Claude Code `SessionStart` hook or a scheduled job.
 
 ## Marketplace
 
-Plugins appear in `.claude-plugin/marketplace.json` alongside Skills, as plugin entries with `archive` sources. Agents that support the Claude plugin marketplace format can discover and install Plugins directly from this endpoint without the `skillset` CLI.
+The Registry serves a Claude Code marketplace at `/.claude-plugin/marketplace.json`. It lists every Plugin that supports Claude Code, as entries with `archive` sources, so Claude Code can install from it without the `skillset` CLI:
 
-MCP Servers are never listed in the Marketplace because the Registry has no bytes to point at for them — only Skills and Plugins appear there.
+```bash
+claude plugin marketplace add https://skills.example.com/.claude-plugin/marketplace.json
+claude plugin install code-review-suite@skillset
+```
+
+Cursor and Codex cannot read a marketplace from a URL, so the Registry serves none for them; `skillset plugins install` is how they install. MCP Servers are never listed, because the Registry has no bytes to point at for them.
+
+### Marketplace settings
+
+Admins edit the marketplace's details in **Settings → Marketplace**: its name, owner, owner email, and description. The name is what Claude Code users type after the `@` (`claude plugin install <plugin>@<name>`) and must be kebab-case. Which Plugins it lists always follows what is published.
+
+<Warning>
+  Renaming the marketplace breaks installs that used the old name. Users have to add the marketplace again and reinstall its plugins under the new name.
+</Warning>
+
+The details are also available to Admins over the API at `GET` and `PUT /api/marketplace/settings`.
 
 ## Tags
 

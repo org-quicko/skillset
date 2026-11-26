@@ -538,6 +538,21 @@ describe("Importing a Skill from a Git Provider (ADR-0024)", () => {
       expect(found).toEqual([{ provider: "github", project: "acme/skills", ref: "main", path: "apps/code-review" }]);
     });
 
+    it("finds Plugin roots by their agent manifest when asked for plugins, and says so when there are none", async () => {
+      await ready();
+      const provider = stub({
+        [ROOT_TREE]: tree("plugins/review/.claude-plugin/plugin.json", "plugins/review/skills/lint/SKILL.md", "solo/SKILL.md"),
+      });
+
+      const found = await imports.listSkillFolders(writer.id, rootLocation(), provider.fetch, "plugin");
+      expect(found.map((location) => location.path)).toEqual(["plugins/review"]);
+
+      const empty = stub({ [ROOT_TREE]: tree("solo/SKILL.md") });
+      await expect(imports.listSkillFolders(writer.id, rootLocation(), empty.fetch, "plugin")).rejects.toThrow(
+        /No plugin was found/,
+      );
+    });
+
     it("reports that no Skill was found, distinct from an empty folder", async () => {
       await ready();
       const provider = stub({ [ROOT_TREE]: tree("README.md") });

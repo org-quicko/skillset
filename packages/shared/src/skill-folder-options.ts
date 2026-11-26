@@ -11,4 +11,10 @@ export interface SkillFolderOptions {
   maxFiles?: number;
   /** Defaults to `ARTIFACT_MAX_UNCOMPRESSED_BYTES`. */
   maxBytes?: number;
+  /**
+   * For discovery: the files, relative to a folder, that mark it as a
+   * Resource. Defaults to `SKILL.md`; a Plugin passes its agent manifests
+   * (`PLUGIN_MANIFEST_PATHS`).
+   */
+  markers?: readonly string[];
 }

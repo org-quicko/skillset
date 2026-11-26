@@ -26,12 +26,15 @@ const COMMANDS: readonly (readonly [string, string])[] = [
   ["skillset whoami", "Show which Registry and identity are active"],
   ["skillset search [query] [--tag <name>]", "Search the Registry's catalog, or list all of it"],
   ["skillset info <name> [--files]", "Read a Skill without installing it"],
-  ["skillset install <name> [--namespace <ns>] [--agent <id>]", "Install a Skill from the Registry for a coding Agent"],
-  ["skillset install <url> --name <skill> [--agent <id>]", "Install a Skill from a GitHub or GitLab repo with your git, and submit it"],
+  ["skillset skills install <name> [--namespace <ns>] [--agent <id>]", "Install a Skill from the Registry (or just `skillset install`)"],
+  ["skillset skills install <url> --name <skill> [--agent <id>]", "Install a Skill from a GitHub or GitLab repo with your git, and submit it"],
+  ["skillset mcp install <name>", "Install an MCP Server into this project's .mcp.json"],
   ["skillset list [--scope <scope>]", "Show what this project has installed, and whether it is current"],
   ["skillset update [names...] [--force]", "Re-download Skills the Registry has moved on from"],
   ["skillset remove <name>", "Uninstall a Skill from this project"],
-  ["skillset publish [path]", "Publish a Skill, or every Skill under a directory"],
+  ["skillset plugins install <name> [--agent <id>]", "Install a Plugin for Claude Code, Cursor, or Codex"],
+  ["skillset plugins update [name]", "Update Plugins installed with the CLI to the Registry's latest"],
+  ["skillset publish [path]", "Publish a Plugin, a Skill, or every Skill under a directory"],
   ["skillset publish <url> --name <skill>", "Publish a Skill from a GitHub or GitLab repo with your git"],
 ];
 

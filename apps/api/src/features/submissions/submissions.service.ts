@@ -205,7 +205,7 @@ export class SubmissionsService {
     await this.db.deleteFrom("resource_submissions").where("id", "=", id).execute();
 
     this.logger.info({ submission_id: id, resource_id: resourceId }, "submission approved");
-    return this.resources.get(resourceId);
+    return (await this.resources.get(resourceId)) as SkillDetail;
   }
 
   /**

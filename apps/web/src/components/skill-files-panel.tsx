@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { artifactFileUrl, useArtifactFile, useArtifactFiles } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
 import { findArtifactFile, resolveArtifactPath } from "@/lib/artifact-links";
+import { ancestorFolders, buildFileTree, type FolderNode } from "@/lib/file-tree";
 import { renderSkillBody } from "@/lib/render-skill-body";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -40,50 +41,113 @@ const CodeViewer = lazy(() => import("@/components/code-viewer"));
  */
 const PANEL_HEIGHT = "h-full";
 
-/** One directory of an Artifact and the files directly in it. `""` is the Skill's root. */
-interface FileGroup {
-  directory: string;
-  files: ArtifactFile[];
-}
-
-/**
- * The Artifact's files grouped by the directory they sit in, root first and
- * then in the order the API listed them.
- *
- * @remarks
- * One level of grouping rather than a full recursive tree: a Skill's folder
- * is a `SKILL.md` beside a handful of shallow directories (`references/`,
- * `scripts/`, `assets/`), and a nested directory's full path in its header
- * says everything a second level of indentation would.
- */
-function groupByDirectory(files: readonly ArtifactFile[]): FileGroup[] {
-  const groups = new Map<string, ArtifactFile[]>();
-
-  for (const file of files) {
-    const slash = file.path.lastIndexOf("/");
-    const directory = slash === -1 ? "" : file.path.slice(0, slash);
-    const group = groups.get(directory);
-    if (group) group.push(file);
-    else groups.set(directory, [file]);
-  }
-
-  // The API already sorts by path with `SKILL.md` first, so insertion order
-  // is the order to keep — except that the root's own files belong above the
-  // directories regardless of how their names happen to sort.
-  const entries = [...groups.entries()].map(([directory, files]) => ({ directory, files }));
-  const root = entries.filter((group) => group.directory === "");
-  return [...root, ...entries.filter((group) => group.directory !== "")];
-}
-
-/** The file to show before anyone has picked one: the `SKILL.md`, falling back to whatever is first. */
-function defaultSelection(files: readonly ArtifactFile[]): string | undefined {
-  return files.find((file) => file.path === SKILL_FILE_NAME)?.path ?? files[0]?.path;
+/** The file to show before anyone has picked one: `rootFile`, falling back to whatever is first. */
+function defaultSelection(files: readonly ArtifactFile[], rootFile: string): string | undefined {
+  return files.find((file) => file.path === rootFile)?.path ?? files[0]?.path;
 }
 
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
 }
 
+/** Left padding per tree depth: each level indents one icon's width. */
+const INDENT_REM = 0.9;
+
+function FileRow({
+  file,
+  depth,
+  selected,
+  onSelect,
+}: {
+  file: ArtifactFile;
+  depth: number;
+  selected: string;
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(file.path)}
+      aria-current={file.path === selected}
+      title={file.path}
+      style={{ paddingLeft: `${0.5 + depth * INDENT_REM}rem` }}
+      className={cn(
+        "flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs transition-colors",
+        file.path === selected
+          ? "bg-muted font-medium text-foreground"
+          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+      )}
+    >
+      <FileIcon className="size-3.5 shrink-0 opacity-70" />
+      <span className="truncate">{fileName(file.path)}</span>
+    </button>
+  );
+}
+
+/** A folder's contents: its files, then each subfolder as a row that opens and closes. */
+function FolderContents({
+  folder,
+  depth,
+  selected,
+  collapsed,
+  onToggle,
+  onSelect,
+}: {
+  folder: FolderNode;
+  depth: number;
+  selected: string;
+  collapsed: ReadonlySet<string>;
+  onToggle: (path: string) => void;
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <>
+      {folder.files.map((file) => (
+        <FileRow key={file.path} file={file} depth={depth} selected={selected} onSelect={onSelect} />
+      ))}
+      {folder.folders.map((child) => {
+        const isCollapsed = collapsed.has(child.path);
+        return (
+          <div key={child.path} className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={() => onToggle(child.path)}
+              aria-expanded={!isCollapsed}
+              title={child.path}
+              style={{ paddingLeft: `${0.5 + depth * INDENT_REM}rem` }}
+              className="flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <ChevronDownIcon
+                className={cn("size-3.5 shrink-0 opacity-60 transition-transform", isCollapsed && "-rotate-90")}
+              />
+              <FolderIcon className="size-3.5 shrink-0 opacity-70" />
+              <span className="truncate">{child.name}</span>
+            </button>
+            {!isCollapsed && (
+              <FolderContents
+                folder={child}
+                depth={depth + 1}
+                selected={selected}
+                collapsed={collapsed}
+                onToggle={onToggle}
+                onSelect={onSelect}
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * The Artifact's files as a nested folder tree.
+ *
+ * @remarks
+ * Every folder starts open: a Skill's folder is small enough to take in at
+ * once. Choosing a file opens every folder above it, so a file chosen by a
+ * link inside another file is never hidden in a closed folder.
+ */
 function FileTree({
   files,
   selected,
@@ -93,80 +157,37 @@ function FileTree({
   selected: string;
   onSelect: (path: string) => void;
 }) {
-  const groups = useMemo(() => groupByDirectory(files), [files]);
-  // Every directory starts open — a Skill's folder is small enough to take in
-  // at once, and a reader who came to browse it should not have to click to
-  // see what is there.
+  const root = useMemo(() => buildFileTree(files), [files]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
-    const slash = selected.lastIndexOf("/");
-    if (slash !== -1) {
-      const directory = selected.slice(0, slash);
-      setCollapsed((current) => {
-        if (!current.has(directory)) return current;
-        const next = new Set(current);
-        next.delete(directory);
-        return next;
-      });
-    }
+    setCollapsed((current) => {
+      const hidden = ancestorFolders(selected).filter((folder) => current.has(folder));
+      if (hidden.length === 0) return current;
+      const next = new Set(current);
+      for (const folder of hidden) next.delete(folder);
+      return next;
+    });
   }, [selected]);
 
-  function toggle(directory: string) {
+  function toggle(path: string) {
     setCollapsed((current) => {
       const next = new Set(current);
-      if (!next.delete(directory)) next.add(directory);
+      if (!next.delete(path)) next.add(path);
       return next;
     });
   }
 
   return (
-    <nav aria-label="Skill files" className="flex h-full flex-col gap-0.5 overflow-y-auto p-2">
-      {groups.map((group) => {
-        const isCollapsed = collapsed.has(group.directory);
-        return (
-          <div key={group.directory} className="flex flex-col gap-0.5">
-            {group.directory !== "" && (
-              <button
-                type="button"
-                onClick={() => toggle(group.directory)}
-                aria-expanded={!isCollapsed}
-                title={group.directory}
-                className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-              >
-                <FolderIcon className="size-3.5 shrink-0 opacity-70" />
-                <span className="truncate">{group.directory}</span>
-                <ChevronDownIcon
-                  className={cn(
-                    "ml-auto size-3.5 shrink-0 opacity-60 transition-transform",
-                    isCollapsed && "-rotate-90",
-                  )}
-                />
-              </button>
-            )}
-            {!isCollapsed &&
-              group.files.map((file) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  onClick={() => onSelect(file.path)}
-                  aria-current={file.path === selected}
-                  title={file.path}
-                  className={cn(
-                    "flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs transition-colors",
-                    group.directory === "" ? "pl-2" : "pl-[1.6rem]",
-                    file.path === selected
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                  )}
-                >
-                  {group.directory === "" && <FileIcon className="size-3.5 shrink-0 opacity-70" />}
-                  <span className="truncate">{fileName(file.path)}</span>
-                </button>
-              ))}
-          </div>
-        );
-      })}
+    <nav aria-label="Files" className="flex h-full flex-col gap-0.5 overflow-y-auto p-2">
+      <FolderContents
+        folder={root}
+        depth={0}
+        selected={selected}
+        collapsed={collapsed}
+        onToggle={toggle}
+        onSelect={onSelect}
+      />
     </nav>
   );
 }
@@ -300,7 +321,7 @@ function TextFileViewer({
           )}
         >
           {isPreview && (
-            <span className="px-4 pt-2.5 text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
+            <span className="px-4 pt-2.5 text-[10px] text-muted-foreground">
               Frontmatter
             </span>
           )}
@@ -443,19 +464,39 @@ function isMarkdownPath(path: string): boolean {
  * @param id - The Skill's id.
  * @param body - The Skill's `body` column, shown when there is no Artifact to
  * browse.
+ * @param rootFile - The file shown first and named in the panel's title.
+ * `SKILL.md` for a Skill; a Plugin passes its README or agent manifest.
+ * @param selectedPath - The file to show, when the page picks it — a Plugin's
+ * component list opens a component's file here. Omitted, the panel keeps its
+ * own choice.
+ * @param onSelectedPathChange - Called when the reader picks a file; pair it with `selectedPath`.
  * @example
  * ```tsx
  * <SkillFilesPanel id={skill.id} body={skill.body} />
  * ```
  */
-export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
+export function SkillFilesPanel({
+  id,
+  body,
+  rootFile = SKILL_FILE_NAME,
+  selectedPath,
+  onSelectedPathChange,
+}: {
+  id: string;
+  body: string;
+  rootFile?: string;
+  selectedPath?: string;
+  onSelectedPathChange?: (path: string) => void;
+}) {
   const listing = useArtifactFiles(id);
-  const [selected, setSelected] = useState<string>();
+  const [ownSelection, setOwnSelection] = useState<string>();
+  const selected = selectedPath ?? ownSelection;
+  const setSelected = onSelectedPathChange ?? setOwnSelection;
   const [view, setView] = useState<MarkdownView>("preview");
 
   if (listing.isPending) {
     return (
-      <Panel title={SKILL_FILE_NAME}>
+      <Panel title={rootFile}>
         <Skeleton className="h-72 w-full rounded-lg" />
       </Panel>
     );
@@ -466,16 +507,16 @@ export function SkillFilesPanel({ id, body }: { id: string; body: string }) {
   // beside a file tree with nothing in it.
   if (listing.isError) {
     return (
-      <Panel title={SKILL_FILE_NAME} className="min-h-0 flex-1" contentClassName="p-0">
+      <Panel title={rootFile} className="min-h-0 flex-1" contentClassName="p-0">
         <div className={cn("flex flex-col", PANEL_HEIGHT)}>
-          <TextFileViewer path={SKILL_FILE_NAME} source={body} view="preview" />
+          <TextFileViewer path={rootFile} source={body} view="preview" />
         </div>
       </Panel>
     );
   }
 
   const files = listing.data.files;
-  const path = selected ?? defaultSelection(files);
+  const path = selected ?? defaultSelection(files, rootFile);
   const file = files.find((candidate) => candidate.path === path);
 
   if (!file) return null;

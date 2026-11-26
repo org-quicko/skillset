@@ -117,6 +117,9 @@ function request(transport: SkillFolderTransport, url: string): Promise<Response
 function collect(maxFiles: number, maxBytes: number) {
   const files: SkillFile[] = [];
   let totalBytes = 0;
+  // Counted at `reserve`, not `add`: a caller reserves every file of a folder
+  // before fetching any of them, so the files added lag behind.
+  let reserved = 0;
 
   const chargeBytes = (bytes: number) => {
     totalBytes += bytes;
@@ -146,12 +149,13 @@ function collect(maxFiles: number, maxBytes: number) {
     },
     /** Called before fetching, so a folder over a ceiling is refused ahead of the work. */
     reserve(declaredSize: number | undefined): void {
-      if (files.length >= maxFiles) {
+      if (reserved >= maxFiles) {
         throw new SkillFolderError(
           "too_many_entries",
           `That folder holds more than ${maxFiles} files, which is more than a Skill may contain.`,
         );
       }
+      reserved += 1;
       if (declaredSize !== undefined) chargeBytes(declaredSize);
     },
     /** Called with the bytes actually read, charging only what `reserve` could not. */
@@ -218,6 +222,28 @@ async function download(transport: SkillFolderTransport, url: string, describe: 
 }
 
 /**
+ * How many files a GitHub folder read downloads at once. One at a time made a
+ * ten-file folder take about 25 seconds; unbounded would open a connection
+ * per file for a folder of up to `ARTIFACT_MAX_ENTRIES`.
+ */
+const DOWNLOAD_CONCURRENCY = 8;
+
+/** `items.map(run)`, with at most `limit` runs in flight; results keep `items`' order. */
+async function mapWithLimit<T, R>(items: readonly T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      const item = items[index];
+      if (item !== undefined) results[index] = await run(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/**
  * Walks a GitHub folder through the Contents API, one request per directory.
  *
  * @throws SkillFolderError as `readSkillFolder` documents.
@@ -241,19 +267,25 @@ async function readGitHub(
   };
 
   const walk = async (path: string): Promise<void> => {
-    for (const entry of await contents(path)) {
-      if (entry.type === "dir") {
-        await walk(entry.path);
-        continue;
-      }
-      // Symlinks and submodules are dropped, exactly as the publishing
-      // pipeline already drops excluded paths.
-      if (entry.type !== "file") continue;
+    const entries = await contents(path);
+    // Symlinks and submodules are dropped, exactly as the publishing
+    // pipeline already drops excluded paths.
+    const fileEntries = entries.filter((entry) => entry.type === "file");
+    // Every size is charged before any byte is fetched, so an oversized
+    // folder is still refused up front.
+    for (const entry of fileEntries) files.reserve(entry.size);
 
-      files.reserve(entry.size);
-      const bytes = await download(transport, entry.download_url ?? "", entry.path);
-      files.add(relativePath(location, entry.path), bytes, entry.size);
-    }
+    const subfolders = Promise.all(entries.filter((entry) => entry.type === "dir").map((entry) => walk(entry.path)));
+    const downloaded = await mapWithLimit(fileEntries, DOWNLOAD_CONCURRENCY, (entry) =>
+      download(transport, entry.download_url ?? "", entry.path),
+    );
+    // Added in listing order rather than as downloads finish, so the same
+    // folder always yields the same file order.
+    fileEntries.forEach((entry, index) => {
+      const bytes = downloaded[index];
+      if (bytes) files.add(relativePath(location, entry.path), bytes, entry.size);
+    });
+    await subfolders;
   };
 
   await walk(location.path);
@@ -374,12 +406,6 @@ export async function readSkillFolder(
   return files.files;
 }
 
-/** The last segment of a `/`-delimited path. */
-function basename(path: string): string {
-  const index = path.lastIndexOf("/");
-  return index === -1 ? path : path.slice(index + 1);
-}
-
 /**
  * A discovered Skill directory's path, relative to `location.path` — `""`
  * when the directory *is* `location.path`.
@@ -399,10 +425,18 @@ function relativeToLocation(location: SkillSourceLocation, dir: string): string 
  * so is any match nested inside a shorter one, so a Skill's own supporting
  * directories are never mistaken for Skills of their own.
  */
-function skillFolders(location: SkillSourceLocation, ref: string, blobPaths: string[]): SkillSourceLocation[] {
-  const withinBounds = blobPaths
-    .filter((path) => basename(path) === SKILL_FILE_NAME)
-    .map((path) => path.slice(0, -(SKILL_FILE_NAME.length + 1)))
+function skillFolders(
+  location: SkillSourceLocation,
+  ref: string,
+  blobPaths: string[],
+  markers: readonly string[],
+): SkillSourceLocation[] {
+  const dirs = blobPaths.flatMap((path) =>
+    markers
+      .filter((marker) => path === marker || path.endsWith(`/${marker}`))
+      .map((marker) => path.slice(0, Math.max(0, path.length - marker.length - 1))),
+  );
+  const withinBounds = [...new Set(dirs)]
     .map((dir) => ({ dir, rel: relativeToLocation(location, dir) }))
     .filter(({ rel }) => {
       if (rel === "") return true;
@@ -445,6 +479,7 @@ async function discoverGitHub(
   transport: SkillFolderTransport,
   location: SkillSourceLocation,
   ref: string,
+  markers: readonly string[],
 ): Promise<SkillSourceLocation[]> {
   const url = `${transport.config.api_base}/repos/${location.project}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
   const res = await request(transport, url);
@@ -459,7 +494,7 @@ async function discoverGitHub(
   const blobPaths = body.tree
     .filter((entry) => entry.type === "blob" && entry.path.startsWith(prefix))
     .map((entry) => entry.path);
-  return skillFolders(location, ref, blobPaths);
+  return skillFolders(location, ref, blobPaths, markers);
 }
 
 /**
@@ -477,6 +512,7 @@ async function discoverGitLab(
   location: SkillSourceLocation,
   ref: string,
   maxEntries: number,
+  markers: readonly string[],
 ): Promise<SkillSourceLocation[]> {
   const { api_base } = transport.config;
   const base = `${api_base}/projects/${projectId(location)}/repository`;
@@ -503,7 +539,7 @@ async function discoverGitLab(
   }
 
   const blobPaths = entries.filter((entry) => entry.type === "blob").map((entry) => entry.path);
-  return skillFolders(location, ref, blobPaths);
+  return skillFolders(location, ref, blobPaths, markers);
 }
 
 /**
@@ -552,11 +588,12 @@ export async function discoverSkillFolders(
   const transport = buildTransport(location, options);
   const ref = location.ref ?? (await defaultBranch(transport, location));
   const maxEntries = options.maxFiles ?? ARTIFACT_MAX_ENTRIES;
+  const markers = options.markers ?? [SKILL_FILE_NAME];
 
   const found =
     location.provider === "github"
-      ? await discoverGitHub(transport, location, ref)
-      : await discoverGitLab(transport, location, ref, maxEntries);
+      ? await discoverGitHub(transport, location, ref, markers)
+      : await discoverGitLab(transport, location, ref, maxEntries, markers);
 
   if (found.length === 0) {
     throw new SkillFolderError("empty_folder", "That folder is empty, or doesn't exist at that ref.");

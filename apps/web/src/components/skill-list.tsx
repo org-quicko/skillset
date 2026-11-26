@@ -1,33 +1,29 @@
 import {
   importedSource,
-  roleMeets,
-  type Role,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
 } from "@in-org-quicko/skillset-shared";
 import { ArrowDownIcon, ArrowUpIcon, SearchXIcon, UploadIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { PublishSkillForm } from "@/components/publish-skill-form";
+import { useEffect, useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FormDialog, FormDialogBody, FormDialogHeader } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSkillDirectory, type SkillDirectoryFilters } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
-import { LOGIN_PATH, skillPath } from "@/lib/routes";
-import { useRouter } from "@/lib/use-router";
+import { skillPath } from "@/lib/routes";
+import type { Section } from "@/lib/sections";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /** How many of a Skill's Tags show as their own chip before the rest collapse into a "+N" one. */
 const VISIBLE_TAG_COUNT = 2;
 
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
+const HEAD_CLASS = "text-xs font-normal text-muted-foreground";
 
 /** One shimmering placeholder row matching the directory table's column layout. */
-function SkillListSkeletonRow({ index }: { index: number }) {
+function SkillListSkeletonRow({ index, showInstalls }: { index: number; showInstalls: boolean }) {
   return (
     <TableRow key={index} className="hover:bg-transparent">
       <TableCell>
@@ -48,30 +44,32 @@ function SkillListSkeletonRow({ index }: { index: number }) {
       <TableCell>
         <Skeleton className="h-3 w-12" />
       </TableCell>
-      <TableCell className="text-center">
-        <Skeleton className="mx-auto h-3 w-10" />
-      </TableCell>
+      {showInstalls && (
+        <TableCell className="text-center">
+          <Skeleton className="mx-auto h-3 w-10" />
+        </TableCell>
+      )}
     </TableRow>
   );
 }
 
 /** The placeholder table shown while the first page of the directory loads. */
-function SkillListSkeleton() {
+function SkillListSkeleton({ showInstalls }: { showInstalls: boolean }) {
   return (
     <div className="w-full">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className={cn("w-10", HEAD_CLASS)}>#</TableHead>
-            <TableHead className={HEAD_CLASS}>Skill</TableHead>
+            <TableHead className={HEAD_CLASS}>Name</TableHead>
             <TableHead className={cn("w-44", HEAD_CLASS)}>Publisher</TableHead>
             <TableHead className={cn("w-28", HEAD_CLASS)}>Updated</TableHead>
-            <TableHead className={cn("w-24 text-right", HEAD_CLASS)}>Installs</TableHead>
+            {showInstalls && <TableHead className={cn("w-24 text-right", HEAD_CLASS)}>Installs</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: 8 }).map((_, index) => (
-            <SkillListSkeletonRow key={index} index={index} />
+            <SkillListSkeletonRow key={index} index={index} showInstalls={showInstalls} />
           ))}
         </TableBody>
       </Table>
@@ -128,29 +126,25 @@ function SortHeader({
  *
  * @param filters - The active search term, Tag ids, and sort choice.
  * @param onFiltersChange - Called with the full new filter set when a sort header or Tag chip is clicked.
- * @param onSelect - Called with a Skill's name and Namespace when its row is clicked, or when a Skill is published from the empty state.
- * @param role - The signed-in visitor's Role, or `null` when signed out — gates the empty state's Publish action the same way `Header` does.
+ * @param section - The catalog section, which picks the Kind listed and the words used.
+ * @param onSelect - Called with a row's name and Namespace when it is clicked.
+ * @param onPublish - Opens the section's Publish dialog from the empty state; omitted for visitors who cannot publish.
  */
 export function SkillList({
+  section,
   filters,
   onFiltersChange,
   onSelect,
-  role,
+  onPublish,
 }: {
+  section: Section;
   filters: SkillDirectoryFilters;
   onFiltersChange: (filters: SkillDirectoryFilters) => void;
   onSelect: (name: string, namespace: string) => void;
-  role: Role | null;
+  onPublish?: () => void;
 }) {
-  const skills = useSkillDirectory(filters);
+  const skills = useSkillDirectory(filters, section.kind);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const [publishOpen, setPublishOpen] = useState(false);
-  const { navigate } = useRouter();
-
-  // Signed out visitors can see the Publish action too, same as `Header`'s —
-  // clicking it while signed out asks for a login instead of hiding the
-  // option outright.
-  const canPublish = role === null || roleMeets(role, "writer");
 
   const rows = skills.data?.pages.flatMap((page) => page.items) ?? [];
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = skills;
@@ -168,7 +162,7 @@ export function SkillList({
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  if (skills.isPending) return <SkillListSkeleton />;
+  if (skills.isPending) return <SkillListSkeleton showInstalls={section.tracksInstalls} />;
 
   if (skills.isError) {
     return <p className="px-5 py-10 text-center text-sm text-destructive">{apiErrorMessage(skills.error)}</p>;
@@ -180,42 +174,20 @@ export function SkillList({
       <div className="fill-mode-both flex animate-in flex-col items-center gap-2 px-5 py-14 text-center fade-in-0 duration-300 motion-reduce:animate-none">
         <SearchXIcon className="size-6 text-ring" />
         <p className="text-sm text-muted-foreground">
-          {hasFilters ? `No skills match “${filters.q || "that filter"}”` : "Publish your first skill"}
+          {hasFilters
+            ? `No ${section.nounPlural} match “${filters.q || "that filter"}”`
+            : `${section.publishVerb} your first ${section.noun}`}
         </p>
         {hasFilters ? (
-          <p className="text-sm text-muted-foreground">Try a skill name, tag or publisher.</p>
+          <p className="text-sm text-muted-foreground">Try a name, tag or publisher.</p>
         ) : (
-          canPublish && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-1"
-              onClick={() => (role ? setPublishOpen(true) : navigate(LOGIN_PATH))}
-            >
+          onPublish && (
+            <Button variant="outline" size="sm" className="mt-1" onClick={onPublish}>
               <UploadIcon />
-              Publish a Skill
+              {section.publishVerb}
             </Button>
           )
         )}
-
-        <FormDialog
-          open={publishOpen}
-          onOpenChange={setPublishOpen}
-          className="max-h-[648px] w-full max-w-2xl sm:max-w-2xl"
-        >
-          <FormDialogHeader
-            title="Publish a Skill"
-            description="Upload a Skill's folder or SKILL.md, or import it from GitHub."
-          />
-          <FormDialogBody>
-            <PublishSkillForm
-              onPublished={(name, namespace) => {
-                setPublishOpen(false);
-                onSelect(name, namespace);
-              }}
-            />
-          </FormDialogBody>
-        </FormDialog>
       </div>
     );
   }
@@ -225,17 +197,19 @@ export function SkillList({
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground">#</TableHead>
-          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Skill</TableHead>
-          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-10 text-xs font-normal text-muted-foreground">#</TableHead>
+          <TableHead className="text-xs font-normal text-muted-foreground">Name</TableHead>
+          <TableHead className="w-44 text-xs font-normal text-muted-foreground">
             Publisher
           </TableHead>
-          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-28 text-xs font-normal text-muted-foreground">
             <SortHeader field="updated_at" label="Updated" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
-          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground">
-            <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
-          </TableHead>
+          {section.tracksInstalls && (
+            <TableHead className="w-24 text-right text-xs font-normal text-muted-foreground">
+              <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
+            </TableHead>
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -256,7 +230,7 @@ export function SkillList({
                       and honours modifier-clicks; the row's own onClick stays for
                       pointer users clicking anywhere else in it. */}
                   <a
-                    href={skillPath(skill.name, skill.namespace)}
+                    href={skillPath(skill.name, skill.namespace, skill.kind)}
                     onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                       event.preventDefault();
@@ -272,7 +246,7 @@ export function SkillList({
                       every row is noise — the same rule that hides the Source
                       (ADR-0041, ADR-0042). */}
                   {importedSource(skill.source) && (
-                    <span className="font-mono text-xs text-muted-foreground">{skill.namespace}</span>
+                    <span className="text-xs text-muted-foreground">{skill.namespace}</span>
                   )}
                   {visibleTags.map((tag) => (
                     <Badge key={tag.id} asChild variant="outline">
@@ -311,13 +285,15 @@ export function SkillList({
                 </div>
               </TableCell>
               <TableCell className="text-sm text-muted-foreground">{formatRelativeTime(skill.updated_at)}</TableCell>
-              <TableCell className="text-center text-sm text-muted-foreground tabular-nums">
-                {skill.installs.toLocaleString()}
-              </TableCell>
+              {section.tracksInstalls && (
+                <TableCell className="text-center text-sm text-muted-foreground tabular-nums">
+                  {skill.installs.toLocaleString()}
+                </TableCell>
+              )}
             </TableRow>
           );
         })}
-        {isFetchingNextPage && <SkillListSkeletonRow index={rows.length} />}
+        {isFetchingNextPage && <SkillListSkeletonRow index={rows.length} showInstalls={section.tracksInstalls} />}
       </TableBody>
     </Table>
       {hasNextPage && <div ref={sentinelRef} className="h-px" />}

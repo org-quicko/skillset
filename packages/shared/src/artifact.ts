@@ -176,6 +176,34 @@ export function validateArtifactSize<T>(files: readonly T[], sizeOf: (file: T) =
  * ```
  */
 export function validateArtifactManifest(value: unknown): ArtifactFile[] {
+  const manifest = validateArtifactFiles(value);
+  if (!manifest.some((file) => file.path === SKILL_FILE_NAME)) {
+    throw new SkillValidationError(
+      "skill_md_missing",
+      `A Skill needs a ${SKILL_FILE_NAME} at its root.`,
+      SKILL_FILE_NAME,
+    );
+  }
+  return manifest;
+}
+
+/**
+ * Validates a declared Artifact manifest the way {@link validateArtifactManifest}
+ * does, without asking for any particular file at the root.
+ *
+ * @remarks
+ * For a Kind whose root marker is not `SKILL.md` — a Plugin's is an agent
+ * manifest, which `validatePluginAgents` checks.
+ *
+ * @param value - The candidate manifest, straight off the wire.
+ * @returns The manifest, typed and with its paths normalised.
+ * @throws SkillValidationError with the same rules as `validateArtifactManifest`, except `skill_md_missing`.
+ * @example
+ * ```ts
+ * const manifest = validateArtifactFiles(payload.files);
+ * ```
+ */
+export function validateArtifactFiles(value: unknown): ArtifactFile[] {
   if (!Array.isArray(value)) {
     throw new SkillValidationError("manifest_invalid", "A Skill's files must be given as a list.", "files");
   }
@@ -206,14 +234,6 @@ export function validateArtifactManifest(value: unknown): ArtifactFile[] {
       throw new SkillValidationError("entry_duplicate", `A Skill lists "${file.path}" more than once.`, file.path);
     }
     seen.add(file.path);
-  }
-
-  if (!seen.has(SKILL_FILE_NAME)) {
-    throw new SkillValidationError(
-      "skill_md_missing",
-      `A Skill needs a ${SKILL_FILE_NAME} at its root.`,
-      SKILL_FILE_NAME,
-    );
   }
 
   validateArtifactSize(manifest, (file) => file.size);
@@ -256,11 +276,32 @@ export function stripWrappingDirectory(files: SkillFile[]): SkillFile[] {
   );
 }
 
+/**
+ * A Resource's files with their paths normalised and excluded paths (`.git`,
+ * `node_modules`, …) dropped — before any Kind-specific layout rule.
+ *
+ * @param files - The files, at paths relative to the Resource's root or a wrapping folder.
+ * @param isExcluded - Which paths to drop. Defaults to `isExcludedPath`; a
+ * Kind that needs some dot-prefixed paths (a Plugin's `.claude-plugin/`)
+ * passes its own.
+ * @returns The files an Artifact may hold, in the same order.
+ * @example
+ * ```ts
+ * collectFiles([{ path: "./README.md", bytes }, { path: ".git/HEAD", bytes }]); // -> [{ path: "README.md", bytes }]
+ * ```
+ */
+export function collectFiles(
+  files: SkillFile[],
+  isExcluded: (path: string) => boolean = isExcludedPath,
+): SkillFile[] {
+  return files
+    .map((file) => ({ ...file, path: normalizeSkillPath(file.path) }))
+    .filter((file) => !isExcluded(file.path));
+}
+
 /** The Skill's files, normalised, filtered, and unwrapped — the exact set an Artifact holds. */
 export function collectSkillFiles(files: SkillFile[]): SkillFile[] {
-  const kept = files
-    .map((file) => ({ ...file, path: normalizeSkillPath(file.path) }))
-    .filter((file) => !isExcludedPath(file.path));
+  const kept = collectFiles(files);
 
   if (kept.length === 0) {
     throw new SkillValidationError(

@@ -1,16 +1,23 @@
 import {
   artifactMediaType,
   ArtifactManifestSchema,
+  buildPluginBundle,
   buildSkillBundle,
+  McpPublishedSchema,
+  PluginPublishedSchema,
+  ResourceDetailSchema,
   SkillDirectoryPageSchema,
   SkillDirectoryStatsSchema,
   SkillInstallTrendSchema,
   SkillPublishedSchema,
-  SkillSchema,
+  type McpDetail,
+  type McpPublish,
+  type Plugin,
   type Skill,
   type SkillDirectorySortField,
   type SkillDirectorySortOrder,
   type SkillFile,
+  type ArtifactFileUpload,
 } from "@in-org-quicko/skillset-shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiFetchText, apiUrl } from "@/lib/api";
@@ -22,6 +29,7 @@ import {
   resourceDetailPrefixKey,
   resourceQueryKey,
   resourcesListQueryKey,
+  resourceKindStatsQueryKey,
   resourceStatsQueryKey,
 } from "@/lib/query-keys";
 
@@ -46,22 +54,22 @@ export interface SkillDirectoryFilters {
  * resets the list. `page_size` is left to the API's own default; nothing
  * here exposes a control for it (out of scope, ticket 23).
  *
- * No `?kind=` is sent: `skill` is the only registered Kind (ADR-0026), so an
- * unfiltered `GET /resources` already lists exactly what this page shows.
- *
  * @param filters - The search term, selected Tag ids, and sort choice —
  * normally the URL's own query-string state (see `SkillsPanel`).
+ * @param kind - The Kind to list, sent as `?kind=` — each catalog section
+ * lists one Kind only.
  * @returns The TanStack Query infinite-query result. `data.pages` is one
  * `SkillDirectoryPage` per page fetched so far; call `fetchNextPage()` to
  * load another once `hasNextPage` is true.
  * @example
- * const skills = useSkillDirectory({ q: "", tagIds: [], sortBy: "installs", sortOrder: "desc" });
+ * const skills = useSkillDirectory({ q: "", tagIds: [], sortBy: "installs", sortOrder: "desc" }, "skill");
  */
-export function useSkillDirectory(filters: SkillDirectoryFilters) {
+export function useSkillDirectory(filters: SkillDirectoryFilters, kind: string) {
   return useInfiniteQuery({
-    queryKey: resourceDirectoryQueryKey(filters),
+    queryKey: resourceDirectoryQueryKey(filters, kind),
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams({
+        kind,
         page: String(pageParam),
         sort_by: filters.sortBy,
         sort_order: filters.sortOrder,
@@ -79,22 +87,22 @@ export function useSkillDirectory(filters: SkillDirectoryFilters) {
 }
 
 /**
- * Fetches the catalog's hero stats: the total Resource count, the distinct
- * Publisher count, and the total Install count across every Resource.
+ * Fetches one catalog section's hero stats: its Resource count, distinct
+ * Publisher count, and total Install count.
  *
  * @remarks
- * Unfiltered — the same regardless of any search term or Tag selection in
- * `useSkillDirectory`, unlike its own `total`. What the home page's stat
- * cards read.
+ * Narrowed by Kind only — the same regardless of any search term or Tag
+ * selection in `useSkillDirectory`, unlike its own `total`.
  *
- * @returns The TanStack Query result for `GET /resources/stats`.
+ * @param kind - The section's Kind.
+ * @returns The TanStack Query result for `GET /resources/stats?kind=`.
  * @example
- * const stats = useSkillStats();
+ * const stats = useSkillStats("mcp");
  */
-export function useSkillStats() {
+export function useSkillStats(kind: string) {
   return useQuery({
-    queryKey: resourceStatsQueryKey,
-    queryFn: () => apiFetch("/resources/stats", SkillDirectoryStatsSchema),
+    queryKey: resourceKindStatsQueryKey(kind),
+    queryFn: () => apiFetch(`/resources/stats?kind=${encodeURIComponent(kind)}`, SkillDirectoryStatsSchema),
   });
 }
 
@@ -125,7 +133,7 @@ export function useSkill(name: string, namespace?: string) {
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
   return useQuery({
     queryKey: resourceQueryKey(name, namespace),
-    queryFn: () => apiFetch(`/resources/skill/by-name/${encodeURIComponent(name)}${query}`, SkillSchema),
+    queryFn: () => apiFetch(`/resources/by-name/${encodeURIComponent(name)}${query}`, ResourceDetailSchema),
     // A publish already writes this exact response into the cache
     // (usePublishSkill's onSuccess) — avoid an immediate, redundant refetch
     // of what was just returned when the reader lands straight on it.
@@ -193,6 +201,35 @@ export class SkillUploadError extends Error {
  * The Skill list is only invalidated once every upload has finished — never
  * while one is in flight.
  */
+/**
+ * Uploads each file of an Artifact to the presigned destination the publish
+ * response returned for it.
+ *
+ * @remarks
+ * One destination per declared file, in the order the manifest declared them
+ * (ADR-0032), so the two lists line up index for index.
+ *
+ * @throws SkillUploadError naming the first file whose upload failed or did
+ * not line up with its destination.
+ */
+async function uploadArtifactFiles(files: SkillFile[], targets: ArtifactFileUpload[]): Promise<void> {
+  await Promise.all(
+    targets.map(async (target, index) => {
+      const file = files[index];
+      if (!file || file.path !== target.path) throw new SkillUploadError(target.path);
+      const upload = await fetch(target.url, {
+        method: target.method,
+        headers: target.headers,
+        // A `Uint8Array` read off a file is typed as backed by
+        // `ArrayBufferLike`, which `BlobPart` doesn't accept directly —
+        // re-wrapping narrows it to a concrete `ArrayBuffer`-backed view.
+        body: new Blob([new Uint8Array(file.bytes)]),
+      });
+      if (!upload.ok) throw new SkillUploadError(target.path);
+    }),
+  );
+}
+
 export function usePublishSkill() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -204,31 +241,97 @@ export function usePublishSkill() {
         body: JSON.stringify(bundle.request),
       });
 
-      // One presigned destination per declared file, in the order the manifest
-      // declared them (ADR-0032), so the two lists line up index for index.
-      await Promise.all(
-        published.upload.files.map(async (target, index) => {
-          const file = bundle.files[index];
-          if (!file || file.path !== target.path) throw new SkillUploadError(target.path);
-
-          const upload = await fetch(target.url, {
-            method: target.method,
-            headers: target.headers,
-            // A `Uint8Array` read off a file is typed as backed by
-            // `ArrayBufferLike`, which `BlobPart` doesn't accept directly —
-            // re-wrapping narrows it to a concrete `ArrayBuffer`-backed view.
-            body: new Blob([new Uint8Array(file.bytes)]),
-          });
-          if (!upload.ok) throw new SkillUploadError(target.path);
-        }),
-      );
-
+      await uploadArtifactFiles(bundle.files, published.upload.files);
       return published.skill;
     },
     onSuccess: (skill) => {
       queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
       queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
       queryClient.setQueryData(resourceQueryKey(skill.name, skill.namespace), skill);
+    },
+  });
+}
+
+/**
+ * What publishing or editing an MCP server takes: its name, then the body the
+ * API reads. `id` is set only for an edit.
+ */
+export interface PublishMcpInput extends McpPublish {
+  name: string;
+  id?: string;
+}
+
+/**
+ * Publishes a new MCP server, or edits an existing one when `id` is given —
+ * one request either way, since it has no Artifact to upload (ADR-0027).
+ *
+ * @remarks
+ * A publish is `PUT /resources/mcp/{name}`; the name's slashes stay path
+ * separators, because the route reads the rest of the path as the name. An
+ * edit is `PATCH /resources/{id}`, which keeps the name and Namespace even
+ * when the repository link changes.
+ *
+ * @throws ApiError when the API refuses the name or body, for example with
+ * no package and no remote.
+ * @example
+ * publishMcp.mutate({ name: "weather", description: "Forecasts.", remotes: [{ transport_type: "http", url }] })
+ * publishMcp.mutate({ id: mcp.id, name: mcp.name, description: "New text.", packages: mcp.packages ?? [] })
+ */
+export function usePublishMcp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, name, ...body }: PublishMcpInput): Promise<McpDetail> => {
+      const path = id
+        ? `/resources/${encodeURIComponent(id)}`
+        : `/resources/mcp/${name.split("/").map(encodeURIComponent).join("/")}`;
+      const published = await apiFetch(path, McpPublishedSchema, {
+        method: id ? "PATCH" : "PUT",
+        body: JSON.stringify(body),
+      });
+      return published.resource;
+    },
+    onSuccess: (mcp) => {
+      queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
+      queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
+      // Every cached copy of this name, however its page's URL named it.
+      queryClient.invalidateQueries({ queryKey: resourceDetailPrefixKey(mcp.name) });
+      queryClient.setQueryData(resourceQueryKey(mcp.name, mcp.namespace), mcp);
+    },
+  });
+}
+
+/**
+ * Publishes a Plugin from its folder: reads its agent manifests, declares its
+ * files, then uploads each one (ADR-0032).
+ *
+ * @remarks
+ * The same two-phase publish as `usePublishSkill`; only the bundle and the
+ * route differ. Which agents the Plugin supports is detected from its
+ * manifests by `buildPluginBundle`.
+ *
+ * @throws PluginValidationError when the folder has no agent manifest or a
+ * manifest breaks a rule; ApiError when the API refuses the publish;
+ * SkillUploadError when a file fails to upload.
+ * @example
+ * publishPlugin.mutate({ files }, { onSuccess: (plugin) => navigate(skillPath(plugin.name, plugin.namespace, "plugin")) })
+ */
+export function usePublishPlugin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ files, source }: PublishSkillInput): Promise<Plugin> => {
+      const bundle = buildPluginBundle(files, { source });
+      const published = await apiFetch(`/resources/plugin/${encodeURIComponent(bundle.name)}`, PluginPublishedSchema, {
+        method: "PUT",
+        body: JSON.stringify(bundle.request),
+      });
+      await uploadArtifactFiles(bundle.files, published.upload.files);
+      return published.plugin;
+    },
+    onSuccess: (plugin) => {
+      queryClient.invalidateQueries({ queryKey: resourcesListQueryKey });
+      queryClient.invalidateQueries({ queryKey: resourceStatsQueryKey });
+      queryClient.invalidateQueries({ queryKey: resourceDetailPrefixKey(plugin.name) });
+      queryClient.setQueryData(resourceQueryKey(plugin.name, plugin.namespace), plugin);
     },
   });
 }

@@ -89,11 +89,11 @@ MCP Servers are published through the web interface. Because the payload is a st
 
 ## Installing an MCP Server
 
-`skillset install` handles MCP Server resources as well as Skills. When the installed Resource is an MCP Server, the CLI writes or merges the server's configuration into the project's `.mcp.json` file rather than writing files to `.agents/skills/`.
+`skillset mcp install` installs an MCP Server: the CLI writes or merges the server's configuration into the project's `.mcp.json` file rather than writing files to `.agents/skills/`.
 
 ```bash
 # Install an MCP Server by name
-skillset install com.example/my-server
+skillset mcp install com.example/my-server
 ```
 
 <Note>

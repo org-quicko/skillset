@@ -1,6 +1,6 @@
 {
   "name": "@in-org-quicko/skillset",
-  "version": "0.0.1",
+  "version": "2.0.0",
   "engines": {
     "bun": ">=1.4.0"
   },

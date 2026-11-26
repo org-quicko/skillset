@@ -7,6 +7,13 @@ export class ResourceNotFoundError extends AppError {
   }
 }
 
+/** An MCP-only change was asked of a Resource of another Kind. */
+export class NotAnMcpServerError extends AppError {
+  constructor() {
+    super(409, "kind_mismatch", "This Resource is not an MCP server.");
+  }
+}
+
 /**
  * A bare name matched Resources in more than one Namespace, and none of them
  * is this Registry's own (ADR-0042).

@@ -1,3 +1,4 @@
+import { CLAUDE_MARKETPLACE_PATH } from "@in-org-quicko/skillset-shared";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
@@ -12,6 +13,7 @@ import { connectionsRoutes } from "./features/connections/connections.routes.js"
 import { identityProvidersRoutes } from "./features/identity-providers/identity-providers.routes.js";
 import { importsRoutes } from "./features/imports/imports.routes.js";
 import { integrationsRoutes } from "./features/integrations/integrations.routes.js";
+import { marketplaceRoutes } from "./features/marketplace/marketplace.routes.js";
 import { resourcesRoutes } from "./features/resources/resources.routes.js";
 import { setupRoutes } from "./features/setup/setup.routes.js";
 import { submissionsRoutes } from "./features/submissions/submissions.routes.js";
@@ -25,7 +27,7 @@ import { clientIp } from "./middleware/client-ip.js";
 import { rateLimit } from "./middleware/rate-limit.js";
 import { requestLog } from "./middleware/request-log.js";
 import { securityHeaders, spaContentSecurityPolicy } from "./middleware/security-headers.js";
-import { buildServices } from "./services.js";
+import { buildServices, type Services } from "./services.js";
 import type { StorageAdapter } from "./storage/types.js";
 
 /**
@@ -106,11 +108,10 @@ export interface AppDependencies {
  * services, one error handler, and one middleware stack.
  *
  * @param deps - The database, storage adapter, signing secret, public URL, and logger.
+ * @param services - The services every route shares; built once by `createApp`.
  * @returns The API's router, before it is mounted under `/api`.
  */
-function createApi(deps: AppDependencies) {
-  const services = buildServices({ ...deps, rateLimiting: deps.rateLimiting !== false });
-
+function createApi(deps: AppDependencies, services: Services) {
   const api = createRouter()
     .use(async (c, next) => {
       c.set("services", services);
@@ -125,6 +126,7 @@ function createApi(deps: AppDependencies) {
     .route("/auth", authRoutes)
     .route("/identity-providers", identityProvidersRoutes)
     .route("/integrations", integrationsRoutes)
+    .route("/marketplace", marketplaceRoutes)
     .route("/connections", connectionsRoutes)
     .route("/imports", importsRoutes)
     .route("/users", usersRoutes)
@@ -185,12 +187,25 @@ export function createApp(deps: AppDependencies): Hono {
   // on its own routes; this is the same check for everything else.
   app.use("/api/*", csrf({ origin: trustedOrigins(deps.publicUrl) }));
 
-  app.route("/api", createApi(deps));
+  const services = buildServices({ ...deps, rateLimiting: deps.rateLimiting !== false });
+  app.route("/api", createApi(deps, services));
 
   // Registered before the static/SPA fallback below: both are dotted paths
   // that fallback would otherwise either 404 (an extension it can't find) or
   // swallow into the SPA shell (no extension).
   app.get("/openapi.json", (c) => c.json(openapiSpec));
+  // Claude Code's marketplace for the Registry's Plugins:
+  // `claude plugin marketplace add <PUBLIC_URL>/.claude-plugin/marketplace.json`.
+  app.get(CLAUDE_MARKETPLACE_PATH, async (c) =>
+    c.json(await services.resources.getClaudeMarketplace(await services.marketplace.getSettings())),
+  );
+  // An MCP server's README as raw markdown, at its page's URL plus `/README.md`,
+  // for an Agent to read without rendering the SPA. `?namespace=` as on the page.
+  app.get("/mcp-servers/:name{.+}/README.md", async (c) => {
+    const mcp = await services.resources.getByName("mcp", c.req.param("name"), c.req.query("namespace"));
+    if (mcp.kind !== "mcp" || !mcp.body) return notFound(c);
+    return c.body(mcp.body, 200, { "content-type": "text/markdown; charset=utf-8" });
+  });
   app.get("/mcp", (c) => c.json(mcpDiscovery));
   if (deps.mcpbPath) {
     const mcpbPath = deps.mcpbPath;
@@ -202,6 +217,8 @@ export function createApp(deps: AppDependencies): Hono {
 
   // Only an `/api` path that no route matched reaches here: every other miss
   // is either a static file or the SPA's own route.
+  // The routes above sit outside `/api`, so `createApi`'s handler does not reach them.
+  app.onError(onError(deps.logger));
   app.notFound((c) => (c.req.path.startsWith("/api/") ? notFound(c) : c.text("404 Not Found", 404)));
 
   if (deps.webRoot) {
@@ -216,10 +233,12 @@ export function createApp(deps: AppDependencies): Hono {
       if (c.req.path.startsWith("/api/")) {
         return notFound(c);
       }
-      // A miss with a file extension was a real static-asset request that
-      // serveStatic already couldn't find (e.g. a stale hashed asset after a
-      // redeploy) — a genuine 404, not a client-side route either.
-      if (/\.[^/]+$/.test(c.req.path)) {
+      // A miss under /assets/ was a real static-asset request that serveStatic
+      // already couldn't find (e.g. a stale hashed asset after a redeploy) — a
+      // genuine 404, not a client-side route either. Only /assets/: a client
+      // route may end in a dotted segment, such as an MCP server's name
+      // (`/mcp-servers/io.github.acme%2Fweather`).
+      if (c.req.path.startsWith("/assets/")) {
         return c.notFound();
       }
       return serveStatic({ root: webRoot, path: "index.html" })(c, next);

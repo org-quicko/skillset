@@ -2,13 +2,12 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * A bordered content box with an optional uppercase header rule — the section
+ * A bordered content box with an optional header rule — the section
  * container the Skill detail page and its widgets are built from.
  *
  * @param title - The header label; when omitted (and no `action`), no header rule is drawn.
  * @param action - Right-aligned controls in the header, e.g. a tab switch.
  * @param contentClassName - Overrides the default body padding (e.g. `"p-0"` for a flush list).
- * @param uppercase - Whether `title` renders uppercase. Defaults to `true`.
  * @remarks
  * The body is `flex-1 min-h-0`, so a Panel placed in a sized flex parent
  * stretches to fill it instead of sizing to its content — the mechanism
@@ -21,7 +20,6 @@ export function Panel({
   children,
   className,
   contentClassName,
-  uppercase = true,
 }: {
   title?: ReactNode;
   action?: ReactNode;
@@ -30,14 +28,13 @@ export function Panel({
   children: ReactNode;
   className?: string;
   contentClassName?: string;
-  uppercase?: boolean;
 }) {
   return (
     <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card", className)}>
       {(title || action) && (
-        <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-5 py-2.5">
           {title && (
-            <span className={cn("text-xs tracking-[0.08em] text-muted-foreground", uppercase && "uppercase")}>
+            <span className="text-xs text-muted-foreground">
               {title}
             </span>
           )}

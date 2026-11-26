@@ -3,7 +3,7 @@ import type { Database } from "../../db/client.js";
 import type { Logger } from "../../lib/logger.js";
 
 /** Where a recorded Install came from — see `resourceInstallSourceEnum` (ADR-0012). */
-export type InstallSource = "web" | "cli" | "mcp";
+export type InstallSource = "web" | "cli" | "mcp" | "marketplace";
 
 /** One day's Install count, as returned by `getInstallTimeseries`. */
 export interface InstallTrendPoint {
@@ -142,20 +142,27 @@ export class AnalyticsService {
    * simply contributes nothing to the sum, the same as it defaults to `0`
    * everywhere else (ADR-0012).
    *
-   * @returns The total Install count across every Skill.
+   * @param kind - When set, sums only Resources of this Kind.
+   * @returns The total Install count across every Skill, or every Resource of `kind`.
    * @example
    * ```ts
    * const totalInstalls = await analytics.getTotalInstallCount();
+   * const mcpInstalls = await analytics.getTotalInstallCount("mcp");
    * ```
    */
-  async getTotalInstallCount(): Promise<number> {
+  async getTotalInstallCount(kind?: string): Promise<number> {
     // `sum` of a bigint is a `numeric`, which pg returns as a string, and is
     // SQL NULL over zero rows — coalesced to 0 so an install-free Registry
     // gets a count, not a parse of `null`.
-    const row = await this.db
+    let query = this.db
       .selectFrom("resource_analytics")
-      .select(sql<string>`coalesce(sum(${sql.ref("install_count")}), 0)`.as("total"))
-      .executeTakeFirstOrThrow();
+      .select(sql<string>`coalesce(sum(${sql.ref("install_count")}), 0)`.as("total"));
+    if (kind) {
+      query = query.where((eb) =>
+        eb("resource_id", "in", eb.selectFrom("resources").select("id").where("kind", "=", kind)),
+      );
+    }
+    const row = await query.executeTakeFirstOrThrow();
     return Number(row.total);
   }
 

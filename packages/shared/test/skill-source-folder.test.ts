@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   discoverSkillFolders,
+  PLUGIN_MANIFEST_PATHS,
   readSkillFolder,
   SkillFolderError,
   type SkillFolderReason,
@@ -437,6 +438,31 @@ describe("Finding every Skill folder under a location", () => {
   };
   const ROOT_GL_API = "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fskills/repository";
   const rootTree = (page: number) => `${ROOT_GL_API}/tree?recursive=true&per_page=100&page=${page}&ref=main&path=`;
+
+  describe("with Plugin markers", () => {
+    it("finds every folder holding an agent manifest, not its nested Skills, and ignores bare Skills", async () => {
+      const github = stub({
+        [ghTree("main")]: tree(
+          "plugins/review/.claude-plugin/plugin.json",
+          "plugins/review/skills/lint/SKILL.md",
+          "plugins/ship/.claude-plugin/plugin.json",
+          "skills/standalone/SKILL.md",
+        ),
+      });
+
+      const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch, markers: PLUGIN_MANIFEST_PATHS });
+
+      expect(found.map((location) => location.path).sort()).toEqual(["plugins/review", "plugins/ship"]);
+    });
+
+    it("returns the repository root when the plugin sits there", async () => {
+      const github = stub({ [ghTree("main")]: tree(".claude-plugin/plugin.json", "skills/a/SKILL.md") });
+
+      const found = await discoverSkillFolders(ROOT_GITHUB, { fetch: github.fetch, markers: PLUGIN_MANIFEST_PATHS });
+
+      expect(found.map((location) => location.path)).toEqual([""]);
+    });
+  });
 
   describe("on GitHub", () => {
     it("returns exactly the given folder when it itself holds a SKILL.md", async () => {

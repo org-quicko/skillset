@@ -1,7 +1,7 @@
 {
   "name": "@in-org-quicko/skillset-installer",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -11,7 +11,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@in-org-quicko/skillset-shared": "workspace:*"
+    "@in-org-quicko/skillset-shared": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

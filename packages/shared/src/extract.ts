@@ -138,23 +138,22 @@ function enforceDeclaredSizesAgree(bytes: Uint8Array, view: DataView, entry: Cen
 }
 
 /**
- * Unpacks a downloaded Artifact into the files that will be written to disk.
+ * Unpacks a downloaded Artifact into the files that will be written to disk, as stored.
  *
  * This is the only place an incoming Artifact is inspected (ADR-0001 — the API never
  * does), so it is where a hostile one is stopped: it refuses path traversal, absolute
  * paths, drive letters, backslashes, null bytes, and symlink entries, enforces the same
- * transfer, entry-count and uncompressed-size limits publishing does, and tolerates or
- * rejects a wrapping directory exactly the way `buildSkillBundle` does.
+ * transfer, entry-count and uncompressed-size limits publishing does. Paths are left as
+ * the archive holds them; `extractSkillFiles` also unwraps a Skill.
  *
  * @param zipBytes - The Artifact as downloaded from storage.
- * @returns The Skill's files, with any single wrapping directory stripped from their paths.
+ * @returns The Artifact's files, at the paths the archive gives them.
  * @throws SkillValidationError with rule `corrupt_archive` when the bytes are not a
  * readable zip or an entry does not hold the bytes it declares, `unsupported_archive` for
  * zip64, `too_many_entries` or `uncompressed_too_large` when a limit is exceeded,
  * `artifact_too_large` when the download itself is oversized, `entry_null_byte`,
  * `entry_absolute_path`, `entry_backslash`, `entry_path_traversal`, `entry_not_a_file`,
- * or `entry_symlink` for a hostile entry, and — from `stripWrappingDirectory` — `ambiguous_layout` when
- * several directories each hold a `SKILL.md`, or `skill_md_missing` when none does.
+ * or `entry_symlink` for a hostile entry.
  *
  * @remarks
  * Limits are checked against the central directory's declared sizes *before* anything is
@@ -171,11 +170,11 @@ function enforceDeclaredSizesAgree(bytes: Uint8Array, view: DataView, entry: Cen
  *
  * @example
  * ```ts
- * const files = extractSkillFiles(await downloadBinary(client, `/skills/${id}/artifact`));
- * // -> [{ path: "SKILL.md", bytes: Uint8Array }, ...]
+ * const files = extractArtifactFiles(await downloadBinary(client, `/resources/${id}/artifact`));
+ * // -> [{ path: ".claude-plugin/plugin.json", bytes: Uint8Array }, ...]
  * ```
  */
-export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
+export function extractArtifactFiles(zipBytes: Uint8Array): SkillFile[] {
   if (zipBytes.byteLength > ARTIFACT_MAX_TRANSFER_BYTES) {
     throw new SkillValidationError(
       "artifact_too_large",
@@ -211,5 +210,24 @@ export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
     return { path: entry.name, bytes };
   });
 
-  return stripWrappingDirectory(files);
+  return files;
+}
+
+/**
+ * Unpacks a downloaded Skill's Artifact: `extractArtifactFiles`, then the wrapping
+ * directory tolerated or rejected exactly the way `buildSkillBundle` does.
+ *
+ * @param zipBytes - The Artifact as downloaded from storage.
+ * @returns The Skill's files, with any single wrapping directory stripped from their paths.
+ * @throws SkillValidationError for any rule `extractArtifactFiles` enforces, and
+ * `ambiguous_layout` when several directories each hold a `SKILL.md`, or
+ * `skill_md_missing` when none does.
+ * @example
+ * ```ts
+ * const files = extractSkillFiles(await downloadBinary(client, `/resources/${id}/artifact`));
+ * // -> [{ path: "SKILL.md", bytes: Uint8Array }, ...]
+ * ```
+ */
+export function extractSkillFiles(zipBytes: Uint8Array): SkillFile[] {
+  return stripWrappingDirectory(extractArtifactFiles(zipBytes));
 }

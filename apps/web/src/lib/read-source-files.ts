@@ -1,5 +1,6 @@
 import {
   discoverSkillFolders,
+  PLUGIN_MANIFEST_PATHS,
   SkillFilesSchema,
   SkillSourcesSchema,
   parseSkillSourceUrl,
@@ -51,12 +52,21 @@ const ANONYMOUS_MESSAGES: Record<Exclude<SkillFolderReason, "not_found">, string
  * walk gave up rather than that one folder is oversized.
  */
 const DISCOVERY_MESSAGES: Partial<Record<Exclude<SkillFolderReason, "not_found">, string>> = {
-  empty_folder: "No Skill was found under that project or folder.",
   too_many_entries: "That project has more to search than a discovery walk will look through.",
 };
 
+/** What a discovery walk looks for: Skill folders, or Plugin roots. */
+export type SourceKind = "skill" | "plugin";
+
+/** Each kind's discovery route and markers. Skill markers are left to the walk's own `SKILL.md` default. */
+const DISCOVERY: Record<SourceKind, { route: string; noun: string; markers?: readonly string[] }> = {
+  skill: { route: "skills", noun: "Skill" },
+  plugin: { route: "plugins", noun: "plugin", markers: PLUGIN_MANIFEST_PATHS },
+};
+
 /** The sentence for a reason a discovery walk refused on. */
-function discoveryFailureMessage(reason: Exclude<SkillFolderReason, "not_found">): string {
+function discoveryFailureMessage(reason: Exclude<SkillFolderReason, "not_found">, kind: SourceKind): string {
+  if (reason === "empty_folder") return `No ${DISCOVERY[kind].noun} was found under that project or folder.`;
   return DISCOVERY_MESSAGES[reason] ?? ANONYMOUS_MESSAGES[reason];
 }
 
@@ -160,7 +170,8 @@ export async function fetchSkillSourceFiles(url: string): Promise<SkillFile[]> {
  *
  * @param url - A repository, project, or folder URL, as accepted by
  * `parseSkillSourceUrl`.
- * @returns Every Skill folder found, each ready to hand to `fetchSkillFilesAt`.
+ * @param kind - What to look for: Skill folders (a `SKILL.md`) or Plugin roots (an agent manifest).
+ * @returns Every folder found, each ready to hand to `fetchSkillFilesAt`.
  * @throws Error if `url` isn't a recognised Git Provider URL, or, on the
  * anonymous path, carrying the `ANONYMOUS_MESSAGES` sentence for whatever the
  * walk refused on — including finding no Skill at all.
@@ -170,15 +181,17 @@ export async function fetchSkillSourceFiles(url: string): Promise<SkillFile[]> {
  * @example
  * ```ts
  * const found = await discoverSkillSources("https://github.com/org/repo");
+ * const plugins = await discoverSkillSources("https://github.com/org/repo", "plugin");
  * ```
  */
-export async function discoverSkillSources(url: string): Promise<SkillSourceLocation[]> {
+export async function discoverSkillSources(url: string, kind: SourceKind = "skill"): Promise<SkillSourceLocation[]> {
   const location = parseSkillSourceUrl(url);
+  const { route, markers } = DISCOVERY[kind];
 
-  if (location.provider !== "github") return discoverAnonymously(location);
+  if (location.provider !== "github") return discoverAnonymously(location, kind);
 
   try {
-    const { items } = await apiFetch(`/imports/${location.provider}/skills`, SkillSourcesSchema, {
+    const { items } = await apiFetch(`/imports/${location.provider}/${route}`, SkillSourcesSchema, {
       method: "POST",
       body: JSON.stringify({ project: location.project, ref: location.ref, path: location.path }),
     });
@@ -187,19 +200,19 @@ export async function discoverSkillSources(url: string): Promise<SkillSourceLoca
     if (!(error instanceof ApiError) || !SENT_NO_TOKEN.has(error.code)) throw error;
 
     try {
-      return await discoverSkillFolders(location);
+      return await discoverSkillFolders(location, { markers });
     } catch (anonymous) {
       if (!(anonymous instanceof SkillFolderError)) throw anonymous;
       if (anonymous.reason === "not_found") throw error;
-      throw new Error(discoveryFailureMessage(anonymous.reason));
+      throw new Error(discoveryFailureMessage(anonymous.reason, kind));
     }
   }
 }
 
 /** `discoverSkillSources`'s anonymous path — see `readAnonymously`, its `fetchSkillFilesAt` counterpart. */
-async function discoverAnonymously(location: SkillSourceLocation): Promise<SkillSourceLocation[]> {
+async function discoverAnonymously(location: SkillSourceLocation, kind: SourceKind): Promise<SkillSourceLocation[]> {
   try {
-    return await discoverSkillFolders(location);
+    return await discoverSkillFolders(location, { markers: DISCOVERY[kind].markers });
   } catch (error) {
     if (!(error instanceof SkillFolderError)) throw error;
     if (error.reason === "not_found") {
@@ -208,7 +221,7 @@ async function discoverAnonymously(location: SkillSourceLocation): Promise<Skill
           "this host, so a private one has to be published by uploading its folder.",
       );
     }
-    throw new Error(discoveryFailureMessage(error.reason));
+    throw new Error(discoveryFailureMessage(error.reason, kind));
   }
 }
 

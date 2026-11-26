@@ -1,0 +1,6 @@
+{
+  "name": "release-toolkit",
+  "description": "Bumps versions, writes changelogs and checks the build before a release.",
+  "version": "0.3.1",
+  "license": "Apache-2.0"
+}

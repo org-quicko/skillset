@@ -1,6 +1,7 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IconSwap } from "@/components/icon-swap";
+import { cn } from "@/lib/utils";
 
 /**
  * A read-only, monospace code block with a copy-to-clipboard button — for a
@@ -8,8 +9,11 @@ import { IconSwap } from "@/components/icon-swap";
  * line by line.
  *
  * @param code - The exact text both rendered and copied.
+ * @param wrap - Wrap long lines instead of scrolling sideways — for a command,
+ * whose meaning does not depend on where it breaks. Leave off for a file, whose
+ * indentation should stay as written.
  */
-export function CopyableCode({ code }: { code: string }) {
+export function CopyableCode({ code, wrap = false }: { code: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -29,7 +33,12 @@ export function CopyableCode({ code }: { code: string }) {
 
   return (
     <div className="flex items-start gap-3 rounded-lg border bg-background px-4 py-3">
-      <pre className="min-w-0 flex-1 overflow-x-auto font-mono text-[13px]">
+      <pre
+        className={cn(
+          "min-w-0 flex-1 font-mono text-[13px]",
+          wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "overflow-x-auto",
+        )}
+      >
         <code>{code}</code>
       </pre>
       <button

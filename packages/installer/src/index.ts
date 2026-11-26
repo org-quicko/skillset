@@ -396,11 +396,52 @@ export {
 export {
   checkoutFolder,
   discoverSkillDirectories,
+  holdsPluginManifest,
   holdsSkillFile,
   isRepositoryUrl,
   readRepositorySkill,
+  walkPluginDirectory,
   walkSkillDirectory,
   type Checkout,
   type Progress,
   type RepositorySkill,
 } from "./repository.js";
+
+export {
+  deriveMcpServerKey,
+  installMcpServer,
+  mcpResourceToConfig,
+  type InstallMcpOptions,
+  type McpInstallReport,
+  type McpServerConfigEntry,
+} from "./mcp-install.js";
+
+export {
+  CLAUDE_LOCAL_MARKETPLACE_NAME,
+  CODEX_MARKETPLACE_NAME,
+  installClaudeCodePluginHosted,
+  installClaudeCodePluginLocally,
+  installCodexPlugin,
+  installCursorPlugin,
+  runCommand,
+  type ClaudeHostedTarget,
+  type CommandResult,
+  type PluginInstallContext,
+  type PluginInstallMode,
+  type PluginInstallReport,
+  type RunCommand,
+} from "./plugin-install.js";
+
+export {
+  installRegistryPlugin,
+  PLUGIN_RECORDS_FILE,
+  resolveConfigPath,
+  servesHostedMarketplace,
+  updateRegistryPlugins,
+  type PluginRegistry,
+  type PluginUpdateFilter,
+  type PluginUpdateOutcome,
+  type PluginVia,
+  type RegistryPluginContext,
+  type RegistryPluginInstallReport,
+} from "./registry-plugins.js";

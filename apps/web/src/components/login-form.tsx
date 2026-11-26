@@ -12,7 +12,6 @@ import { ApiError } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { LOGIN_PATH } from "@/lib/routes";
 import { useRouter } from "@/lib/use-router";
-import { cn } from "@/lib/utils";
 
 /**
  * Starts an external login. Better Auth answers with the provider's
@@ -30,9 +29,9 @@ function startExternalLogin(kind: string): void {
   void authClient.signIn.social({ provider: kind, callbackURL: "/", errorCallbackURL: LOGIN_PATH });
 }
 
-function FieldLabel({ children, uppercase = true }: { children: React.ReactNode; uppercase?: boolean }) {
+function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span className={cn("text-xs tracking-[0.1em] text-foreground", uppercase && "uppercase")}>{children}</span>
+    <span className="text-xs text-foreground">{children}</span>
   );
 }
 
@@ -131,7 +130,7 @@ export function LoginForm() {
             <>
               <div className="flex items-center gap-3.5">
                 <span className="h-px flex-1 bg-border" />
-                <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">or</span>
+                <span className="text-xs text-muted-foreground">or</span>
                 <span className="h-px flex-1 bg-border" />
               </div>
               <div className="flex flex-col gap-2.5">

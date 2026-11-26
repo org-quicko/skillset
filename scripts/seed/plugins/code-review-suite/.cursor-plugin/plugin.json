@@ -1,0 +1,7 @@
+{
+  "name": "code-review-suite",
+  "description": "Reviews diffs for bugs, style and missing tests, with a reviewer agent and a /review command.",
+  "version": "1.2.0",
+  "license": "MIT",
+  "homepage": "https://example.com/code-review-suite"
+}

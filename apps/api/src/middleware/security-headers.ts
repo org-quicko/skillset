@@ -1,3 +1,4 @@
+import { GIT_PROVIDERS } from "@in-org-quicko/skillset-shared";
 import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
 
@@ -18,6 +19,11 @@ import { secureHeaders } from "hono/secure-headers";
  * alone the browser blocks every upload and publishing fails with nothing in
  * the API's logs to explain it.
  *
+ * It also names every Git Provider's API and raw-file hosts. With no
+ * Connection or Integration, the interface reads a public repository straight
+ * from the provider (ADR-0010) — without these, an Import fails in the browser
+ * as "Failed to fetch", again with nothing in the API's logs.
+ *
  * `frame-ancestors 'none'` is the clickjacking half: without it the Settings
  * pages could be framed by a page that overlays its own controls on the real
  * ones.
@@ -32,7 +38,10 @@ import { secureHeaders } from "hono/secure-headers";
  * origin, narrower than the `*` that omitting `connect-src` would inherit
  * from `default-src`, and it still refuses every plaintext destination.
  */
-function spaPolicy(storageOrigin: string | undefined): string {
+export function spaPolicy(storageOrigin: string | undefined): string {
+  const gitOrigins = Object.values(GIT_PROVIDERS).flatMap((provider) =>
+    [provider.api_base, provider.raw_host].flatMap((url) => (url ? [new URL(url).origin] : [])),
+  );
   return [
     "default-src 'self'",
     "script-src 'self'",
@@ -40,7 +49,7 @@ function spaPolicy(storageOrigin: string | undefined): string {
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "worker-src 'self' blob:",
-    `connect-src 'self' ${storageOrigin ?? "https:"}`,
+    ["connect-src 'self'", storageOrigin ?? "https:", ...new Set(gitOrigins)].join(" "),
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
@@ -97,9 +106,14 @@ export function securityHeaders(publicUrl: string) {
 }
 
 /**
- * Applies the SPA's Content-Security-Policy to the web interface's HTML.
+ * Applies the SPA's Content-Security-Policy to the web interface's HTML, and
+ * makes browsers revalidate that HTML on every load.
  *
  * @remarks
+ * The shell names the hashed bundle to load, so a cached shell keeps an old
+ * interface running after a redeploy. `no-cache` still lets the browser keep
+ * it, behind a cheap ETag check. The hashed assets are left cacheable.
+ *
  * Conditioned on the response's `content-type` rather than on the path,
  * because the shell is served from two places — `serveStatic` for `/`, and
  * the SPA fallback for every client-side route — and both answer with HTML.
@@ -119,6 +133,7 @@ export function spaContentSecurityPolicy(storageOrigin?: string) {
     await next();
     if (c.res.headers.get("content-type")?.includes("text/html")) {
       c.res.headers.set("content-security-policy", policy);
+      c.res.headers.set("cache-control", "no-cache");
     }
   });
 }
