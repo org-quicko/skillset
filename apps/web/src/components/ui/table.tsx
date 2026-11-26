@@ -68,11 +68,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        // `uppercase` doesn't reach text inside a <button> on its own — a
-        // button's own text-transform: none (browser default) wins over the
-        // inherited value — so it's repeated on `button` explicitly for any
-        // sortable header built from one.
-        "h-10 px-6 text-left align-middle font-medium whitespace-nowrap text-foreground uppercase [&:has([role=checkbox])]:pr-0 [&_button]:uppercase",
+        "h-10 px-6 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}
@@ -106,8 +102,8 @@ function TableCaption({
   )
 }
 
-/** `TableHead` className for a Settings table's plain-label header row (no uppercase weight, muted). */
-export const TABLE_HEAD_LABEL_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground"
+/** `TableHead` className for a Settings table's plain-label header row (normal weight, muted). */
+export const TABLE_HEAD_LABEL_CLASS = "text-xs font-normal text-muted-foreground"
 
 export {
   Table,

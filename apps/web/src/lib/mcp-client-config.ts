@@ -9,7 +9,7 @@ export type McpClient = "mcp-json" | "claude" | "codex" | "cursor";
 
 export interface McpClientSnippet {
   client: McpClient;
-  /** The tab label. */
+  /** The dropdown label. */
   label: string;
   /** Where the snippet goes: a file to paste it into, or "Terminal" for a command. */
   target: string;
@@ -78,7 +78,7 @@ function codexToml(key: string, entry: McpServerConfigEntry): string {
  * Claude Code's CLI, Codex's `config.toml`, and Cursor's `mcp.json`.
  *
  * @param mcp - The MCP server, as the Registry returns it.
- * @returns One snippet per client, in tab order.
+ * @returns One snippet per client, in dropdown order.
  * @throws Error when the server has neither a package nor a remote — the
  * Registry refuses to publish one, so this only fires on bad data.
  * @example

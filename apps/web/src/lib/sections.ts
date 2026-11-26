@@ -18,6 +18,11 @@ export interface Section {
   path: string;
   /** What every detail page in this section sits under. */
   detailPrefix: string;
+  /**
+   * Whether this Kind's Installs are counted. An MCP server's are not:
+   * `skillset mcp install` only reads it, so its count is always 0.
+   */
+  tracksInstalls: boolean;
 }
 
 export const SECTIONS: Record<SectionKind, Section> = {
@@ -30,6 +35,7 @@ export const SECTIONS: Record<SectionKind, Section> = {
     description: "Browse and install skills for research, coding, design, automation, and more.",
     path: "/",
     detailPrefix: "/skills/",
+    tracksInstalls: true,
   },
   mcp: {
     kind: "mcp",
@@ -40,6 +46,7 @@ export const SECTIONS: Record<SectionKind, Section> = {
     description: "Connect your agents to tools and data through Model Context Protocol servers.",
     path: "/mcp-servers",
     detailPrefix: "/mcp-servers/",
+    tracksInstalls: false,
   },
   plugin: {
     kind: "plugin",
@@ -50,6 +57,7 @@ export const SECTIONS: Record<SectionKind, Section> = {
     description: "Bundles of skills, commands, and MCP servers you install in one step.",
     path: "/plugins",
     detailPrefix: "/plugins/",
+    tracksInstalls: true,
   },
 };
 

@@ -321,7 +321,7 @@ function TextFileViewer({
           )}
         >
           {isPreview && (
-            <span className="px-4 pt-2.5 text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
+            <span className="px-4 pt-2.5 text-[10px] text-muted-foreground">
               Frontmatter
             </span>
           )}

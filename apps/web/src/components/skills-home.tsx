@@ -15,6 +15,7 @@ import { useTags } from "@/hooks/use-tags";
 import { LOGIN_PATH } from "@/lib/routes";
 import type { Section, SectionKind } from "@/lib/sections";
 import { useRouter } from "@/lib/use-router";
+import { cn } from "@/lib/utils";
 
 /**
  * How long typing has to pause before the search term reaches the URL.
@@ -59,7 +60,7 @@ function HeroStat({ value, singular, plural }: { value: number; singular: string
   return (
     <div className="flex flex-col gap-1 px-5 py-3.5">
       <CountUp value={value} className="text-[22px] font-medium tabular-nums" />
-      <span className="text-xs tracking-[0.1em] text-muted-foreground uppercase">
+      <span className="text-xs text-muted-foreground">
         {value === 1 ? singular : plural}
       </span>
     </div>
@@ -76,8 +77,9 @@ function HeroStatSkeleton() {
   );
 }
 
-function capitalize(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
+/** "MCP server" → "MCP Server": every word capitalised, the rest of it left alone. */
+function titleCase(text: string): string {
+  return text.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 /** "a skill", "an MCP server" — the article follows the noun's first sound. */
@@ -160,6 +162,7 @@ export function SkillsHome({
   const tags = useTags();
   const statsQuery = useSkillStats(section.kind);
   const stats = statsQuery.data;
+  const statColumns = section.tracksInstalls ? "grid-cols-3" : "grid-cols-2";
   const searchRef = useRef<HTMLInputElement>(null);
   // Computed once per mount — the platform doesn't change under the user.
   const [isMac] = useState(isMacPlatform);
@@ -230,20 +233,22 @@ export function SkillsHome({
             </div>
             <Reveal delayMs={120} className="shrink-0">
               {stats ? (
-                <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
+                <div className={cn("grid divide-x rounded-lg border bg-card", statColumns)}>
                   <HeroStat
                     value={stats.skills}
-                    singular={capitalize(section.noun)}
-                    plural={capitalize(section.nounPlural)}
+                    singular={titleCase(section.noun)}
+                    plural={titleCase(section.nounPlural)}
                   />
                   <HeroStat value={stats.publishers} singular="Publisher" plural="Publishers" />
-                  <HeroStat value={stats.installs} singular="Install" plural="Installs" />
+                  {section.tracksInstalls && (
+                    <HeroStat value={stats.installs} singular="Install" plural="Installs" />
+                  )}
                 </div>
               ) : statsQuery.isPending ? (
-                <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
+                <div className={cn("grid divide-x rounded-lg border bg-card", statColumns)}>
                   <HeroStatSkeleton />
                   <HeroStatSkeleton />
-                  <HeroStatSkeleton />
+                  {section.tracksInstalls && <HeroStatSkeleton />}
                 </div>
               ) : null}
             </Reveal>

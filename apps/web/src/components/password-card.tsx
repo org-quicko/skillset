@@ -38,9 +38,9 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
   }
 
   return (
-    <Panel className="w-full bg-transparent" title="Password" description={description ?? "Change your password at any time."} uppercase={false}>
+    <Panel className="w-full bg-transparent" title="Password" description={description ?? "Change your password at any time."}>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <LabeledField label="Current password" htmlFor="current_password">
+        <LabeledField label="Current Password" htmlFor="current_password">
           <Input
             id="current_password"
             type="password"
@@ -52,7 +52,7 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
           />
         </LabeledField>
         <LabeledField
-          label="New password"
+          label="New Password"
           htmlFor="new_password"
           hint={`At least ${PASSWORD_MIN_LENGTH} characters.`}
         >
@@ -67,7 +67,7 @@ export function PasswordCard({ description }: { description?: ReactNode }) {
             className="h-9"
           />
         </LabeledField>
-        <LabeledField label="Verify password" htmlFor="confirm_password">
+        <LabeledField label="Verify Password" htmlFor="confirm_password">
           <Input
             id="confirm_password"
             type="password"
@@ -136,7 +136,7 @@ export function ChangePasswordDialog({
     <FormDialog open={open} onOpenChange={handleOpenChange}>
       <FormDialogHeader title="Change password" description="Enter your current password and choose a new one." />
       <FormDialogBody>
-        <FormField htmlFor="dialog_current_password" label="Current password">
+        <FormField htmlFor="dialog_current_password" label="Current Password">
           <Input
             id="dialog_current_password"
             type="password"
@@ -148,7 +148,7 @@ export function ChangePasswordDialog({
         </FormField>
         <FormField
           htmlFor="dialog_new_password"
-          label="New password"
+          label="New Password"
           helperText={`At least ${PASSWORD_MIN_LENGTH} characters.`}
         >
           <Input
@@ -163,7 +163,7 @@ export function ChangePasswordDialog({
         </FormField>
         <FormField
           htmlFor="dialog_confirm_password"
-          label="Verify password"
+          label="Verify Password"
           helperText={mismatch ? <span className="text-destructive">Passwords don&apos;t match.</span> : undefined}
         >
           <Input

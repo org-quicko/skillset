@@ -38,7 +38,7 @@ export function PluginComponentsPanel({
 
   return (
     <Panel
-      title="What's inside"
+      title="What's Inside"
       action={
         active && (
           <PanelTabs

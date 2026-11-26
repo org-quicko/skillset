@@ -15,6 +15,31 @@ export interface StagedPlugin {
 }
 
 /**
+ * What a staged plugin folder will publish: its name, version, agents, description, and file count.
+ *
+ * @param staged - The folder read, and the bundle built from it.
+ * @example
+ * ```tsx
+ * <StagedPluginSummary staged={staged} />
+ * ```
+ */
+export function StagedPluginSummary({ staged }: { staged: StagedPlugin }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium break-all">{staged.bundle.name}</span>
+        {staged.bundle.request.version && <Badge variant="secondary">{staged.bundle.request.version}</Badge>}
+        <AgentIcons agents={staged.bundle.request.agents} />
+      </div>
+      <p className="text-sm text-pretty text-muted-foreground">{staged.bundle.request.description}</p>
+      <p className="text-xs text-muted-foreground">
+        {staged.bundle.files.length} {staged.bundle.files.length === 1 ? "file" : "files"}
+      </p>
+    </div>
+  );
+}
+
+/**
  * The upload tab of the Plugin publish form: drop or pick a folder, then check
  * the name and agents read from its manifests.
  *
@@ -118,19 +143,7 @@ export function PluginFolderUpload({
 
       {readError && <p className="text-sm text-pretty text-destructive">{readError}</p>}
 
-      {staged && (
-        <div className="flex flex-col gap-2 rounded-lg border p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium break-all">{staged.bundle.name}</span>
-            {staged.bundle.request.version && <Badge variant="secondary">{staged.bundle.request.version}</Badge>}
-            <AgentIcons agents={staged.bundle.request.agents} />
-          </div>
-          <p className="text-sm text-pretty text-muted-foreground">{staged.bundle.request.description}</p>
-          <p className="text-xs text-muted-foreground">
-            {staged.bundle.files.length} {staged.bundle.files.length === 1 ? "file" : "files"}
-          </p>
-        </div>
-      )}
+      {staged && <StagedPluginSummary staged={staged} />}
     </div>
   );
 }

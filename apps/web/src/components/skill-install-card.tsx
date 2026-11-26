@@ -74,9 +74,11 @@ export function SkillInstallCard({ name, namespace }: { name: string; namespace?
         </div>
       }
     >
-      <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3">
+      <div className="flex items-start gap-3 rounded-lg border bg-background px-4 py-3">
         {tab === "command" && <span className="font-mono text-[13px] text-ring">$</span>}
-        <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{text}</code>
+        <code className="min-w-0 flex-1 font-mono text-[13px] whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {text}
+        </code>
         <button
           type="button"
           aria-label="Copy to clipboard"

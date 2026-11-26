@@ -1,16 +1,36 @@
 import type { McpDetail } from "@in-org-quicko/skillset-shared";
-import { GlobeIcon, TerminalIcon } from "lucide-react";
-import { useState } from "react";
+import { FileJsonIcon, GlobeIcon, type LucideIcon, TerminalIcon } from "lucide-react";
+import { type ReactNode, type SVGProps, useState } from "react";
+import { AGENT_ICONS } from "@/components/agent-icons";
 import { CopyableCode } from "@/components/copyable-code";
 import { Panel } from "@/components/panel";
-import { PanelTabs } from "@/components/panel-tabs";
 import { Badge } from "@/components/ui/badge";
-import { mcpClientSnippets, type McpClient } from "@/lib/mcp-client-config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { mcpClientSnippets, type McpClient, type McpClientSnippet } from "@/lib/mcp-client-config";
 import { renderSkillBody } from "@/lib/render-skill-body";
 
+/** Each client's mark: the agent's own, or a file for the `.mcp.json` that several clients read. */
+const CLIENT_ICONS: Record<McpClient, (props: SVGProps<SVGSVGElement>) => ReactNode> = {
+  "mcp-json": FileJsonIcon,
+  claude: AGENT_ICONS["claude-code"],
+  codex: AGENT_ICONS.codex,
+  cursor: AGENT_ICONS.cursor,
+};
+
+function ClientLabel({ snippet }: { snippet: McpClientSnippet }) {
+  const Icon = CLIENT_ICONS[snippet.client];
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon className="size-3.5" />
+      {snippet.label}
+    </span>
+  );
+}
+
 /**
- * How to add the server to each client, one tab per client. The tab choice
- * is not kept in the URL: it is a reading preference, not a view to share.
+ * How to add the server to each client, under a dropdown of the clients, as
+ * on a Plugin's Installation panel. The choice is not kept in the URL: it is a
+ * reading preference, not a view to share.
  */
 function McpConfigPanel({ mcp }: { mcp: McpDetail }) {
   const snippets = mcpClientSnippets(mcp);
@@ -22,16 +42,26 @@ function McpConfigPanel({ mcp }: { mcp: McpDetail }) {
     <Panel
       title="Configuration"
       action={
-        <PanelTabs
-          tabs={snippets.map((s) => ({ id: s.client, label: s.label }))}
+        <Select
           value={snippet.client}
-          onChange={setClient}
-        />
+          onValueChange={(value) => setClient(snippets.find((s) => s.client === value)?.client ?? client)}
+        >
+          <SelectTrigger size="sm" aria-label="Agent">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            {snippets.map((s) => (
+              <SelectItem key={s.client} value={s.client}>
+                <ClientLabel snippet={s} />
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       }
     >
       <div className="flex flex-col gap-2">
         <span className="font-mono text-xs text-muted-foreground">{snippet.target}</span>
-        <CopyableCode code={snippet.code} />
+        <CopyableCode code={snippet.code} wrap={snippet.target === "Terminal"} />
         {snippet.note && <p className="text-xs text-pretty text-muted-foreground">{snippet.note}</p>}
       </div>
     </Panel>
@@ -55,27 +85,38 @@ function NamedValue({ name, required, description }: { name: string; required?: 
   );
 }
 
+/** Whether a Server entry is a package the client runs or a remote it connects to. */
+function ServerKind({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      {label}
+    </span>
+  );
+}
+
 /**
- * An MCP server's page body: how to add it to each client, the package it runs
- * or the endpoint it connects to, and its README.
+ * An MCP server's page body: how to add it to each client, how the server is
+ * reached — a package the client runs or a remote endpoint it connects to — and
+ * its README.
  *
  * @param mcp - The MCP server, as the Registry returns it.
  */
 export function McpDetailPanel({ mcp }: { mcp: McpDetail }) {
+  const packages = mcp.packages ?? [];
+  const remotes = mcp.remotes ?? [];
   return (
     <div className="flex flex-col gap-4">
       <McpConfigPanel mcp={mcp} />
 
-      {mcp.packages && mcp.packages.length > 0 && (
-        <Panel title="Package">
-          <div className="flex flex-col gap-3">
-            {mcp.packages.map((pkg) => (
-              <div key={`${pkg.registry_name}:${pkg.name}`} className="flex flex-col gap-3 rounded-lg border p-3.5 text-sm">
+      {(packages.length > 0 || remotes.length > 0) && (
+        <Panel title="Server">
+          <div className="flex flex-col divide-y">
+            {packages.map((pkg) => (
+              <div key={`${pkg.registry_name}:${pkg.name}`} className="flex flex-col gap-3 py-4 text-sm first:pt-0 last:pb-0">
+                <ServerKind icon={TerminalIcon} label="Package" />
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <TerminalIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="min-w-0 font-medium break-all">{pkg.name}</span>
-                  </span>
+                  <span className="min-w-0 font-medium break-all">{pkg.name}</span>
                   <Badge variant="outline">{pkg.registry_name}</Badge>
                   {pkg.version && <Badge variant="secondary">{pkg.version}</Badge>}
                 </div>
@@ -95,20 +136,11 @@ export function McpDetailPanel({ mcp }: { mcp: McpDetail }) {
                 )}
               </div>
             ))}
-          </div>
-        </Panel>
-      )}
-
-      {mcp.remotes && mcp.remotes.length > 0 && (
-        <Panel title="Remote connection">
-          <div className="flex flex-col gap-3">
-            {mcp.remotes.map((remote) => (
-              <div key={remote.url} className="flex flex-col gap-3 rounded-lg border p-3.5 text-sm">
+            {remotes.map((remote) => (
+              <div key={remote.url} className="flex flex-col gap-3 py-4 text-sm first:pt-0 last:pb-0">
+                <ServerKind icon={GlobeIcon} label="Remote" />
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <GlobeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="min-w-0 font-mono text-xs break-all">{remote.url}</span>
-                  </span>
+                  <span className="min-w-0 font-mono text-xs break-all">{remote.url}</span>
                   <Badge variant="outline">{remote.transport_type.toUpperCase()}</Badge>
                 </div>
                 {/* Headers usually carry the credential a reader has to supply, so they are shown, not only pasted. */}

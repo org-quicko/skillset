@@ -75,7 +75,7 @@ export function PluginInstallCard({ plugin }: { plugin: Plugin }) {
               {guide.steps.length > 1 ? `${index + 1}. ` : ""}
               {step.text}
             </span>
-            {step.command && <CopyableCode code={step.command} />}
+            {step.command && <CopyableCode code={step.command} wrap />}
           </li>
         ))}
       </ol>

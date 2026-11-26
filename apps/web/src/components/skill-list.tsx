@@ -20,10 +20,10 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 /** How many of a Skill's Tags show as their own chip before the rest collapse into a "+N" one. */
 const VISIBLE_TAG_COUNT = 2;
 
-const HEAD_CLASS = "text-xs font-normal tracking-[0.08em] text-muted-foreground";
+const HEAD_CLASS = "text-xs font-normal text-muted-foreground";
 
 /** One shimmering placeholder row matching the directory table's column layout. */
-function SkillListSkeletonRow({ index }: { index: number }) {
+function SkillListSkeletonRow({ index, showInstalls }: { index: number; showInstalls: boolean }) {
   return (
     <TableRow key={index} className="hover:bg-transparent">
       <TableCell>
@@ -44,15 +44,17 @@ function SkillListSkeletonRow({ index }: { index: number }) {
       <TableCell>
         <Skeleton className="h-3 w-12" />
       </TableCell>
-      <TableCell className="text-center">
-        <Skeleton className="mx-auto h-3 w-10" />
-      </TableCell>
+      {showInstalls && (
+        <TableCell className="text-center">
+          <Skeleton className="mx-auto h-3 w-10" />
+        </TableCell>
+      )}
     </TableRow>
   );
 }
 
 /** The placeholder table shown while the first page of the directory loads. */
-function SkillListSkeleton() {
+function SkillListSkeleton({ showInstalls }: { showInstalls: boolean }) {
   return (
     <div className="w-full">
       <Table>
@@ -62,12 +64,12 @@ function SkillListSkeleton() {
             <TableHead className={HEAD_CLASS}>Name</TableHead>
             <TableHead className={cn("w-44", HEAD_CLASS)}>Publisher</TableHead>
             <TableHead className={cn("w-28", HEAD_CLASS)}>Updated</TableHead>
-            <TableHead className={cn("w-24 text-right", HEAD_CLASS)}>Installs</TableHead>
+            {showInstalls && <TableHead className={cn("w-24 text-right", HEAD_CLASS)}>Installs</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: 8 }).map((_, index) => (
-            <SkillListSkeletonRow key={index} index={index} />
+            <SkillListSkeletonRow key={index} index={index} showInstalls={showInstalls} />
           ))}
         </TableBody>
       </Table>
@@ -160,7 +162,7 @@ export function SkillList({
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  if (skills.isPending) return <SkillListSkeleton />;
+  if (skills.isPending) return <SkillListSkeleton showInstalls={section.tracksInstalls} />;
 
   if (skills.isError) {
     return <p className="px-5 py-10 text-center text-sm text-destructive">{apiErrorMessage(skills.error)}</p>;
@@ -195,17 +197,19 @@ export function SkillList({
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="w-10 text-xs font-normal tracking-[0.08em] text-muted-foreground">#</TableHead>
-          <TableHead className="text-xs font-normal tracking-[0.08em] text-muted-foreground">Name</TableHead>
-          <TableHead className="w-44 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-10 text-xs font-normal text-muted-foreground">#</TableHead>
+          <TableHead className="text-xs font-normal text-muted-foreground">Name</TableHead>
+          <TableHead className="w-44 text-xs font-normal text-muted-foreground">
             Publisher
           </TableHead>
-          <TableHead className="w-28 text-xs font-normal tracking-[0.08em] text-muted-foreground">
+          <TableHead className="w-28 text-xs font-normal text-muted-foreground">
             <SortHeader field="updated_at" label="Updated" filters={filters} onFiltersChange={onFiltersChange} />
           </TableHead>
-          <TableHead className="w-24 text-right text-xs font-normal tracking-[0.08em] text-muted-foreground">
-            <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
-          </TableHead>
+          {section.tracksInstalls && (
+            <TableHead className="w-24 text-right text-xs font-normal text-muted-foreground">
+              <SortHeader field="installs" label="Installs" filters={filters} onFiltersChange={onFiltersChange} />
+            </TableHead>
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -242,7 +246,7 @@ export function SkillList({
                       every row is noise — the same rule that hides the Source
                       (ADR-0041, ADR-0042). */}
                   {importedSource(skill.source) && (
-                    <span className="font-mono text-xs text-muted-foreground">{skill.namespace}</span>
+                    <span className="text-xs text-muted-foreground">{skill.namespace}</span>
                   )}
                   {visibleTags.map((tag) => (
                     <Badge key={tag.id} asChild variant="outline">
@@ -281,13 +285,15 @@ export function SkillList({
                 </div>
               </TableCell>
               <TableCell className="text-sm text-muted-foreground">{formatRelativeTime(skill.updated_at)}</TableCell>
-              <TableCell className="text-center text-sm text-muted-foreground tabular-nums">
-                {skill.installs.toLocaleString()}
-              </TableCell>
+              {section.tracksInstalls && (
+                <TableCell className="text-center text-sm text-muted-foreground tabular-nums">
+                  {skill.installs.toLocaleString()}
+                </TableCell>
+              )}
             </TableRow>
           );
         })}
-        {isFetchingNextPage && <SkillListSkeletonRow index={rows.length} />}
+        {isFetchingNextPage && <SkillListSkeletonRow index={rows.length} showInstalls={section.tracksInstalls} />}
       </TableBody>
     </Table>
       {hasNextPage && <div ref={sentinelRef} className="h-px" />}

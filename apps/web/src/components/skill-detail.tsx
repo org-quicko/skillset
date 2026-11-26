@@ -1,5 +1,5 @@
 import { importedSource, PLUGIN_AGENTS, PLUGIN_README_FILE_NAME } from "@in-org-quicko/skillset-shared";
-import { DownloadIcon, EllipsisIcon, ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, EllipsisIcon, ExternalLinkIcon, PencilIcon, TagsIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { DeleteSkillDialog } from "@/components/delete-skill-dialog";
 import { EditTagsDialog } from "@/components/edit-tags-dialog";
@@ -13,6 +13,7 @@ import { SkillFilesPanel } from "@/components/skill-files-panel";
 import { PluginComponentsPanel } from "@/components/plugin-components-panel";
 import { PluginInstallCard } from "@/components/plugin-install-card";
 import { PublishMcpForm } from "@/components/publish-mcp-form";
+import { UpdatePluginForm } from "@/components/update-plugin-form";
 import { SkillInstallCard } from "@/components/skill-install-card";
 import { FormDialog, FormDialogHeader } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -104,7 +105,7 @@ function NamespaceValue({ namespace }: { namespace: string }) {
       <TooltipTrigger asChild>
         <span
           tabIndex={0}
-          className="block truncate rounded-sm font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="block truncate rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           {namespace}
         </span>
@@ -206,10 +207,13 @@ export function SkillDetail({
   onDeleted: () => void;
 }) {
   const skill = useSkill(name, namespace);
-  const trend = useSkillInstallTrend(skill.data?.id);
+  // Nothing records an MCP server's Installs: `skillset mcp install` only reads it.
+  const tracksInstalls = skill.data?.kind !== "mcp";
+  const trend = useSkillInstallTrend(tracksInstalls ? skill.data?.id : undefined);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editTagsOpen, setEditTagsOpen] = useState(false);
   const [editMcpOpen, setEditMcpOpen] = useState(false);
+  const [updatePluginOpen, setUpdatePluginOpen] = useState(false);
   // A Plugin's component list opens a component's file in the files panel below it.
   const [openFile, setOpenFile] = useState<string>();
   const filesRef = useRef<HTMLDivElement>(null);
@@ -273,9 +277,15 @@ export function SkillDetail({
                     Edit
                   </DropdownMenuItem>
                 )}
+                {canEditTags && data.kind === "plugin" && (
+                  <DropdownMenuItem onClick={() => setUpdatePluginOpen(true)}>
+                    <UploadIcon />
+                    Publish new version
+                  </DropdownMenuItem>
+                )}
                 {canEditTags && (
                   <DropdownMenuItem onClick={() => setEditTagsOpen(true)}>
-                    <PencilIcon />
+                    <TagsIcon />
                     Edit Tags
                   </DropdownMenuItem>
                 )}
@@ -350,17 +360,19 @@ export function SkillDetail({
         </div>
 
         <div className={cn("flex flex-col gap-4", fillsViewport && "lg:overflow-y-auto")}>
-          <Panel title="Installs">
-            <span className="text-[44px] leading-none font-semibold">{data.installs.toLocaleString()}</span>
-            {trend.data && trend.data.points.length > 0 && (
-              <div className="mt-1">
-                <InstallTrendChart points={trend.data.points} />
-                <span className="mt-1.5 block text-[11px] text-muted-foreground">
-                  Last {trend.data.points.length} days
-                </span>
-              </div>
-            )}
-          </Panel>
+          {tracksInstalls && (
+            <Panel title="Installs">
+              <span className="text-[44px] leading-none font-semibold">{data.installs.toLocaleString()}</span>
+              {trend.data && trend.data.points.length > 0 && (
+                <div className="mt-1">
+                  <InstallTrendChart points={trend.data.points} />
+                  <span className="mt-1.5 block text-[11px] text-muted-foreground">
+                    Last {trend.data.points.length} days
+                  </span>
+                </div>
+              )}
+            </Panel>
+          )}
 
           <Panel title="Details" contentClassName="p-0">
             <DetailRow label={data.kind === "mcp" ? "Listed by" : "Publisher"}>
@@ -420,7 +432,7 @@ export function SkillDetail({
             )}
             {data.kind === "mcp" && (
               <DetailRow label="Type">
-                <span className="font-mono text-xs">
+                <span className="text-xs">
                   {data.packages && data.packages.length > 0
                     ? `${data.packages[0]?.registry_name} package`
                     : data.remotes && data.remotes.length > 0
@@ -453,6 +465,20 @@ export function SkillDetail({
             initial={data}
             onPublished={() => setEditMcpOpen(false)}
             onCancel={() => setEditMcpOpen(false)}
+          />
+        </FormDialog>
+      )}
+      {canEditTags && data.kind === "plugin" && (
+        <FormDialog
+          open={updatePluginOpen}
+          onOpenChange={setUpdatePluginOpen}
+          className="w-full max-w-xl sm:max-w-xl"
+        >
+          <FormDialogHeader title="Publish a new version" description={data.name} />
+          <UpdatePluginForm
+            plugin={data}
+            onPublished={() => setUpdatePluginOpen(false)}
+            onCancel={() => setUpdatePluginOpen(false)}
           />
         </FormDialog>
       )}

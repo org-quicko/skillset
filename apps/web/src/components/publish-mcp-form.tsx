@@ -4,36 +4,23 @@ import {
   MCP_REGISTRIES,
   MCP_TRANSPORTS,
   type McpDetail,
-  type McpEnvironmentVariable,
   type McpRegistry,
   type McpTransport,
 } from "@in-org-quicko/skillset-shared";
-import { FileUpIcon } from "lucide-react";
+import { ImportIcon, PlusIcon, XIcon } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { FormDialogBody, FormDialogFooter, FormField } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { usePublishMcp } from "@/hooks/use-skills";
 import { apiErrorMessage } from "@/lib/api";
+import { toEnvironmentVariables, type McpEnvRow } from "@/lib/mcp-env";
 
 type Delivery = "package" | "remote";
-
-/**
- * One name per line; blank lines are dropped. A name the server already had
- * keeps its description, default, and required flag; a new one is marked
- * required, the common case for tokens and keys.
- */
-function parseEnvNames(text: string, existing: McpEnvironmentVariable[]): McpEnvironmentVariable[] | undefined {
-  const names = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (names.length === 0) return undefined;
-  return names.map((name) => existing.find((variable) => variable.name === name) ?? { name, required: true });
-}
 
 /**
  * Lists a new MCP server, or edits one: its name and description, its
@@ -79,13 +66,17 @@ export function PublishMcpForm({
   const [registry, setRegistry] = useState<McpRegistry>(pkg?.registry_name ?? "npm");
   const [packageName, setPackageName] = useState(pkg?.name ?? "");
   const [version, setVersion] = useState(pkg?.version ?? "");
-  const [envNames, setEnvNames] = useState(
-    (pkg?.environment_variables ?? []).map((variable) => variable.name).join("\n"),
+  const [envRows, setEnvRows] = useState<McpEnvRow[]>(
+    (pkg?.environment_variables ?? []).map(({ name, required }) => ({ name, required: required ?? false })),
   );
   const [transport, setTransport] = useState<McpTransport>(remote?.transport_type ?? "http");
   const [url, setUrl] = useState(remote?.url ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [readmeError, setReadmeError] = useState<string>();
+
+  function updateEnvRow(index: number, change: Partial<McpEnvRow>) {
+    setEnvRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...change } : row)));
+  }
 
   async function handleReadmePicked(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -119,7 +110,7 @@ export function PublishMcpForm({
                 name: packageName.trim(),
                 version: version.trim() || undefined,
                 package_arguments: pkg?.package_arguments,
-                environment_variables: parseEnvNames(envNames, pkg?.environment_variables ?? []),
+                environment_variables: toEnvironmentVariables(envRows, pkg?.environment_variables ?? []),
               },
             ],
           }
@@ -142,7 +133,7 @@ export function PublishMcpForm({
             disabled={Boolean(initial)}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="weather"
+            placeholder="Eg: weather"
           />
         </FormField>
 
@@ -161,17 +152,17 @@ export function PublishMcpForm({
             maxLength={MCP_DESCRIPTION_MAX_LENGTH}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="What the server lets an agent do"
+            placeholder="Eg: Get forecasts and severe weather alerts for any city"
           />
         </FormField>
 
-        <FormField label="Repository" htmlFor="mcp-source" helperText="Optional. Where the server's code lives.">
+        <FormField label="Repository" htmlFor="mcp-source">
           <Input
             id="mcp-source"
             type="url"
             value={source}
             onChange={(event) => setSource(event.target.value)}
-            placeholder="https://github.com/acme/weather-mcp"
+            placeholder="Eg: https://github.com/acme/weather-mcp"
           />
         </FormField>
 
@@ -203,7 +194,7 @@ export function PublishMcpForm({
                   required={delivery === "package"}
                   value={packageName}
                   onChange={(event) => setPackageName(event.target.value)}
-                  placeholder="@acme/weather-mcp"
+                  placeholder="Eg: @acme/weather-mcp"
                 />
               </FormField>
               <FormField label="Version" htmlFor="mcp-version">
@@ -211,24 +202,57 @@ export function PublishMcpForm({
                   id="mcp-version"
                   value={version}
                   onChange={(event) => setVersion(event.target.value)}
-                  placeholder="latest"
+                  placeholder="Eg: 1.0.0"
                 />
               </FormField>
             </div>
-            <FormField
-              label="Environment variables"
-              htmlFor="mcp-env"
-              helperText="One name per line. Each is marked required."
-            >
-              <Textarea
-                id="mcp-env"
-                rows={3}
-                value={envNames}
-                onChange={(event) => setEnvNames(event.target.value)}
-                placeholder="WEATHER_API_KEY"
-                className="font-mono text-xs"
-              />
-            </FormField>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="mcp-env-0">Environment variables</Label>
+              {envRows.map((row, index) => (
+                <div key={index} className="grid grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-2">
+                  <Input
+                    id={`mcp-env-${index}`}
+                    aria-label="Variable name"
+                    value={row.name}
+                    onChange={(event) => updateEnvRow(index, { name: event.target.value })}
+                    placeholder="Eg: WEATHER_API_KEY"
+                    className="font-mono text-xs"
+                  />
+                  <Select
+                    value={row.required ? "required" : "optional"}
+                    onValueChange={(value) => updateEnvRow(index, { required: value === "required" })}
+                  >
+                    <SelectTrigger aria-label="Required or optional" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="required">Required</SelectItem>
+                      <SelectItem value="optional">Optional</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Remove variable"
+                    className="text-muted-foreground"
+                    onClick={() => setEnvRows((rows) => rows.filter((_, i) => i !== index))}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={() => setEnvRows((rows) => [...rows, { name: "", required: true }])}
+              >
+                <PlusIcon />
+                Add variable
+              </Button>
+            </div>
           </TabsContent>
 
           <TabsContent value="remote" className="mt-4">
@@ -254,38 +278,40 @@ export function PublishMcpForm({
                   required={delivery === "remote"}
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://mcp.acme.com/mcp"
+                  placeholder="Eg: https://mcp.acme.com/mcp"
                 />
               </FormField>
             </div>
           </TabsContent>
         </Tabs>
 
-        <FormField
-          label="README"
-          htmlFor="mcp-body"
-          helperText={readmeError ?? "Optional. Markdown, shown on the server's page."}
-          trailing={
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="-my-1 text-muted-foreground"
-              onClick={() => readmeInputRef.current?.click()}
-            >
-              <FileUpIcon />
-              Upload README.md
-            </Button>
-          }
-        >
-          <Textarea
-            id="mcp-body"
-            rows={6}
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            placeholder="# Weather MCP server"
-            className="font-mono text-xs"
-          />
+        <FormField label="README" htmlFor="mcp-body" helperText={readmeError}>
+          <div className="relative">
+            <Textarea
+              id="mcp-body"
+              rows={6}
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+              className="font-mono text-xs"
+            />
+            {/* A placeholder with a button in it: a native one is text only. Clicks
+                outside the button fall through to the textarea, so it still focuses. */}
+            {!body && (
+              <div className="pointer-events-none absolute inset-x-2.5 top-1.5 flex items-center gap-1 text-xs text-muted-foreground">
+                Start typing, or
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="pointer-events-auto -mx-1 text-foreground"
+                  onClick={() => readmeInputRef.current?.click()}
+                >
+                  <ImportIcon />
+                  Import README
+                </Button>
+              </div>
+            )}
+          </div>
         </FormField>
         <input
           ref={readmeInputRef}
