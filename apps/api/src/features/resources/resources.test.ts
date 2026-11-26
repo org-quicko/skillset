@@ -2283,6 +2283,27 @@ describe("Publishing and editing MCP servers", () => {
     expect(rows.length).toBe(1);
   });
 
+  it("serves a server's README as markdown at its page's URL plus /README.md", async () => {
+    const created = ((await (await publishMcp(writer, "acme/readme-weather", {
+      description: "Forecasts.",
+      body: "# Weather\n",
+      ...PACKAGE,
+    })).json()) as { resource: ApiMcp }).resource;
+
+    const res = await context.app.request(
+      `/mcp-servers/${encodeURIComponent("acme/readme-weather")}/README.md?namespace=${encodeURIComponent(created.namespace)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toStartWith("text/markdown");
+    expect(await res.text()).toBe("# Weather\n");
+  });
+
+  it("answers 404 for a server with no README, and for no such server", async () => {
+    await publishMcp(writer, "no-readme", { description: "Forecasts.", ...PACKAGE });
+    expect((await context.app.request("/mcp-servers/no-readme/README.md")).status).toBe(404);
+    expect((await context.app.request("/mcp-servers/never-published/README.md")).status).toBe(404);
+  });
+
   it("refuses an edit from a reader", async () => {
     const created = ((await (await publishMcp(writer, "reader-cannot-edit", { description: "First.", ...PACKAGE })).json()) as {
       resource: ApiMcp;

@@ -199,6 +199,13 @@ export function createApp(deps: AppDependencies): Hono {
   app.get(CLAUDE_MARKETPLACE_PATH, async (c) =>
     c.json(await services.resources.getClaudeMarketplace(await services.marketplace.getSettings())),
   );
+  // An MCP server's README as raw markdown, at its page's URL plus `/README.md`,
+  // for an Agent to read without rendering the SPA. `?namespace=` as on the page.
+  app.get("/mcp-servers/:name{.+}/README.md", async (c) => {
+    const mcp = await services.resources.getByName("mcp", c.req.param("name"), c.req.query("namespace"));
+    if (mcp.kind !== "mcp" || !mcp.body) return notFound(c);
+    return c.body(mcp.body, 200, { "content-type": "text/markdown; charset=utf-8" });
+  });
   app.get("/mcp", (c) => c.json(mcpDiscovery));
   if (deps.mcpbPath) {
     const mcpbPath = deps.mcpbPath;
@@ -210,6 +217,8 @@ export function createApp(deps: AppDependencies): Hono {
 
   // Only an `/api` path that no route matched reaches here: every other miss
   // is either a static file or the SPA's own route.
+  // The routes above sit outside `/api`, so `createApi`'s handler does not reach them.
+  app.onError(onError(deps.logger));
   app.notFound((c) => (c.req.path.startsWith("/api/") ? notFound(c) : c.text("404 Not Found", 404)));
 
   if (deps.webRoot) {
