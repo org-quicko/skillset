@@ -35,7 +35,7 @@ export function SkillInstallCard({ name, namespace }: { name: string; namespace?
   const qualifier = namespace ? ` --namespace ${namespace}` : "";
   // The scoped package name, not the `skillset` bin name: npx resolves what it
   // is given as a package, and `skillset` on npm is somebody else's.
-  const command = `npx ${CLI_PACKAGE} install ${name}${qualifier}`;
+  const command = `npx ${CLI_PACKAGE} skills install ${name}${qualifier}`;
   const prompt = namespace
     ? `Install the ${name} skill from ${namespace} on the Skillset registry.`
     : `Install the ${name} skill from the Skillset registry.`;

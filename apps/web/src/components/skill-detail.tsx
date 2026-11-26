@@ -6,6 +6,7 @@ import { EditTagsDialog } from "@/components/edit-tags-dialog";
 import { GIT_PROVIDER_ICONS } from "@/components/provider-icons";
 import { InstallTrendChart } from "@/components/install-trend-chart";
 import { McpDetailPanel } from "@/components/mcp-detail-panel";
+import { AgentIcons } from "@/components/agent-icons";
 import { Panel } from "@/components/panel";
 import { Reveal } from "@/components/reveal";
 import { SkillFilesPanel } from "@/components/skill-files-panel";
@@ -390,13 +391,7 @@ export function SkillDetail({
             {data.kind === "plugin" && (
               <>
                 <DetailRow label="Agents">
-                  <div className="flex flex-wrap justify-end gap-1">
-                    {data.agents.map((agent) => (
-                      <Badge key={agent} variant="outline">
-                        {PLUGIN_AGENTS[agent].label}
-                      </Badge>
-                    ))}
-                  </div>
+                  <AgentIcons agents={data.agents} />
                 </DetailRow>
                 {data.version && <DetailRow label="Version">{data.version}</DetailRow>}
                 {data.license && <DetailRow label="License">{data.license}</DetailRow>}

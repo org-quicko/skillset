@@ -443,13 +443,14 @@ describe("runInstall and Namespaces (ADR-0042)", () => {
       });
     }
 
-    it("installs MCP server into .mcp.json inferred from slashed name", async () => {
+    it("installs an MCP Server into .mcp.json", async () => {
       await withTempDirs(async ({ configDir, cwd }) => {
         const { fetch: fetchImpl } = stubMcpRegistry();
         const deps = depsFor(configDir, cwd, fetchImpl);
 
         const report = await runInstall(deps, {
           name: "io.github.modelcontextprotocol/server-everything",
+          kind: "mcp",
         });
 
         expect(report.kind).toBe("mcp");
@@ -466,17 +467,19 @@ describe("runInstall and Namespaces (ADR-0042)", () => {
       });
     });
 
-    it("installs MCP server with explicit --kind mcp", async () => {
+    it("installs a slashed name as a Skill unless told otherwise, naming the command for an MCP Server", async () => {
       await withTempDirs(async ({ configDir, cwd }) => {
-        const { fetch: fetchImpl } = stubMcpRegistry();
+        // The Registry answers a Skill lookup with whatever Kind has the name.
+        const { fetch: fetchImpl, calls } = stubFetch((url) => {
+          if (url.includes("/resources/skill/by-name/")) return jsonResponse(200, fakeMcp());
+          throw new Error(`Unexpected request to ${url}`);
+        });
         const deps = depsFor(configDir, cwd, fetchImpl);
 
-        const report = await runInstall(deps, {
-          name: "io.github.modelcontextprotocol/server-everything",
-          kind: "mcp",
-        });
-
-        expect(report.kind).toBe("mcp");
+        await expect(
+          runInstall(deps, { name: "io.github.modelcontextprotocol/server-everything", scope: "project" }),
+        ).rejects.toThrow(/is an MCP Server, not a Skill — run `skillset mcp install/);
+        expect(calls.some((call) => call.url.includes("/resources/mcp/"))).toBe(false);
       });
     });
 
@@ -488,6 +491,7 @@ describe("runInstall and Namespaces (ADR-0042)", () => {
         await expect(
           runInstall(deps, {
             name: "io.github.modelcontextprotocol/server-everything",
+            kind: "mcp",
             scope: "user",
           }),
         ).rejects.toThrow(/MCP Server installation is project scope only/);

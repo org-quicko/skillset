@@ -724,3 +724,117 @@ describe("runPublish from a repository URL", () => {
     }
   });
 });
+
+describe("runPublish: a Plugin's directory", () => {
+  /** A Plugin with a manifest, a command, a skill of its own, and a `.git` that must not be published. */
+  async function makePluginDir(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "skillset-test-"));
+    await mkdir(join(dir, ".claude-plugin"));
+    await writeFile(
+      join(dir, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "review-suite", description: "Reviews code.", version: "1.2.0" }),
+    );
+    await writeFile(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { github: { url: "https://mcp.example" } } }));
+    await mkdir(join(dir, "commands"));
+    await writeFile(join(dir, "commands", "review.md"), "---\ndescription: Review the diff.\n---\nReview.\n");
+    await writeSkillAt(dir, "skills/lint", "lint");
+    await mkdir(join(dir, ".git"));
+    await writeFile(join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    return dir;
+  }
+
+  function fakePublishedPlugin() {
+    const now = new Date().toISOString();
+    return {
+      plugin: {
+        id: "plugin-1",
+        kind: "plugin",
+        namespace: "registry.example",
+        name: "review-suite",
+        description: "Reviews code.",
+        body: null,
+        agents: ["claude-code"],
+        version: "1.2.0",
+        license: null,
+        homepage: null,
+        components: null,
+        source: "com.example.registry",
+        published_at: now,
+        updated_at: now,
+        published_by: { user_id: "u1", email: "writer@example.com", first_name: "A", last_name: "B" },
+        tags: [],
+        installs: 0,
+      },
+    };
+  }
+
+  it("publishes the Plugin, keeping its agent dot paths and not its Skills as Resources of their own", async () => {
+    const pluginDir = await makePluginDir();
+    const configDir = await mkdtemp(join(tmpdir(), "skillset-test-"));
+    try {
+      const configPath = join(configDir, "config.json");
+      await writeConfig(configPath, { registry: "https://registry.example", token: "writer-token" });
+
+      const published = fakePublishedPlugin();
+      const uploaded = new Set<string>();
+      const { fetch: fetchImpl, calls } = stubFetch((url, init) => {
+        if (url === "https://registry.example/api/resources/plugin/review-suite") {
+          const body = JSON.parse(String(init?.body));
+          expect(body).toMatchObject({ description: "Reviews code.", agents: ["claude-code"], version: "1.2.0" });
+          expect(body.components.commands).toEqual([
+            { name: "review", description: "Review the diff.", path: "commands/review.md" },
+          ]);
+          expect(body.components.skills.map((skill: { name: string }) => skill.name)).toEqual(["lint"]);
+          return jsonResponse(200, { ...published, upload: uploadFor(init?.body) });
+        }
+        if (isStorageUrl(url)) {
+          uploaded.add(storagePath(url));
+          return new Response(null, { status: 200 });
+        }
+        throw new Error(`Unexpected request to ${url}`);
+      });
+
+      const result = asResult(await runPublish(testDeps({ fetch: fetchImpl, configPath, cwd: pluginDir }), {}));
+
+      expect(result).toEqual({ name: "review-suite", id: "plugin-1", published_at: published.plugin.published_at });
+      expect(calls.filter((call) => call.url.includes("/api/resources/"))).toHaveLength(1);
+      expect([...uploaded].sort()).toEqual([
+        ".claude-plugin/plugin.json",
+        ".mcp.json",
+        "commands/review.md",
+        "skills/lint/SKILL.md",
+      ]);
+    } finally {
+      await rm(pluginDir, { recursive: true, force: true });
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("names the rule when the manifest breaks one, before any network call", async () => {
+    const pluginDir = await makePluginDir();
+    try {
+      await writeFile(join(pluginDir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "Review Suite" }));
+      const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
+      await expect(
+        runPublish(testDeps({ fetch: fetchImpl, configPath: join(pluginDir, "config.json"), cwd: pluginDir }), {}),
+      ).rejects.toThrow(/^name_invalid: /);
+      expect(calls).toHaveLength(0);
+    } finally {
+      await rm(pluginDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a directory holding both a SKILL.md and a Plugin manifest", async () => {
+    const pluginDir = await makePluginDir();
+    try {
+      await writeFile(join(pluginDir, "SKILL.md"), "---\nname: review-suite\ndescription: A Skill.\n---\nBody.\n");
+      const { fetch: fetchImpl, calls } = stubFetch(() => jsonResponse(200, {}));
+      await expect(
+        runPublish(testDeps({ fetch: fetchImpl, configPath: join(pluginDir, "config.json"), cwd: pluginDir }), {}),
+      ).rejects.toThrow(/holds both SKILL\.md and a Plugin manifest/);
+      expect(calls).toHaveLength(0);
+    } finally {
+      await rm(pluginDir, { recursive: true, force: true });
+    }
+  });
+});

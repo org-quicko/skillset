@@ -29,6 +29,7 @@ import { detectAgentId, recordInstall } from "./installed.js";
 import { rethrowValidationError } from "../errors.js";
 import { ApiError, downloadBinary, registryFetch, uploadArtifactFiles, type RegistryClient } from "../http.js";
 import { openReadClient, type SessionDeps } from "../session.js";
+import { z } from "zod";
 
 /** One selectable Agent, as the searchable prompt shows it. */
 export interface AgentChoice {
@@ -63,7 +64,7 @@ export interface InstallDeps extends SessionDeps {
 export interface InstallOptions {
   /** A Skill or MCP Server's name at the Registry, or a GitHub or GitLab URL to install straight from (ADR-0044). */
   name: string;
-  /** Explicit resource kind: "skill" | "mcp" */
+  /** What to install: a Skill (the default), or an MCP Server for `skillset mcp install`. */
   kind?: "skill" | "mcp";
   /**
    * `--name`: which Skill to install out of a URL, by the name its `SKILL.md`
@@ -217,11 +218,19 @@ async function resolveFromRegistry(client: RegistryClient, options: InstallOptio
   // there — and answers 409 only on a genuine tie, which `describeError`
   // reprints with both Namespaces named.
   const query = options.namespace ? `?namespace=${encodeURIComponent(options.namespace)}` : "";
-  const skill = await registryFetch(
+  // The Registry falls back to any Kind when no Skill has the name, so a
+  // Plugin's or MCP Server's name comes back here as that Resource.
+  const found = await registryFetch(
     client,
     `/resources/skill/by-name/${encodeURIComponent(options.name)}${query}`,
-    SkillSchema,
+    z.looseObject({ kind: z.string() }),
   );
+  if (found.kind !== "skill") {
+    const [what, command] =
+      found.kind === "mcp" ? ["an MCP Server", "skillset mcp install"] : ["a Plugin", "skillset plugins install"];
+    throw new Error(`"${options.name}" is ${what}, not a Skill — run \`${command} ${options.name}\`.`);
+  }
+  const skill = SkillSchema.parse(found);
   const bytes = await downloadBinary(client, `/resources/${skill.id}/artifact?source=cli`);
 
   let files;
@@ -327,34 +336,29 @@ export async function runInstall(deps: InstallDeps, options: InstallOptions): Pr
   const client = await openReadClient(deps);
   const fromUrl = isRepositoryUrl(options.name);
 
-  // Check if target is an MCP Server resource (ADR-0029)
-  const isMcpCandidate = options.kind === "mcp" || (!fromUrl && options.name.includes("/"));
-  if (isMcpCandidate) {
+  // ADR-0029
+  if (options.kind === "mcp") {
     if (options.scope === "user") {
       throw new Error("MCP Server installation is project scope only (--scope user is unsupported).");
     }
     const query = options.namespace ? `?namespace=${encodeURIComponent(options.namespace)}` : "";
-    try {
-      const mcp = await registryFetch(
-        client,
-        `/resources/mcp/by-name/${encodeURIComponent(options.name)}${query}`,
-        McpSchema,
-      );
-      const mcpReport = await installMcpServer({
-        cwd: deps.cwd,
-        mcp,
-        force: options.force,
-      });
-      return {
-        kind: "mcp",
-        serverKey: mcpReport.serverKey,
-        configPath: mcpReport.path,
-        overwritten: mcpReport.overwritten,
-        config: mcpReport.config,
-      };
-    } catch (err) {
-      if (options.kind === "mcp") throw err;
-    }
+    const mcp = await registryFetch(
+      client,
+      `/resources/mcp/by-name/${encodeURIComponent(options.name)}${query}`,
+      McpSchema,
+    );
+    const mcpReport = await installMcpServer({
+      cwd: deps.cwd,
+      mcp,
+      force: options.force,
+    });
+    return {
+      kind: "mcp",
+      serverKey: mcpReport.serverKey,
+      configPath: mcpReport.path,
+      overwritten: mcpReport.overwritten,
+      config: mcpReport.config,
+    };
   }
 
   if (!options.scope && !deps.isTTY) {

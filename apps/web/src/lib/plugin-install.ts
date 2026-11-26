@@ -1,10 +1,4 @@
-import {
-  CLAUDE_MARKETPLACE_NAME,
-  CLAUDE_MARKETPLACE_PATH,
-  claudeMarketplaceEntryName,
-  registryNamespace,
-  type PluginAgent,
-} from "@in-org-quicko/skillset-shared";
+import { registryNamespace, type PluginAgent } from "@in-org-quicko/skillset-shared";
 
 /** One step of installing a Plugin: what to do, and the command to run when there is one. */
 export interface PluginInstallStep {
@@ -27,6 +21,18 @@ export interface PluginInstallContext {
   origin: string;
 }
 
+/** What the CLI is published as — the name `npx` has to be given to reach it. */
+const CLI_PACKAGE = "@in-org-quicko/skillset-cli";
+
+/** The `skillset plugins install` command that installs a Plugin for one agent. */
+function cliInstallCommand(
+  { name, namespace, origin }: PluginInstallContext,
+  agent: PluginAgent,
+): string {
+  const qualifier = namespace === registryNamespace(origin) ? "" : ` --namespace ${namespace}`;
+  return `npx ${CLI_PACKAGE} plugins install ${name}${qualifier} --agent ${agent}`;
+}
+
 /**
  * How to install a Plugin on each agent the Registry supports.
  *
@@ -34,20 +40,38 @@ export interface PluginInstallContext {
  * Keyed by every `PluginAgent`, so adding an agent to `PLUGIN_AGENTS` does not
  * typecheck until its install guide is written here.
  */
-export const PLUGIN_INSTALL_GUIDES: Record<PluginAgent, (context: PluginInstallContext) => PluginInstallGuide> = {
-  "claude-code": ({ name, namespace, origin }) => {
-    const entry = claudeMarketplaceEntryName(name, namespace, namespace === registryNamespace(origin));
-    return {
-      steps: [
-        {
-          text: "Add this Registry's marketplace to Claude Code. You do this once.",
-          command: `claude plugin marketplace add ${origin}${CLAUDE_MARKETPLACE_PATH}`,
-        },
-        { text: "Install the plugin.", command: `claude plugin install ${entry}@${CLAUDE_MARKETPLACE_NAME}` },
-      ],
-      note: origin.startsWith("https://")
-        ? undefined
-        : "Claude Code downloads plugins only over HTTPS. This Registry is served over HTTP, so the install fails until it is served over HTTPS.",
-    };
-  },
+export const PLUGIN_INSTALL_GUIDES: Record<
+  PluginAgent,
+  (context: PluginInstallContext) => PluginInstallGuide
+> = {
+  "claude-code": (context) => ({
+    steps: [
+      {
+        text: "Install the plugin with the Skillset CLI. It adds this Registry's marketplace to Claude Code and runs claude plugin install.",
+        command: cliInstallCommand(context, "claude-code"),
+      },
+    ],
+    note: context.origin.startsWith("https://")
+      ? "Needs the claude CLI on your PATH. Claude Code keeps the plugin up to date from the marketplace."
+      : "Claude Code downloads plugins only over HTTPS. This Registry is served over HTTP, so the install fails until it is served over HTTPS.",
+  }),
+  cursor: (context) => ({
+    steps: [
+      {
+        text: "Install the plugin with the Skillset CLI. It copies the plugin into ~/.cursor/plugins/local.",
+        command: cliInstallCommand(context, "cursor"),
+      },
+      { text: 'Restart Cursor, or run "Developer: Reload Window", to load it.' },
+    ],
+    note: "Cursor has no command to install a plugin from a marketplace, so the CLI copies it in. Run the command again to update it.",
+  }),
+  codex: (context) => ({
+    steps: [
+      {
+        text: "Install the plugin with the Skillset CLI. It adds a local Skillset marketplace to Codex and runs codex plugin add.",
+        command: cliInstallCommand(context, "codex"),
+      },
+    ],
+    note: "Needs the codex CLI on your PATH. Run the command again to update the plugin.",
+  }),
 };

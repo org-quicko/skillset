@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
-import { getAgent, importedSource } from "@in-org-quicko/skillset-shared";
+import { getAgent, importedSource, PLUGIN_AGENT_IDS, PLUGIN_AGENTS } from "@in-org-quicko/skillset-shared";
 import { Command } from "commander";
 import { homedir } from "node:os";
 import pc from "picocolors";
@@ -9,13 +9,14 @@ import { runInstall } from "./commands/install.js";
 import type { SkillStatus } from "@in-org-quicko/skillset-installer";
 import { runList } from "./commands/list.js";
 import { runLogin } from "./commands/login.js";
+import { runPluginInstall } from "./commands/plugins.js";
 import { runPublish } from "./commands/publish.js";
 import { runRemove } from "./commands/remove.js";
 import { runSearch } from "./commands/search.js";
 import { runUpdate } from "./commands/update.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveConfigPath } from "./config.js";
-import { isRepositoryUrl } from "@in-org-quicko/skillset-installer";
+import { isRepositoryUrl, runCommand } from "@in-org-quicko/skillset-installer";
 import { emitJson, jsonMode, setJsonMode } from "./json.js";
 import { bannerText, fail, promptAgent, promptChoice, promptConfirm, promptToken } from "./ui.js";
 
@@ -122,8 +123,9 @@ program
 program
   .command("publish")
   .description(
-    "Publish a Skill to the Registry: from a path — one Skill's directory, or a directory holding several — " +
-      "or from a GitHub or GitLab URL, cloned with your own git credentials.",
+    "Publish to the Registry: a Plugin's directory (one holding .claude-plugin/plugin.json), one Skill's " +
+      "directory, or a directory holding several Skills — or a Skill from a GitHub or GitLab URL, cloned with " +
+      "your own git credentials.",
   )
   .argument("[target]", "A path (default: the current directory), or a GitHub or GitLab URL — a repository, or a folder in one")
   .option("--name <skill>", "Required with a URL: which Skill to publish, by the name in its SKILL.md")
@@ -134,6 +136,7 @@ program
     examples([
       "skillset publish                      # whatever is in this directory",
       "skillset publish ./skills --yes",
+      "skillset publish ./plugins/code-review-suite",
       "skillset publish https://github.com/acme/skills --name pdf",
     ]),
   )
@@ -233,33 +236,29 @@ interface InstallFlags {
   scope?: string;
   copy?: boolean;
   force?: boolean;
-  kind?: "skill" | "mcp";
 }
 
-program
-  .command("install")
-  .description(
-    "Install a Skill or MCP Server for a coding Agent: by name from the Registry, or from a GitHub or GitLab URL, cloned with " +
-      "your own git credentials and submitted to the Registry for approval.",
-  )
-  .argument("<target>", "A Skill or MCP Server's name in the Registry, or a GitHub or GitLab URL — a repository, or a folder in one")
-  .option("--kind <kind>", "Resource kind to install: skill or mcp")
-  .option("--name <skill>", "Required with a URL: which Skill to install, by the name in its SKILL.md")
-  .option("--namespace <ns>", "Which party named the Skill, when a bare name matches more than one")
-  .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
-  .option("--scope <scope>", "Install scope: project or user")
-  .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
-  .option("--force", "Replace an already-installed Skill that has local changes, or that a different party named")
-  .option("--json", JSON_FLAG)
-  .addHelpText(
-    "after",
-    examples([
-      "skillset install code-review",
-      "skillset install pdf --namespace anthropics/skills",
-      "skillset install https://github.com/anthropics/skills --name pdf",
-    ]),
-  )
-  .action(async (target: string, opts: InstallFlags) => {
+/** Adds the flags every Skill install takes: `skillset install` and `skillset skills install`. */
+function withSkillInstallOptions(command: Command): Command {
+  return command
+    .argument("<target>", "A Skill's name in the Registry, or a GitHub or GitLab URL — a repository, or a folder in one")
+    .option("--name <skill>", "Required with a URL: which Skill to install, by the name in its SKILL.md")
+    .option("--namespace <ns>", "Which party named the Skill, when a bare name matches more than one")
+    .option("--agent <id>", "Agent to install for (run with no value to pick from the list)")
+    .option("--scope <scope>", "Install scope: project or user")
+    .option("--copy", "Copy the Skill into the Agent's own directory instead of symlinking to .agents/skills")
+    .option("--force", "Replace an already-installed Skill that has local changes, or that a different party named")
+    .option("--json", JSON_FLAG);
+}
+
+/**
+ * The action behind every Skill and MCP Server install command.
+ *
+ * @param kind - The kind the command installs.
+ * @param verb - The command as typed, for the intro banner.
+ */
+function installAction(kind: "skill" | "mcp", verb: string) {
+  return async (target: string, opts: InstallFlags) => {
     const deps = {
       fetch,
       configPath: resolveConfigPath(process.env),
@@ -276,7 +275,7 @@ program
     };
     const options = {
       name: target,
-      kind: opts.kind,
+      kind,
       skillName: opts.name,
       namespace: opts.namespace,
       agent: opts.agent,
@@ -286,7 +285,7 @@ program
     };
     if (jsonMode()) return emitJson(() => runInstall(deps, options));
 
-    p.intro(label("install"));
+    p.intro(label(verb));
     const s = p.spinner();
     const progress = {
       start: (message: string) => s.start(message),
@@ -329,6 +328,100 @@ program
       } else if (submission?.status === "failed") {
         p.log.warn(`Installed, but not submitted to the Registry: ${submission.message}`);
       }
+      p.outro("Done");
+    } catch (error) {
+      fail(error);
+    }
+  };
+}
+
+withSkillInstallOptions(
+  program
+    .command("install")
+    .description(
+      "Install a Skill for a coding Agent — the shortcut for `skillset skills install`.",
+    ),
+)
+  .addHelpText(
+    "after",
+    examples([
+      "skillset install code-review",
+      "skillset install pdf --namespace anthropics/skills",
+      "skillset install https://github.com/anthropics/skills --name pdf",
+    ]),
+  )
+  .action(installAction("skill", "install"));
+
+const skills = program.command("skills").description("Install Skills from the Registry.");
+
+withSkillInstallOptions(
+  skills
+    .command("install")
+    .description(
+      "Install a Skill for a coding Agent: by name from the Registry, or from a GitHub or GitLab URL, cloned with " +
+        "your own git credentials and submitted to the Registry for approval.",
+    ),
+)
+  .addHelpText(
+    "after",
+    examples([
+      "skillset skills install code-review",
+      "skillset skills install pdf --namespace anthropics/skills",
+      "skillset skills install https://github.com/anthropics/skills --name pdf",
+    ]),
+  )
+  .action(installAction("skill", "skills install"));
+
+const mcp = program.command("mcp").description("Install MCP Servers from the Registry.");
+
+mcp
+  .command("install")
+  .description("Install an MCP Server into this project's .mcp.json. MCP Servers install at project scope only.")
+  .argument("<target>", "The MCP Server's name in the Registry")
+  .option("--namespace <ns>", "Which party named the MCP Server, when a bare name matches more than one")
+  .option("--force", "Replace a server of the same name already in .mcp.json")
+  .option("--json", JSON_FLAG)
+  .addHelpText("after", examples(["skillset mcp install io.github.modelcontextprotocol/server-everything"]))
+  .action(installAction("mcp", "mcp install"));
+
+const plugins = program.command("plugins").description("Install Plugins from the Registry.");
+
+plugins
+  .command("install")
+  .description(
+    "Install a Plugin for one of the agents it supports — the agents whose manifest it holds " +
+      "(.claude-plugin, .cursor-plugin, .codex-plugin).",
+  )
+  .argument("<name>", "The Plugin's name in the Registry")
+  .option("--namespace <ns>", "Which party named the Plugin, when a bare name matches more than one")
+  .option("--agent <id>", `Agent to install for: ${PLUGIN_AGENT_IDS.join(", ")} (prompted for when the Plugin supports several)`)
+  .option("--json", JSON_FLAG)
+  .addHelpText(
+    "after",
+    examples(["skillset plugins install code-review-suite", "skillset plugins install code-review-suite --agent cursor"]),
+  )
+  .action(async (name: string, opts: { namespace?: string; agent?: string }) => {
+    const deps = {
+      fetch,
+      configPath: resolveConfigPath(process.env),
+      env: process.env,
+      homeDir: homedir(),
+      isTTY: jsonMode() ? false : process.stdin.isTTY === true,
+      promptChoice,
+      run: runCommand,
+    };
+    const options = { name, namespace: opts.namespace, agent: opts.agent };
+    if (jsonMode()) return emitJson(() => runPluginInstall(deps, options));
+
+    p.intro(label("plugins install"));
+    try {
+      const result = await runPluginInstall(deps, options);
+      const supported = result.supported_agents.map((agent) => PLUGIN_AGENTS[agent].label).join(", ");
+      p.log.success(`Installed ${pc.cyan(result.name)} for ${PLUGIN_AGENTS[result.agent].label}`);
+      p.log.message(pc.dim(`Supports: ${supported}`));
+      if (result.path) p.log.message(pc.dim(`Files: ${result.path}`));
+      for (const command of result.commands) p.log.message(pc.dim(`Ran: ${command}`));
+      if (result.next) p.log.info(result.next);
       p.outro("Done");
     } catch (error) {
       fail(error);

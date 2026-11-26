@@ -3,24 +3,26 @@ import { registryNamespace } from "@in-org-quicko/skillset-shared";
 import { PLUGIN_INSTALL_GUIDES } from "../src/lib/plugin-install";
 
 const ORIGIN = "https://skills.acme.com";
+const CLI = `npx @in-org-quicko/skillset-cli plugins install review-suite`;
 
-describe("Claude Code install guide", () => {
-  it("adds this Registry's marketplace, then installs the plugin by its plain name when published here", () => {
+describe("Plugin install guides", () => {
+  it("installs for Claude Code through the Skillset CLI", () => {
     const guide = PLUGIN_INSTALL_GUIDES["claude-code"]({
       name: "review-suite",
       namespace: registryNamespace(ORIGIN),
       origin: ORIGIN,
     });
-    expect(guide.steps.map((step) => step.command)).toEqual([
-      "claude plugin marketplace add https://skills.acme.com/.claude-plugin/marketplace.json",
-      "claude plugin install review-suite@skillset",
-    ]);
-    expect(guide.note).toBeUndefined();
+    expect(guide.steps.map((step) => step.command)).toEqual([`${CLI} --agent claude-code`]);
+    expect(guide.note).not.toMatch(/HTTPS/);
   });
 
-  it("names a plugin imported from elsewhere with its namespace, so it cannot clash with one published here", () => {
-    const guide = PLUGIN_INSTALL_GUIDES["claude-code"]({ name: "review-suite", namespace: "acme/plugins", origin: ORIGIN });
-    expect(guide.steps[1]?.command).toBe("claude plugin install review-suite--acme-plugins@skillset");
+  it("names the namespace of a plugin imported from elsewhere", () => {
+    const guide = PLUGIN_INSTALL_GUIDES.cursor({
+      name: "review-suite",
+      namespace: "acme/plugins",
+      origin: ORIGIN,
+    });
+    expect(guide.steps[0]?.command).toBe(`${CLI} --namespace acme/plugins --agent cursor`);
   });
 
   it("warns when the Registry is not on HTTPS, since Claude Code will not download over HTTP", () => {
@@ -29,6 +31,6 @@ describe("Claude Code install guide", () => {
       namespace: registryNamespace("http://localhost:3000"),
       origin: "http://localhost:3000",
     });
-    expect(guide.note).toBeDefined();
+    expect(guide.note).toMatch(/HTTPS/);
   });
 });

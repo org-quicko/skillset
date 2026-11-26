@@ -88,7 +88,9 @@ npm install -g @in-org-quicko/skillset-cli
 skillset login --registry <url>
 skillset search [query]      # what the team has published
 skillset info <name>         # read a Skill without installing it
-skillset install <name>      # install a Skill for a coding agent
+skillset skills install <name>   # install a Skill for a coding agent (or just `skillset install`)
+skillset mcp install <name>      # add an MCP Server to this project's .mcp.json
+skillset plugins install <name>  # install a Plugin for Claude Code, Cursor, or Codex
 skillset list                # what's installed here, and whether it's current
 skillset update [names...]   # re-download whatever the Registry has moved on from
 skillset remove <name>       # uninstall a Skill

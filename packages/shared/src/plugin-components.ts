@@ -21,7 +21,7 @@ export type PluginComponent = z.infer<typeof PluginComponentSchema>;
  * The API never reads Artifact bytes (ADR-0001), so the publisher's client
  * reads these and declares them, the same trust as the manifest's
  * `description`. Read from the default layout only (`skills/`, `commands/`,
- * `agents/`, `hooks/hooks.json`, `.mcp.json`); a manifest that moves a
+ * `agents/`, `hooks/hooks.json`, `.mcp.json` or `mcp.json`); a manifest that moves a
  * component to a custom path shows without it.
  *
  * `mods` are Claude Code's function-hook modules, which `hooks/hooks.json`
@@ -39,7 +39,8 @@ export const PluginComponentsSchema = z.object({
 export type PluginComponents = z.infer<typeof PluginComponentsSchema>;
 
 const HOOKS_PATH = "hooks/hooks.json";
-const MCP_PATH = ".mcp.json";
+/** Claude Code and Codex read `.mcp.json`; Cursor reads `mcp.json`. */
+const MCP_PATHS = [".mcp.json", "mcp.json"] as const;
 
 function text(file: SkillFile): string {
   return new TextDecoder().decode(file.bytes);
@@ -152,9 +153,12 @@ export function pluginComponents(
   const hookPath = isRecord(hookSource) ? HOOKS_PATH : manifestPath;
   const hooks = isRecord(hookSource) ? hookSource : isRecord(manifest.hooks) ? manifest.hooks : {};
 
-  const mcpFile = jsonOf(byPath.get(MCP_PATH));
-  // A plugin's `.mcp.json` may wrap its servers in `mcpServers` or list them at the top level.
-  const fileServers = isRecord(mcpFile.mcpServers) ? mcpFile.mcpServers : mcpFile;
+  const fileServers = MCP_PATHS.flatMap((path) => {
+    const mcpFile = jsonOf(byPath.get(path));
+    // A plugin's MCP file may wrap its servers in `mcpServers` or list them at the top level.
+    const servers = isRecord(mcpFile.mcpServers) ? mcpFile.mcpServers : mcpFile;
+    return Object.entries(servers).map(([name, server]) => ({ name, description: mcpTarget(server), path }));
+  });
   const inlineServers = isRecord(manifest.mcpServers) ? manifest.mcpServers : {};
 
   return {
@@ -164,7 +168,7 @@ export function pluginComponents(
     hooks: Object.keys(hooks).map((event) => ({ name: event, description: null, path: hookPath })),
     mods: modComponents(hooksFile, new Set(byPath.keys())),
     mcp_servers: [
-      ...Object.entries(fileServers).map(([name, server]) => ({ name, description: mcpTarget(server), path: MCP_PATH })),
+      ...fileServers,
       ...Object.entries(inlineServers).map(([name, server]) => ({
         name,
         description: mcpTarget(server),

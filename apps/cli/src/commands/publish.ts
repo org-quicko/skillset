@@ -1,10 +1,14 @@
 import { relative, resolve, sep } from "node:path";
+import type { z } from "zod";
 import {
+  buildPluginBundle,
   buildSkillBundle,
+  PluginPublishedSchema,
   SKILL_DISCOVERY_MAX_DEPTH,
   SKILL_FILE_NAME,
   SkillPublishedSchema,
   SkillValidationError,
+  type PluginBundle,
   type SkillBundle,
 } from "@in-org-quicko/skillset-shared";
 import { rethrowValidationError } from "../errors.js";
@@ -13,9 +17,11 @@ import { openAuthenticatedClient, type SessionDeps } from "../session.js";
 import { describeError } from "../ui.js";
 import {
   discoverSkillDirectories,
+  holdsPluginManifest,
   holdsSkillFile,
   isRepositoryUrl,
   readRepositorySkill,
+  walkPluginDirectory,
   walkSkillDirectory,
   type Progress,
 } from "@in-org-quicko/skillset-installer";
@@ -61,20 +67,16 @@ export type PublishOutcome =
   | { name: string; status: "failed"; error: string };
 
 /**
- * PUTs a Skill's metadata, then uploads its Artifact straight to storage (ADR-0001).
+ * PUTs a Resource's metadata to `path`, turning the Registry's 401 and 403 into reasons.
  *
  * @throws Error about permissions when the Registry answers 403, so a reader's Token is
  * refused with a reason rather than a generic failure; and about the Token itself on 401.
- * @throws ApiError for any other refusal, and `RegistryUnreachableError` when neither the
- * Registry nor storage can be reached.
+ * @throws ApiError for any other refusal, and `RegistryUnreachableError` when the Registry
+ * cannot be reached.
  */
-async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bundle: SkillBundle): Promise<PublishResult> {
-  let published;
+async function putResource<T>(client: RegistryClient, path: string, schema: z.ZodType<T>, body: unknown): Promise<T> {
   try {
-    published = await registryFetch(client, `/resources/skill/${encodeURIComponent(bundle.name)}`, SkillPublishedSchema, {
-      method: "PUT",
-      body: JSON.stringify(bundle.request),
-    });
+    return await registryFetch(client, path, schema, { method: "PUT", body: JSON.stringify(body) });
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
       throw new Error("This Token is not allowed to publish — publishing needs the writer role or higher.");
@@ -84,10 +86,54 @@ async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bu
     }
     throw error;
   }
+}
 
+/**
+ * PUTs a Skill's metadata, then uploads its Artifact straight to storage (ADR-0001).
+ *
+ * @throws The errors `putResource` throws, and `RegistryUnreachableError` when storage
+ * cannot be reached.
+ */
+async function publishBundle(client: RegistryClient, fetchImpl: typeof fetch, bundle: SkillBundle): Promise<PublishResult> {
+  const published = await putResource(
+    client,
+    `/resources/skill/${encodeURIComponent(bundle.name)}`,
+    SkillPublishedSchema,
+    bundle.request,
+  );
   await uploadArtifactFiles(fetchImpl, published.upload.files, bundle.files);
-
   return { name: published.skill.name, id: published.skill.id, published_at: published.skill.published_at };
+}
+
+/**
+ * Publishes the Plugin whose root is `dir`: the same two-phase publish as a Skill, to the
+ * Plugin route.
+ *
+ * @throws Error naming the rule when the Plugin fails the local check, thrown before the
+ * Registry is contacted; otherwise the errors `putResource` throws, and
+ * `RegistryUnreachableError` when storage cannot be reached.
+ */
+async function publishPlugin(deps: PublishDeps, dir: string): Promise<PublishResult> {
+  if (await holdsSkillFile(dir)) {
+    throw new Error(
+      `"${dir}" holds both ${SKILL_FILE_NAME} and a Plugin manifest — publish each Resource from its own directory.`,
+    );
+  }
+  let bundle: PluginBundle;
+  try {
+    bundle = buildPluginBundle(await walkPluginDirectory(dir));
+  } catch (error) {
+    rethrowValidationError(error);
+  }
+  const client = await openAuthenticatedClient(deps);
+  const published = await putResource(
+    client,
+    `/resources/plugin/${encodeURIComponent(bundle.name)}`,
+    PluginPublishedSchema,
+    bundle.request,
+  );
+  await uploadArtifactFiles(deps.fetch, published.upload.files, bundle.files);
+  return { name: published.plugin.name, id: published.plugin.id, published_at: published.plugin.published_at };
 }
 
 /**
@@ -145,8 +191,8 @@ async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], op
 }
 
 /**
- * Publishes the Skill at a directory, or every Skill beneath it — or one named
- * Skill out of a GitHub or GitLab repository.
+ * Publishes the Plugin or Skill at a directory, or every Skill beneath it — or one
+ * named Skill out of a GitHub or GitLab repository.
  *
  * @param deps - The fetch implementation, config-file path, environment, the directory a
  * relative path is resolved against, whether a terminal is attached, how to confirm
@@ -154,13 +200,14 @@ async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], op
  * @param options - `target`, a path (default `deps.cwd`) or a repository URL; `skillName`
  * (`--name`), which Skill to publish out of a URL; and `yes`, which skips the confirmation
  * before publishing more than one Skill, for automation with no terminal attached.
- * @returns The published Skill's name, id, and publish timestamp for a URL, or for a path
- * that itself holds a `SKILL.md`. For any other path, every Skill found beneath it up to
+ * @returns The published Resource's name, id, and publish timestamp for a URL, for a path
+ * that itself holds an agent's Plugin manifest, or for a path that itself holds a `SKILL.md`. For any other path, every Skill found beneath it up to
  * `SKILL_DISCOVERY_MAX_DEPTH` levels deep is published, and the outcome of each is returned
  * individually rather than thrown: a failure part-way through does not stop the rest.
  * @throws Error when a URL is given without `--name`, or `--name` with a path.
- * @throws Error naming the rule and the offending directory when a Skill fails the local
- * check — thrown before the Registry is contacted — or when no Skill is found at all.
+ * @throws Error naming the rule and the offending directory when a Skill or Plugin fails the
+ * local check — thrown before the Registry is contacted — or when no Skill is found at all.
+ * @throws Error when a path holds both a `SKILL.md` and a Plugin manifest.
  * @throws Error with git's own message when a URL cannot be cloned, or naming every Skill
  * found when none there declares `--name`.
  * @throws Error explaining how to authenticate when no Registry and Token are configured.
@@ -176,6 +223,10 @@ async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], op
  * Every Skill is validated locally with the same shared rules the API applies before the
  * Registry is contacted for any of them (ADR-0001's upload comes after).
  *
+ * A path holding an agent's Plugin manifest (`.claude-plugin/plugin.json`) is published as
+ * that one Plugin, and is never searched for Skills: the Skills inside a Plugin are its own
+ * business, not Resources of their own (ADR-0001). A URL always names a Skill.
+ *
  * A URL is cloned with the User's own git, the same way `install` clones one, so any
  * repository they can clone publishes — private ones included — and the repository is
  * recorded as the Skill's Source and, through it, its Namespace (ADR-0041, ADR-0042,
@@ -185,6 +236,7 @@ async function publishAll(deps: PublishDeps, bundles: readonly SkillBundle[], op
  * ```ts
  * const { name, id } = await runPublish(deps, { target: "./skills/code-review" }) as PublishResult;
  * const outcomes = await runPublish(deps, { target: "./skills", yes: true }) as PublishOutcome[];
+ * const plugin = await runPublish(deps, { target: "./plugins/code-review-suite" }) as PublishResult;
  * await runPublish(deps, { target: "https://github.com/acme/skills", skillName: "pdf" });
  * ```
  */
@@ -206,6 +258,8 @@ export async function runPublish(deps: PublishDeps, options: PublishOptions): Pr
   }
 
   const targetPath = options.target ? resolve(deps.cwd, options.target) : deps.cwd;
+
+  if (await holdsPluginManifest(targetPath)) return publishPlugin(deps, targetPath);
 
   if (await holdsSkillFile(targetPath)) {
     let bundle;

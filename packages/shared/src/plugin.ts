@@ -19,6 +19,10 @@ import { timestamp } from "./timestamp.js";
  * one entry here plus its install instructions; publishing, storage, and the
  * wire shape do not change.
  *
+ * An agent is listed for a Plugin only when the Plugin holds that agent's own
+ * manifest, even where the agent would load another's (Codex reads
+ * `.claude-plugin/plugin.json` too).
+ *
  * The first manifest present, in this table's order, is the one `description`,
  * `version`, `license`, and `homepage` are read from.
  *
@@ -31,6 +35,16 @@ export const PLUGIN_AGENTS = {
     label: "Claude Code",
     manifestPath: ".claude-plugin/plugin.json",
     dotPaths: [".claude-plugin", ".mcp.json", ".lsp.json"],
+  },
+  cursor: {
+    label: "Cursor",
+    manifestPath: ".cursor-plugin/plugin.json",
+    dotPaths: [".cursor-plugin"],
+  },
+  codex: {
+    label: "Codex",
+    manifestPath: ".codex-plugin/plugin.json",
+    dotPaths: [".codex-plugin", ".mcp.json", ".app.json"],
   },
 } as const satisfies Record<string, { label: string; manifestPath: string; dotPaths: readonly string[] }>;
 
@@ -314,11 +328,22 @@ const KEPT_DOT_PATHS: ReadonlySet<string> = new Set(
 );
 
 /**
- * Like `isExcludedPath`, but keeps the root dot paths an agent reads. A
- * leading wrapping folder is allowed for, since files are collected before it
- * is stripped.
+ * Like `isExcludedPath`, but keeps the root dot paths an agent reads.
+ *
+ * @remarks
+ * A leading wrapping folder is allowed for, since files are collected before
+ * it is stripped. Files inside a kept dot path are still held to
+ * `isExcludedPath` (`.claude-plugin/.DS_Store` is dropped).
+ *
+ * @param path - A path relative to the Plugin's root, or to one wrapping folder.
+ * @returns Whether a Plugin's Artifact leaves the path out.
+ * @example
+ * ```ts
+ * isExcludedPluginPath(".claude-plugin/plugin.json"); // -> false
+ * isExcludedPluginPath(".git/HEAD"); // -> true
+ * ```
  */
-function isExcludedPluginPath(path: string): boolean {
+export function isExcludedPluginPath(path: string): boolean {
   const segments = path.split("/");
   for (const skip of [0, 1]) {
     const top = segments[skip];

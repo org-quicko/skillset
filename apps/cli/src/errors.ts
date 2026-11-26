@@ -1,4 +1,4 @@
-import { formatSkillValidationError, SkillValidationError } from "@in-org-quicko/skillset-shared";
+import { formatSkillValidationError, PluginValidationError, SkillValidationError } from "@in-org-quicko/skillset-shared";
 
 /**
  * Turns a shared-rules validation failure into the one-line, rule-naming message the CLI
@@ -12,7 +12,8 @@ import { formatSkillValidationError, SkillValidationError } from "@in-org-quicko
  * @returns Never; it always throws. Declared `never` so a `try`/`catch` around an
  * assignment still narrows the assigned variable as definitely assigned afterwards.
  * @throws Error naming the rule, the message, and the field when `error` is a
- * `SkillValidationError`; otherwise rethrows `error` exactly as it arrived.
+ * `SkillValidationError` or a `PluginValidationError`; otherwise rethrows
+ * `error` exactly as it arrived.
  *
  * @example
  * ```ts
@@ -27,6 +28,9 @@ import { formatSkillValidationError, SkillValidationError } from "@in-org-quicko
 export function rethrowValidationError(error: unknown): never {
   if (error instanceof SkillValidationError) {
     throw new Error(formatSkillValidationError(error));
+  }
+  if (error instanceof PluginValidationError) {
+    throw new Error(`${error.rule}: ${error.message}${error.field ? ` (${error.field})` : ""}`);
   }
   throw error;
 }

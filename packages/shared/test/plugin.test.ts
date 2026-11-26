@@ -158,3 +158,41 @@ describe("buildPluginBundle's components", () => {
     expect(bundle.request.components.mcp_servers).toEqual([]);
   });
 });
+
+describe("a Plugin's agents, from the manifests it holds", () => {
+  const manifest = (path: string, name = "review-suite") =>
+    file(path, JSON.stringify({ name, description: "Reviews code." }));
+
+  it("lists every agent whose manifest folder is present, and only those", () => {
+    const bundle = buildPluginBundle([
+      manifest(".claude-plugin/plugin.json"),
+      manifest(".cursor-plugin/plugin.json"),
+      manifest(".codex-plugin/plugin.json"),
+    ]);
+    expect(bundle.request.agents).toEqual(["claude-code", "cursor", "codex"]);
+    expect(buildPluginBundle([manifest(".cursor-plugin/plugin.json")]).request.agents).toEqual(["cursor"]);
+  });
+
+  it("keeps each agent's own dot folder in the Artifact", () => {
+    const bundle = buildPluginBundle([manifest(".cursor-plugin/plugin.json"), manifest(".codex-plugin/plugin.json")]);
+    expect(bundle.files.map((f) => f.path).sort()).toEqual([".codex-plugin/plugin.json", ".cursor-plugin/plugin.json"]);
+  });
+
+  it("refuses manifests that disagree on the name", () => {
+    expect(
+      ruleOf(() =>
+        buildPluginBundle([manifest(".claude-plugin/plugin.json"), manifest(".cursor-plugin/plugin.json", "other")]),
+      ),
+    ).toBe("name_mismatch");
+  });
+
+  it("lists the MCP servers in Cursor's mcp.json", () => {
+    const bundle = buildPluginBundle([
+      manifest(".cursor-plugin/plugin.json"),
+      file("mcp.json", JSON.stringify({ mcpServers: { docs: { url: "https://docs.example/mcp" } } })),
+    ]);
+    expect(bundle.request.components.mcp_servers).toEqual([
+      { name: "docs", description: "https://docs.example/mcp", path: "mcp.json" },
+    ]);
+  });
+});

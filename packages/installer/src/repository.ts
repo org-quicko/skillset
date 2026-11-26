@@ -8,8 +8,10 @@ import {
   formatSkillValidationError,
   importNamespace,
   isExcludedPath,
+  isExcludedPluginPath,
   parseSkillDocument,
   parseSkillSourceUrl,
+  PLUGIN_MANIFEST_PATHS,
   resourceSourceUrl,
   SKILL_DISCOVERY_MAX_DEPTH,
   SKILL_FILE_NAME,
@@ -25,27 +27,67 @@ import {
  */
 
 /**
- * Reads every file under `root`, skipping whatever `isExcludedPath` (shared)
- * would exclude anyway — pruning descent into `node_modules`/`.git`/etc.
- * rather than reading them and discarding the bytes.
+ * Reads every file under `root` that `isExcluded` keeps, pruning descent into
+ * an excluded directory rather than reading it and discarding the bytes.
  */
-export async function walkSkillDirectory(root: string, dir: string = root): Promise<SkillFile[]> {
+async function walkDirectory(root: string, dir: string, isExcluded: (path: string) => boolean): Promise<SkillFile[]> {
   const entries = await readdir(dir, { withFileTypes: true });
   const files: SkillFile[] = [];
 
   for (const entry of entries) {
     const absolutePath = join(dir, entry.name);
     const relativePath = relative(root, absolutePath).split(sep).join("/");
-    if (isExcludedPath(relativePath)) continue;
+    if (isExcluded(relativePath)) continue;
 
     if (entry.isDirectory()) {
-      files.push(...(await walkSkillDirectory(root, absolutePath)));
+      files.push(...(await walkDirectory(root, absolutePath, isExcluded)));
     } else if (entry.isFile()) {
       files.push({ path: relativePath, bytes: await readFile(absolutePath) });
     }
   }
 
   return files;
+}
+
+/**
+ * Reads every file under `root`, skipping whatever `isExcludedPath` (shared)
+ * would exclude anyway — `node_modules`, `.git`, and every other dot path.
+ */
+export async function walkSkillDirectory(root: string): Promise<SkillFile[]> {
+  return walkDirectory(root, root, isExcludedPath);
+}
+
+/**
+ * Reads every file of the Plugin at `root`. Unlike a Skill's walk, it keeps
+ * the root dot paths an agent reads (`.claude-plugin/`, `.mcp.json`), via
+ * `isExcludedPluginPath`.
+ */
+export async function walkPluginDirectory(root: string): Promise<SkillFile[]> {
+  return walkDirectory(root, root, isExcludedPluginPath);
+}
+
+/**
+ * Whether `dir` itself holds an agent's Plugin manifest — the mark of a
+ * Plugin's own root, as `SKILL.md` is a Skill's.
+ *
+ * @param dir - The directory to check.
+ * @returns `true` when any of `PLUGIN_MANIFEST_PATHS` is a file under `dir`.
+ * @throws Error from the filesystem for anything but a missing file, as `holdsSkillFile` does.
+ * @example
+ * ```ts
+ * await holdsPluginManifest("./plugins/code-review-suite"); // -> true
+ * ```
+ */
+export async function holdsPluginManifest(dir: string): Promise<boolean> {
+  for (const manifestPath of PLUGIN_MANIFEST_PATHS) {
+    try {
+      await access(join(dir, ...manifestPath.split("/")));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return false;
 }
 
 /**

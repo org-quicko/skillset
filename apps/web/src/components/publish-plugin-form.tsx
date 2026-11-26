@@ -1,6 +1,7 @@
 import { buildPluginBundle, PLUGIN_AGENTS, type PluginBundle, type SkillFile } from "@in-org-quicko/skillset-shared";
 import { UploadIcon } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
+import { AgentIcons } from "@/components/agent-icons";
 import { Badge } from "@/components/ui/badge";
 import { readDroppedFiles, readPickedFiles } from "@/lib/read-skill-files";
 import { cn } from "@/lib/utils";
@@ -122,11 +123,7 @@ export function PluginFolderUpload({
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium break-all">{staged.bundle.name}</span>
             {staged.bundle.request.version && <Badge variant="secondary">{staged.bundle.request.version}</Badge>}
-            {staged.bundle.request.agents.map((agent) => (
-              <Badge key={agent} variant="outline">
-                {PLUGIN_AGENTS[agent].label}
-              </Badge>
-            ))}
+            <AgentIcons agents={staged.bundle.request.agents} />
           </div>
           <p className="text-sm text-pretty text-muted-foreground">{staged.bundle.request.description}</p>
           <p className="text-xs text-muted-foreground">

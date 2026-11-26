@@ -80,7 +80,7 @@ export function PluginComponentsPanel({
                   {component.name}
                 </span>
                 {component.description && (
-                  <span className="line-clamp-2 text-xs text-pretty text-muted-foreground">{component.description}</span>
+                  <span className="truncate text-xs text-muted-foreground">{component.description}</span>
                 )}
               </button>
             </li>

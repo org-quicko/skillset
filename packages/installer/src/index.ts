@@ -396,9 +396,11 @@ export {
 export {
   checkoutFolder,
   discoverSkillDirectories,
+  holdsPluginManifest,
   holdsSkillFile,
   isRepositoryUrl,
   readRepositorySkill,
+  walkPluginDirectory,
   walkSkillDirectory,
   type Checkout,
   type Progress,
@@ -413,3 +415,15 @@ export {
   type McpInstallReport,
   type McpServerConfigEntry,
 } from "./mcp-install.js";
+
+export {
+  CODEX_MARKETPLACE_NAME,
+  installClaudeCodePlugin,
+  installCodexPlugin,
+  installCursorPlugin,
+  runCommand,
+  type CommandResult,
+  type PluginInstallContext,
+  type PluginInstallReport,
+  type RunCommand,
+} from "./plugin-install.js";
