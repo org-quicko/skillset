@@ -35,7 +35,7 @@
     },
     "apps/cli": {
       "name": "@in-org-quicko/skillset-cli",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "bin": {
         "skillset": "./dist/cli.js",
       },
@@ -54,7 +54,7 @@
     },
     "apps/mcp": {
       "name": "@in-org-quicko/skillset-mcp",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "bin": {
         "skillset-mcp": "./dist/cli.js",
       },

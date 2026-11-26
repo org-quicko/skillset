@@ -1,4 +1,5 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import pkg from "../package.json" with { type: "json" };
 import type { Variables } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import { z } from "zod";
 import { ArtifactManifestSchema, PLUGIN_AGENT_IDS, type AgentDetection } from "@in-org-quicko/skillset-shared";
@@ -446,7 +447,7 @@ export function createServer(
   run: RunCommand = runCommand,
 ): McpServer {
   const server = new McpServer(
-    { name: "skillset-mcp", version: "0.0.0", title: "Skillset Skill Catalog" },
+    { name: "skillset-mcp", version: pkg.version, title: "Skillset Skill Catalog" },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
