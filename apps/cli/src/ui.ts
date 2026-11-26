@@ -33,6 +33,7 @@ const COMMANDS: readonly (readonly [string, string])[] = [
   ["skillset update [names...] [--force]", "Re-download Skills the Registry has moved on from"],
   ["skillset remove <name>", "Uninstall a Skill from this project"],
   ["skillset plugins install <name> [--agent <id>]", "Install a Plugin for Claude Code, Cursor, or Codex"],
+  ["skillset plugins update [name]", "Update Plugins installed with the CLI to the Registry's latest"],
   ["skillset publish [path]", "Publish a Plugin, a Skill, or every Skill under a directory"],
   ["skillset publish <url> --name <skill>", "Publish a Skill from a GitHub or GitLab repo with your git"],
 ];

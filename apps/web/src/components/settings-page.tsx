@@ -4,6 +4,7 @@ import { AiAssistantsCard } from "@/components/ai-assistants-card";
 import { ConnectionCard } from "@/components/connection-card";
 import { IdentityProvidersCard } from "@/components/identity-providers-card";
 import { IntegrationsCard } from "@/components/integrations-card";
+import { MarketplaceCard } from "@/components/marketplace-card";
 import { ProfileCard } from "@/components/profile-card";
 import { SubmissionsCard } from "@/components/submissions-card";
 import { Button } from "@/components/ui/button";
@@ -29,10 +30,21 @@ const SUBMISSIONS_PATH = "/settings/submissions";
 const TOKENS_PATH = "/settings/tokens";
 const LOGIN_PATH = "/settings/login";
 const INTEGRATIONS_PATH = "/settings/integrations";
+const MARKETPLACE_PATH = "/settings/marketplace";
 const CONNECTIONS_PATH = "/settings/connected-accounts";
 const ASSISTANTS_PATH = "/settings/ai-assistants";
 
-type Section = "profile" | "users" | "tags" | "submissions" | "login" | "integrations" | "connections" | "tokens" | "assistants";
+type Section =
+  | "profile"
+  | "users"
+  | "tags"
+  | "submissions"
+  | "login"
+  | "integrations"
+  | "marketplace"
+  | "connections"
+  | "tokens"
+  | "assistants";
 
 // `canManageUsers` gates the Integrations section too: it decides something
 // about the Registry rather than about you — which apps it holds repository
@@ -57,6 +69,7 @@ function sectionFor(
   if (pathname === SUBMISSIONS_PATH && canManageUsers) return "submissions";
   if (pathname === LOGIN_PATH && canManageLogin) return "login";
   if (pathname === INTEGRATIONS_PATH && canManageUsers) return "integrations";
+  if (pathname === MARKETPLACE_PATH && canManageUsers) return "marketplace";
   if (pathname === CONNECTIONS_PATH && canImport) return "connections";
   if (pathname === TOKENS_PATH) return "tokens";
   if (pathname === ASSISTANTS_PATH) return "assistants";
@@ -79,6 +92,7 @@ export function SettingsPage({ user }: { user: User }) {
     ...(canManageUsers
       ? [{ label: "Integrations", section: "integrations" as const, path: INTEGRATIONS_PATH }]
       : []),
+    ...(canManageUsers ? [{ label: "Marketplace", section: "marketplace" as const, path: MARKETPLACE_PATH }] : []),
     ...(canImport
       ? [{ label: "Connected Accounts", section: "connections" as const, path: CONNECTIONS_PATH }]
       : []),
@@ -136,6 +150,7 @@ export function SettingsPage({ user }: { user: User }) {
           {section === "submissions" && canManageUsers && <SubmissionsCard />}
           {section === "login" && canManageLogin && <IdentityProvidersCard />}
           {section === "integrations" && canManageUsers && <IntegrationsCard />}
+          {section === "marketplace" && canManageUsers && <MarketplaceCard />}
           {section === "connections" && canImport && <ConnectionCard />}
           {section === "tokens" && <TokensCard />}
           {section === "assistants" && <AiAssistantsCard />}

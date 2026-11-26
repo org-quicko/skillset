@@ -2,7 +2,6 @@ import {
   ARTIFACT_MAX_UNCOMPRESSED_BYTES,
   artifactMediaType,
   buildArtifact,
-  CLAUDE_MARKETPLACE_NAME,
   claudeMarketplaceEntryName,
   validateArtifactPath,
   normalizeSkillPath,
@@ -13,6 +12,7 @@ import {
   type ArtifactFileUpload,
   type McpPackage,
   type McpPayload,
+  type MarketplaceSettings,
   type McpRemote,
   type Page,
   type PluginAgent,
@@ -207,6 +207,14 @@ interface ClaudeMarketplaceEntry {
   description: string;
   version: string;
   source: { source: "archive"; url: string };
+}
+
+/** Claude Code's marketplace file, as the Registry serves it. */
+interface ClaudeMarketplace {
+  name: string;
+  owner: { name: string; email?: string };
+  metadata?: { description: string };
+  plugins: ClaudeMarketplaceEntry[];
 }
 
 /** `PUT /resources/{kind}/{name}`'s `upload`: one presigned destination per declared file. */
@@ -1130,7 +1138,7 @@ export class ResourcesService {
 
   /**
    * Claude Code's marketplace: every Plugin that supports `claude-code`, each
-   * downloadable as a zip from this Registry.
+   * downloadable as a zip from this Registry, under the details an Admin set.
    *
    * @remarks
    * Public, like every read (ADR-0013). Each entry's version adds the last
@@ -1139,13 +1147,14 @@ export class ResourcesService {
    * place (ADR-0002). Entry names follow `claudeMarketplaceEntryName`, which
    * the web's install commands use too.
    *
+   * @param settings - The marketplace's name, owner, and description, from `MarketplaceService.getSettings`.
    * @returns The marketplace file's contents.
    * @example
    * ```ts
-   * const marketplace = await resourcesService.getClaudeMarketplace();
+   * const marketplace = await resourcesService.getClaudeMarketplace(await marketplaceService.getSettings());
    * ```
    */
-  async getClaudeMarketplace(): Promise<{ name: string; owner: { name: string }; plugins: ClaudeMarketplaceEntry[] }> {
+  async getClaudeMarketplace(settings: MarketplaceSettings): Promise<ClaudeMarketplace> {
     const rows = await this.db
       .selectFrom("resources")
       .select(["id", "namespace", "name", "description", "payload", "updated_at"])
@@ -1156,8 +1165,9 @@ export class ResourcesService {
     const own = registryNamespace(this.publicUrl);
     const base = this.publicUrl.replace(/\/+$/, "");
     return {
-      name: CLAUDE_MARKETPLACE_NAME,
-      owner: { name: "Skillset" },
+      name: settings.name,
+      owner: settings.owner_email ? { name: settings.owner_name, email: settings.owner_email } : { name: settings.owner_name },
+      ...(settings.description ? { metadata: { description: settings.description } } : {}),
       plugins: rows.map((row) => {
         const payload = row.payload as PluginPayload;
         return {

@@ -11,6 +11,7 @@ export type IdentityProviderRow = Selectable<DB["identity_providers"]>;
 export type NewIdentityProviderRow = Insertable<DB["identity_providers"]>;
 export type IntegrationRow = Selectable<DB["integrations"]>;
 export type NewIntegrationRow = Insertable<DB["integrations"]>;
+export type MarketplaceSettingsRow = Selectable<DB["marketplace_settings"]>;
 export type RateLimitRow = Selectable<DB["rate_limits"]>;
 export type ResourceInstallEventRow = Selectable<DB["resource_install_events"]>;
 export type NewResourceInstallEventRow = Insertable<DB["resource_install_events"]>;

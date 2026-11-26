@@ -12,8 +12,8 @@ describe("Plugin install guides", () => {
       namespace: registryNamespace(ORIGIN),
       origin: ORIGIN,
     });
-    expect(guide.steps.map((step) => step.command)).toEqual([`${CLI} --agent claude-code`]);
-    expect(guide.note).not.toMatch(/HTTPS/);
+    expect(guide.steps[0]?.command).toBe(`${CLI} --agent claude-code`);
+    expect(guide.note).toMatch(/skillset plugins update/);
   });
 
   it("names the namespace of a plugin imported from elsewhere", () => {
@@ -23,14 +23,5 @@ describe("Plugin install guides", () => {
       origin: ORIGIN,
     });
     expect(guide.steps[0]?.command).toBe(`${CLI} --namespace acme/plugins --agent cursor`);
-  });
-
-  it("warns when the Registry is not on HTTPS, since Claude Code will not download over HTTP", () => {
-    const guide = PLUGIN_INSTALL_GUIDES["claude-code"]({
-      name: "review-suite",
-      namespace: registryNamespace("http://localhost:3000"),
-      origin: "http://localhost:3000",
-    });
-    expect(guide.note).toMatch(/HTTPS/);
   });
 });

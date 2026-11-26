@@ -24,6 +24,9 @@ export interface PluginInstallContext {
 /** What the CLI is published as — the name `npx` has to be given to reach it. */
 const CLI_PACKAGE = "@in-org-quicko/skillset-cli";
 
+/** How a plugin installed with the CLI is kept up to date, for every agent. */
+const UPDATE_NOTE = "Run skillset plugins update to bring it up to date after a new version is published.";
+
 /** The `skillset plugins install` command that installs a Plugin for one agent. */
 function cliInstallCommand(
   { name, namespace, origin }: PluginInstallContext,
@@ -50,10 +53,9 @@ export const PLUGIN_INSTALL_GUIDES: Record<
         text: "Install the plugin with the Skillset CLI. It adds this Registry's marketplace to Claude Code and runs claude plugin install.",
         command: cliInstallCommand(context, "claude-code"),
       },
+      { text: "Restart Claude Code to load it." },
     ],
-    note: context.origin.startsWith("https://")
-      ? "Needs the claude CLI on your PATH. Claude Code keeps the plugin up to date from the marketplace."
-      : "Claude Code downloads plugins only over HTTPS. This Registry is served over HTTP, so the install fails until it is served over HTTPS.",
+    note: `Needs the claude CLI on your PATH. ${UPDATE_NOTE}`,
   }),
   cursor: (context) => ({
     steps: [
@@ -63,7 +65,7 @@ export const PLUGIN_INSTALL_GUIDES: Record<
       },
       { text: 'Restart Cursor, or run "Developer: Reload Window", to load it.' },
     ],
-    note: "Cursor has no command to install a plugin from a marketplace, so the CLI copies it in. Run the command again to update it.",
+    note: `Cursor has no command to install a plugin from a marketplace, so the CLI copies it in. ${UPDATE_NOTE}`,
   }),
   codex: (context) => ({
     steps: [
@@ -72,6 +74,6 @@ export const PLUGIN_INSTALL_GUIDES: Record<
         command: cliInstallCommand(context, "codex"),
       },
     ],
-    note: "Needs the codex CLI on your PATH. Run the command again to update the plugin.",
+    note: `Needs the codex CLI on your PATH. ${UPDATE_NOTE}`,
   }),
 };

@@ -9,7 +9,7 @@ import { runInstall } from "./commands/install.js";
 import type { SkillStatus } from "@in-org-quicko/skillset-installer";
 import { runList } from "./commands/list.js";
 import { runLogin } from "./commands/login.js";
-import { runPluginInstall } from "./commands/plugins.js";
+import { runPluginInstall, runPluginUpdate } from "./commands/plugins.js";
 import { runPublish } from "./commands/publish.js";
 import { runRemove } from "./commands/remove.js";
 import { runSearch } from "./commands/search.js";
@@ -419,11 +419,71 @@ plugins
       const supported = result.supported_agents.map((agent) => PLUGIN_AGENTS[agent].label).join(", ");
       p.log.success(`Installed ${pc.cyan(result.name)} for ${PLUGIN_AGENTS[result.agent].label}`);
       p.log.message(pc.dim(`Supports: ${supported}`));
+      if (result.via === "hosted") p.log.message(pc.dim("From: the Registry's hosted marketplace"));
       if (result.path) p.log.message(pc.dim(`Files: ${result.path}`));
       for (const command of result.commands) p.log.message(pc.dim(`Ran: ${command}`));
       if (result.next) p.log.info(result.next);
       p.outro("Done");
     } catch (error) {
+      fail(error);
+    }
+  });
+
+plugins
+  .command("update")
+  .description(
+    "Update Plugins installed with `skillset plugins install` to what the Registry has now — every one, or " +
+      "the one named.",
+  )
+  .argument("[name]", "The Plugin to update (default: every Plugin the CLI installed from this Registry)")
+  .option("--namespace <ns>", "Which party named the Plugin, when a bare name matches more than one")
+  .option("--agent <id>", `Only its install for this agent: ${PLUGIN_AGENT_IDS.join(", ")}`)
+  .option("--force", "Reinstall even when the Registry has nothing newer")
+  .option("--json", JSON_FLAG)
+  .addHelpText(
+    "after",
+    examples(["skillset plugins update", "skillset plugins update code-review-suite --agent cursor"]),
+  )
+  .action(async (name: string | undefined, opts: { namespace?: string; agent?: string; force?: boolean }) => {
+    const deps = {
+      fetch,
+      configPath: resolveConfigPath(process.env),
+      env: process.env,
+      homeDir: homedir(),
+      isTTY: false,
+      promptChoice,
+      run: runCommand,
+    };
+    const options = { name, namespace: opts.namespace, agent: opts.agent, force: opts.force };
+    if (jsonMode()) {
+      return emitJson(async () => {
+        const outcomes = await runPluginUpdate(deps, options);
+        if (outcomes.some((outcome) => outcome.status === "failed")) process.exitCode = 1;
+        return outcomes;
+      });
+    }
+
+    p.intro(label("plugins update"));
+    const s = p.spinner();
+    s.start("Checking the Registry");
+    try {
+      const outcomes = await runPluginUpdate(deps, options);
+      s.stop(outcomes.length === 0 ? "No Plugins installed with the CLI" : "Checked");
+      for (const outcome of outcomes) {
+        const what = `${pc.cyan(outcome.name)} for ${PLUGIN_AGENTS[outcome.agent].label}`;
+        if (outcome.status === "updated") {
+          p.log.success(`Updated ${what}: ${outcome.from} → ${outcome.to}`);
+          if (outcome.next) p.log.info(outcome.next);
+        } else if (outcome.status === "current") {
+          p.log.message(pc.dim(`${outcome.name} for ${PLUGIN_AGENTS[outcome.agent].label} is current (${outcome.revision})`));
+        } else {
+          p.log.error(`Could not update ${what}: ${outcome.message}`);
+        }
+      }
+      if (outcomes.some((outcome) => outcome.status === "failed")) process.exitCode = 1;
+      p.outro("Done");
+    } catch (error) {
+      s.stop("Failed");
       fail(error);
     }
   });

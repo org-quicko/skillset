@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SkillFile } from "@in-org-quicko/skillset-shared";
 import {
-  installClaudeCodePlugin,
+  installClaudeCodePluginHosted,
+  installClaudeCodePluginLocally,
   installCodexPlugin,
   installCursorPlugin,
   type CommandResult,
@@ -41,14 +42,16 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-describe("installClaudeCodePlugin", () => {
+const HOSTED = {
+  marketplaceUrl: "https://skills.acme.com/.claude-plugin/marketplace.json",
+  marketplaceName: "skillset",
+  entry: "review-suite",
+};
+
+describe("installClaudeCodePluginHosted", () => {
   it("adds the Registry's hosted marketplace, then installs the entry from it", async () => {
     const { context, calls } = contextFor(home);
-    const report = await installClaudeCodePlugin(
-      context,
-      "https://skills.acme.com/",
-      "review-suite",
-    );
+    const report = await installClaudeCodePluginHosted(context, HOSTED, "install");
     expect(calls).toEqual([
       "claude plugin marketplace add https://skills.acme.com/.claude-plugin/marketplace.json",
       "claude plugin install review-suite@skillset",
@@ -58,31 +61,86 @@ describe("installClaudeCodePlugin", () => {
 
   it("refreshes the marketplace when it is already added", async () => {
     const { context, calls } = contextFor(home, (line) =>
-      line.includes("marketplace add")
-        ? { code: 1, output: "already exists" }
-        : { code: 0, output: "" },
+      line.includes("marketplace add") ? { code: 1, output: "already exists" } : { code: 0, output: "" },
     );
-    await installClaudeCodePlugin(context, "https://skills.acme.com", "review-suite");
-    expect(calls[1]).toBe("claude plugin marketplace update skillset");
-    expect(calls[2]).toBe("claude plugin install review-suite@skillset");
+    await installClaudeCodePluginHosted(context, HOSTED, "install");
+    expect(calls.slice(1)).toEqual([
+      "claude plugin marketplace update skillset",
+      "claude plugin install review-suite@skillset",
+    ]);
+  });
+
+  it("refreshes the marketplace and updates the plugin on update", async () => {
+    const { context, calls } = contextFor(home);
+    await installClaudeCodePluginHosted(context, { ...HOSTED, marketplaceName: "acme" }, "update");
+    expect(calls).toEqual(["claude plugin marketplace update acme", "claude plugin update review-suite@acme"]);
   });
 
   it("says so when claude is not on PATH", async () => {
     const { context } = contextFor(home, () => ({ code: null, output: "" }));
-    await expect(
-      installClaudeCodePlugin(context, "https://skills.acme.com", "review-suite"),
-    ).rejects.toThrow(/Claude Code's `claude` CLI is not on PATH/);
+    await expect(installClaudeCodePluginHosted(context, HOSTED, "install")).rejects.toThrow(
+      /Claude Code's `claude` CLI is not on PATH/,
+    );
   });
 
   it("reports the install's own output when it fails", async () => {
     const { context } = contextFor(home, (line) =>
-      line.includes("plugin install")
-        ? { code: 1, output: "plugin not found" }
-        : { code: 0, output: "" },
+      line.includes("plugin install") ? { code: 1, output: "plugin not found" } : { code: 0, output: "" },
     );
+    await expect(installClaudeCodePluginHosted(context, HOSTED, "install")).rejects.toThrow(/plugin not found/);
+  });
+});
+
+describe("installClaudeCodePluginLocally", () => {
+  const root = () => join(home, ".claude", "plugins", "local", "skillset");
+
+  it("writes the plugin beside a local marketplace that lists it, then installs from it", async () => {
+    const { context, calls } = contextFor(home);
+    const report = await installClaudeCodePluginLocally(
+      context,
+      "review-suite",
+      [manifest(".claude-plugin"), file("commands/review.md", "Review.")],
+      "1.2.0+100",
+      "install",
+    );
+
+    expect(report.path).toBe(join(root(), "review-suite"));
+    expect(await readFile(join(root(), "review-suite", "commands", "review.md"), "utf8")).toBe("Review.");
+    const marketplace = JSON.parse(await readFile(join(root(), ".claude-plugin", "marketplace.json"), "utf8"));
+    expect(marketplace).toEqual({
+      name: "skillset-local",
+      owner: { name: "Skillset" },
+      plugins: [{ name: "review-suite", source: "./review-suite", version: "1.2.0+100" }],
+    });
+    expect(calls).toEqual([`claude plugin marketplace add ${root()}`, "claude plugin install review-suite@skillset-local"]);
+  });
+
+  it("updates in place: a new revision in the marketplace, a refresh, then claude plugin update", async () => {
+    const { context, calls } = contextFor(home, (line) =>
+      line.includes("marketplace add") ? { code: 1, output: "already added" } : { code: 0, output: "" },
+    );
+    await installClaudeCodePluginLocally(context, "lint-kit", [manifest(".claude-plugin")], "0.1.0+1", "install");
+    await installClaudeCodePluginLocally(context, "review-suite", [manifest(".claude-plugin")], "1.2.0+100", "install");
+    calls.length = 0;
+    await installClaudeCodePluginLocally(context, "review-suite", [manifest(".claude-plugin")], "1.2.0+200", "update");
+
+    const marketplace = JSON.parse(await readFile(join(root(), ".claude-plugin", "marketplace.json"), "utf8"));
+    expect(marketplace.plugins).toEqual([
+      { name: "lint-kit", source: "./lint-kit", version: "0.1.0+1" },
+      { name: "review-suite", source: "./review-suite", version: "1.2.0+200" },
+    ]);
+    expect(calls).toEqual([
+      `claude plugin marketplace add ${root()}`,
+      "claude plugin marketplace update skillset-local",
+      "claude plugin update review-suite@skillset-local",
+    ]);
+  });
+
+  it("refuses a Plugin with no Claude Code manifest", async () => {
+    const { context } = contextFor(home);
     await expect(
-      installClaudeCodePlugin(context, "https://skills.acme.com", "nope"),
-    ).rejects.toThrow(/plugin not found/);
+      installClaudeCodePluginLocally(context, "review-suite", [manifest(".cursor-plugin")], "1.0.0", "install"),
+    ).rejects.toThrow(/no \.claude-plugin\/plugin\.json/);
   });
 });
 

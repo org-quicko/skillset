@@ -417,13 +417,17 @@ export {
 } from "./mcp-install.js";
 
 export {
+  CLAUDE_LOCAL_MARKETPLACE_NAME,
   CODEX_MARKETPLACE_NAME,
-  installClaudeCodePlugin,
+  installClaudeCodePluginHosted,
+  installClaudeCodePluginLocally,
   installCodexPlugin,
   installCursorPlugin,
   runCommand,
+  type ClaudeHostedTarget,
   type CommandResult,
   type PluginInstallContext,
+  type PluginInstallMode,
   type PluginInstallReport,
   type RunCommand,
 } from "./plugin-install.js";

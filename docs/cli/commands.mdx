@@ -4,7 +4,7 @@ sidebarTitle: "Commands"
 description: "Full reference for every Skillset CLI command: login, search, install, publish, and more — with all flags, defaults, and examples."
 ---
 
-The Skillset CLI exposes twelve commands that cover the full lifecycle of a Skill, MCP Server, or Plugin: authenticating against a Registry, searching and reading the catalog, installing and managing Skills locally, and publishing new ones. Every command accepts `--json` for machine-readable output; see [CI & Automation](/cli/ci-automation) for non-interactive usage.
+The Skillset CLI exposes thirteen commands that cover the full lifecycle of a Skill, MCP Server, or Plugin: authenticating against a Registry, searching and reading the catalog, installing and managing Skills locally, and publishing new ones. Every command accepts `--json` for machine-readable output; see [CI & Automation](/cli/ci-automation) for non-interactive usage.
 
 <Note>
   **`--json` mode** replaces all formatted output with a structured JSON payload on stdout. Errors go to stderr as `{"error": {"code", "message"}}` with a non-zero exit code. `--json` never prompts — see each command for which flags become required.
@@ -328,7 +328,7 @@ skillset plugins install <name> [--agent <id>] [--namespace <ns>] [--json]
   Which party named the Plugin, when a bare name matches more than one publisher.
 </ParamField>
 
-- `claude-code` adds the Registry's `/.claude-plugin/marketplace.json` to Claude Code and runs `claude plugin install <name>@skillset`. Needs an HTTPS Registry.
+- `claude-code` adds the Registry's `/.claude-plugin/marketplace.json` to Claude Code and runs `claude plugin install <name>@<marketplace>` when the Registry is public HTTPS. Otherwise it writes the Plugin to a local marketplace under `~/.claude/plugins/local/skillset/` and installs `<name>@skillset-local`.
 - `cursor` copies the Plugin to `~/.cursor/plugins/local/<name>/`.
 - `codex` writes it to a local marketplace under `~/.agents/plugins/local/skillset/`, then runs `codex plugin marketplace add` and `codex plugin add <name>@skillset`.
 
@@ -340,8 +340,38 @@ skillset plugins install <name> [--agent <id>] [--namespace <ns>] [--json]
   "next": "Restart Cursor, or run \"Developer: Reload Window\", to load it.",
   "name": "code-review-suite",
   "namespace": "skills.example.com",
-  "supported_agents": ["claude-code", "cursor", "codex"]
+  "supported_agents": ["claude-code", "cursor", "codex"],
+  "via": null
 }
+```
+
+Every install is recorded in `plugins.json` beside the CLI's config, for `plugins update`. Installing a Plugin already installed updates it.
+
+</Accordion>
+
+<Accordion title="plugins update — Update Plugins installed with the CLI">
+
+Checks every Plugin installed with `skillset plugins install` from the configured Registry, or the one named, and reinstalls those republished since. A Plugin whose version and publish time are unchanged is left alone.
+
+```bash
+skillset plugins update [name] [--agent <id>] [--namespace <ns>] [--force] [--json]
+```
+
+<ParamField path="--agent" type="string">
+  Only update the Plugin's install for this agent.
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Reinstall even when the Registry has nothing newer.
+</ParamField>
+
+One Plugin failing does not stop the rest; the command exits with code 1 when any failed.
+
+```json Output (--json)
+[
+  { "name": "code-review-suite", "namespace": "skills.example.com", "agent": "cursor", "status": "updated", "from": "1.2.0+1795600000", "to": "1.2.1+1795700000", "next": "Restart Cursor, or run \"Developer: Reload Window\", to load it." },
+  { "name": "code-review-suite", "namespace": "skills.example.com", "agent": "codex", "status": "current", "revision": "1.2.1+1795700000" }
+]
 ```
 
 </Accordion>

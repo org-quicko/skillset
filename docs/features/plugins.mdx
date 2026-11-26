@@ -113,13 +113,25 @@ skillset plugins install code-review-suite --agent cursor
 
 Each agent installs differently:
 
-- **Claude Code:** the CLI adds this Registry's marketplace (`claude plugin marketplace add <registry>/.claude-plugin/marketplace.json`) and runs `claude plugin install <name>@skillset`. Claude Code then downloads the Plugin and keeps it up to date. The Registry must be served over HTTPS on a non-loopback host: Claude Code refuses plugin archives from anywhere else.
+- **Claude Code:** when the Registry is served over HTTPS on a public host, the CLI adds its hosted marketplace (`claude plugin marketplace add <registry>/.claude-plugin/marketplace.json`) and runs `claude plugin install <name>@<marketplace>`, and Claude Code downloads the Plugin itself. Anywhere else (plain HTTP, `localhost`, a private address), Claude Code refuses the hosted marketplace's archives, so the CLI downloads the Plugin into a local marketplace at `~/.claude/plugins/local/skillset/`, adds that, and runs `claude plugin install <name>@skillset-local`.
 - **Cursor:** the CLI downloads the Plugin and copies it to `~/.cursor/plugins/local/<name>/`. Restart Cursor, or run "Developer: Reload Window", to load it.
 - **Codex:** the CLI downloads the Plugin into a local Skillset marketplace at `~/.agents/plugins/local/skillset/`, adds that marketplace to Codex, and runs `codex plugin add <name>@skillset`.
 
 A Plugin's page has an Installation panel with a dropdown of the agents it supports. Each one shows the `skillset plugins install` command for that agent, ready to copy.
 
-Run the command again to update a Plugin installed for Cursor or Codex. Claude Code and Codex need their own CLIs (`claude`, `codex`) on your `PATH`.
+Claude Code and Codex need their own CLIs (`claude`, `codex`) on your `PATH`.
+
+### Updating a Plugin
+
+The CLI remembers every Plugin it installs, in `plugins.json` beside its config file. `skillset plugins update` checks each against the Registry and reinstalls the ones republished since, the same way for every agent:
+
+```bash
+skillset plugins update                      # every Plugin installed with the CLI
+skillset plugins update code-review-suite    # one Plugin, for every agent it was installed for
+skillset plugins update code-review-suite --agent cursor --force
+```
+
+A Plugin counts as new when its manifest version or its publish time changes, so republishing without bumping the version still reaches users. Plugins installed some other way, such as straight from Claude Code's `/plugin` browser, are not tracked: Claude Code updates those itself. To keep Plugins current without remembering to run the command, run it from a Claude Code `SessionStart` hook or a scheduled job.
 
 ## Marketplace
 
@@ -131,6 +143,16 @@ claude plugin install code-review-suite@skillset
 ```
 
 Cursor and Codex cannot read a marketplace from a URL, so the Registry serves none for them; `skillset plugins install` is how they install. MCP Servers are never listed, because the Registry has no bytes to point at for them.
+
+### Marketplace settings
+
+Admins edit the marketplace's details in **Settings → Marketplace**: its name, owner, owner email, and description. The name is what Claude Code users type after the `@` (`claude plugin install <plugin>@<name>`) and must be kebab-case. Which Plugins it lists always follows what is published.
+
+<Warning>
+  Renaming the marketplace breaks installs that used the old name. Users have to add the marketplace again and reinstall its plugins under the new name.
+</Warning>
+
+The details are also available to Admins over the API at `GET` and `PUT /api/marketplace/settings`.
 
 ## Tags
 

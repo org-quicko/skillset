@@ -2,8 +2,6 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  CLAUDE_MARKETPLACE_NAME,
-  CLAUDE_MARKETPLACE_PATH,
   PLUGIN_AGENTS,
   pluginAgentsForPaths,
   type PluginAgent,
@@ -68,6 +66,29 @@ export interface PluginInstallReport {
 
 /** The marketplace name the Registry's Plugins are installed under in a local Codex marketplace. */
 export const CODEX_MARKETPLACE_NAME = "skillset";
+
+/**
+ * The marketplace name of the local Claude Code marketplace the CLI writes when the Registry's
+ * hosted one cannot be used. Not `skillset`, so it never collides with the hosted marketplace.
+ */
+export const CLAUDE_LOCAL_MARKETPLACE_NAME = "skillset-local";
+
+/** Whether to install a Plugin afresh, or update one already installed from the same place. */
+export type PluginInstallMode = "install" | "update";
+
+/** One `plugins` entry of the local Claude Code marketplace file. */
+interface ClaudeLocalMarketplaceEntry {
+  name: string;
+  source: string;
+  version: string;
+}
+
+/** The local Claude Code marketplace file, as far as the CLI writes it. */
+interface ClaudeLocalMarketplace {
+  name: string;
+  owner: { name: string };
+  plugins: ClaudeLocalMarketplaceEntry[];
+}
 
 /** One `plugins` entry of a Codex marketplace file. */
 interface CodexMarketplaceEntry {
@@ -155,45 +176,133 @@ async function readCodexMarketplace(path: string): Promise<CodexMarketplace> {
   }
 }
 
+/** Where the Claude Code marketplace is, and which Plugin in it to install. */
+export interface ClaudeHostedTarget {
+  /** The Registry's hosted marketplace URL, e.g. `https://skills.acme.com/.claude-plugin/marketplace.json`. */
+  marketplaceUrl: string;
+  /** The marketplace's `name`, as the Registry serves it. */
+  marketplaceName: string;
+  /** The Plugin's entry name in it, from `claudeMarketplaceEntryName`. */
+  entry: string;
+}
+
 /**
- * Installs a Plugin for Claude Code from the Registry's hosted marketplace.
+ * Installs or updates a Plugin for Claude Code from the Registry's hosted marketplace.
  *
  * @remarks
- * Claude Code reads a marketplace straight from a URL, so nothing is written
- * here: `claude` adds `<registry>/.claude-plugin/marketplace.json` (or
- * refreshes it when it is already added) and downloads the Plugin itself.
+ * Claude Code reads the marketplace straight from its URL and downloads the
+ * Plugin itself, so nothing is written here. Installing adds the marketplace
+ * (or refreshes it when already added) and runs `claude plugin install`;
+ * updating refreshes it and runs `claude plugin update`. Claude Code only
+ * accepts this over HTTPS on a public host.
  *
  * @param context - The home directory and how to run `claude`.
- * @param registry - The Registry's origin, e.g. `https://skills.acme.com`.
- * @param entry - The Plugin's name in the marketplace, from `claudeMarketplaceEntryName`.
+ * @param target - The marketplace URL and name, and the Plugin's entry in it.
+ * @param mode - `install`, or `update` for a Plugin already installed from it.
  * @returns The commands run.
  * @throws Error when `claude` is not on PATH, or naming the command and its output when one fails.
  * @example
  * ```ts
- * await installClaudeCodePlugin({ homeDir, run: runCommand }, "https://skills.acme.com", "review-suite");
+ * await installClaudeCodePluginHosted(context, {
+ *   marketplaceUrl: "https://skills.acme.com/.claude-plugin/marketplace.json",
+ *   marketplaceName: "skillset",
+ *   entry: "review-suite",
+ * }, "install");
  * ```
  */
-export async function installClaudeCodePlugin(
+export async function installClaudeCodePluginHosted(
   context: PluginInstallContext,
-  registry: string,
-  entry: string,
+  target: ClaudeHostedTarget,
+  mode: PluginInstallMode,
 ): Promise<PluginInstallReport> {
   const commands: string[] = [];
-  const marketplaceUrl = `${registry.replace(/\/+$/, "")}${CLAUDE_MARKETPLACE_PATH}`;
+  const plugin = `${target.entry}@${target.marketplaceName}`;
+  if (mode === "update") {
+    await runOrThrow(context, "claude-code", commands, "claude", ["plugin", "marketplace", "update", target.marketplaceName]);
+    await runOrThrow(context, "claude-code", commands, "claude", ["plugin", "update", plugin]);
+  } else {
+    await addOrRefreshMarketplace(
+      context,
+      "claude-code",
+      commands,
+      "claude",
+      ["plugin", "marketplace", "add", target.marketplaceUrl],
+      ["plugin", "marketplace", "update", target.marketplaceName],
+    );
+    await runOrThrow(context, "claude-code", commands, "claude", ["plugin", "install", plugin]);
+  }
+  return { agent: "claude-code", path: null, commands, next: "Restart Claude Code to load it." };
+}
+
+async function readClaudeLocalMarketplace(path: string): Promise<ClaudeLocalMarketplace> {
+  const fresh: ClaudeLocalMarketplace = { name: CLAUDE_LOCAL_MARKETPLACE_NAME, owner: { name: "Skillset" }, plugins: [] };
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<ClaudeLocalMarketplace>;
+    return { ...fresh, plugins: Array.isArray(parsed.plugins) ? parsed.plugins : [] };
+  } catch {
+    return fresh;
+  }
+}
+
+/**
+ * Installs or updates a Plugin for Claude Code through a local Skillset marketplace.
+ *
+ * @remarks
+ * Used when the Registry's hosted marketplace cannot be: Claude Code refuses a
+ * Plugin archive that is not HTTPS or that is on a local or private host. The
+ * Plugin is written beside a marketplace file under
+ * `~/.claude/plugins/local/skillset/`, that marketplace is added to Claude Code
+ * (or refreshed), and the Plugin is installed or updated from it — the way the
+ * JFrog CLI does. The entry's version carries `revision`, so Claude Code sees a
+ * republish as a new version even when the manifest's version is unchanged.
+ *
+ * @param context - The home directory and how to run `claude`.
+ * @param name - The Plugin's name, which names its directory and marketplace entry.
+ * @param files - The Plugin's files, from `extractArtifactFiles`.
+ * @param revision - The Plugin's version as the Registry has it, e.g. `1.2.0+1717000000`.
+ * @param mode - `install`, or `update` for a Plugin already installed from it.
+ * @returns Where the files were written, and the commands run.
+ * @throws Error when the files hold no `.claude-plugin/plugin.json`, when `claude` is not on
+ * PATH, or naming the command and its output when one fails.
+ * @example
+ * ```ts
+ * await installClaudeCodePluginLocally(context, "review-suite", files, "1.2.0+1717000000", "install");
+ * ```
+ */
+export async function installClaudeCodePluginLocally(
+  context: PluginInstallContext,
+  name: string,
+  files: readonly SkillFile[],
+  revision: string,
+  mode: PluginInstallMode,
+): Promise<PluginInstallReport> {
+  requireManifest("claude-code", files);
+  const root = join(context.homeDir, ".claude", "plugins", "local", "skillset");
+  const path = join(root, name);
+  await writePluginFiles(path, files);
+
+  const marketplacePath = join(root, ".claude-plugin", "marketplace.json");
+  const marketplace = await readClaudeLocalMarketplace(marketplacePath);
+  const entry: ClaudeLocalMarketplaceEntry = { name, source: `./${name}`, version: revision };
+  marketplace.plugins = [...marketplace.plugins.filter((plugin) => plugin.name !== name), entry];
+  await mkdir(dirname(marketplacePath), { recursive: true });
+  await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`);
+
+  const commands: string[] = [];
   await addOrRefreshMarketplace(
     context,
     "claude-code",
     commands,
     "claude",
-    ["plugin", "marketplace", "add", marketplaceUrl],
-    ["plugin", "marketplace", "update", CLAUDE_MARKETPLACE_NAME],
+    ["plugin", "marketplace", "add", root],
+    ["plugin", "marketplace", "update", CLAUDE_LOCAL_MARKETPLACE_NAME],
   );
   await runOrThrow(context, "claude-code", commands, "claude", [
     "plugin",
-    "install",
-    `${entry}@${CLAUDE_MARKETPLACE_NAME}`,
+    mode,
+    `${name}@${CLAUDE_LOCAL_MARKETPLACE_NAME}`,
   ]);
-  return { agent: "claude-code", path: null, commands };
+  return { agent: "claude-code", path, commands, next: "Restart Claude Code to load it." };
 }
 
 /**

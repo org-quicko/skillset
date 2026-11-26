@@ -139,6 +139,9 @@ export const submissionsQueryKey = ["submissions"] as const;
 /** Every configured Integration — an Admin's view. There is no public counterpart. */
 export const integrationsQueryKey = ["integrations"] as const;
 
+/** The Claude Code marketplace's details — an Admin's view. */
+export const marketplaceSettingsQueryKey = ["marketplace", "settings"] as const;
+
 /**
  * Every repository a writer's Connection to a Git Provider can see — the
  * picker behind "browse repositories" on the publish screen.

@@ -13,6 +13,7 @@ import { connectionsRoutes } from "./features/connections/connections.routes.js"
 import { identityProvidersRoutes } from "./features/identity-providers/identity-providers.routes.js";
 import { importsRoutes } from "./features/imports/imports.routes.js";
 import { integrationsRoutes } from "./features/integrations/integrations.routes.js";
+import { marketplaceRoutes } from "./features/marketplace/marketplace.routes.js";
 import { resourcesRoutes } from "./features/resources/resources.routes.js";
 import { setupRoutes } from "./features/setup/setup.routes.js";
 import { submissionsRoutes } from "./features/submissions/submissions.routes.js";
@@ -125,6 +126,7 @@ function createApi(deps: AppDependencies, services: Services) {
     .route("/auth", authRoutes)
     .route("/identity-providers", identityProvidersRoutes)
     .route("/integrations", integrationsRoutes)
+    .route("/marketplace", marketplaceRoutes)
     .route("/connections", connectionsRoutes)
     .route("/imports", importsRoutes)
     .route("/users", usersRoutes)
@@ -194,7 +196,9 @@ export function createApp(deps: AppDependencies): Hono {
   app.get("/openapi.json", (c) => c.json(openapiSpec));
   // Claude Code's marketplace for the Registry's Plugins:
   // `claude plugin marketplace add <PUBLIC_URL>/.claude-plugin/marketplace.json`.
-  app.get(CLAUDE_MARKETPLACE_PATH, async (c) => c.json(await services.resources.getClaudeMarketplace()));
+  app.get(CLAUDE_MARKETPLACE_PATH, async (c) =>
+    c.json(await services.resources.getClaudeMarketplace(await services.marketplace.getSettings())),
+  );
   app.get("/mcp", (c) => c.json(mcpDiscovery));
   if (deps.mcpbPath) {
     const mcpbPath = deps.mcpbPath;

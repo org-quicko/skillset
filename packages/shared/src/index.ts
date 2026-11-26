@@ -14,6 +14,7 @@ export * from "./mcp.js";
 export * from "./mcp-config.js";
 export * from "./plugin.js";
 export * from "./plugin-components.js";
+export * from "./marketplace.js";
 export * from "./skill-rules.js";
 export * from "./skill.js";
 export * from "./tag-rules.js";

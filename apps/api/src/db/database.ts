@@ -72,6 +72,15 @@ export interface Integrations {
   updated_at: Generated<Timestamp>;
 }
 
+export interface MarketplaceSettings {
+  description: string | null;
+  id: Generated<boolean>;
+  name: string;
+  owner_email: string | null;
+  owner_name: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface RateLimits {
   count: number;
   id: Generated<string>;
@@ -204,6 +213,7 @@ export interface DB {
   connections: Connections;
   identity_providers: IdentityProviders;
   integrations: Integrations;
+  marketplace_settings: MarketplaceSettings;
   rate_limits: RateLimits;
   resource_analytics: ResourceAnalytics;
   resource_directory: ResourceDirectory;

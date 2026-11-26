@@ -6,6 +6,7 @@ import { ConnectionsService } from "./features/connections/connections.service.j
 import { IdentityProvidersService } from "./features/identity-providers/identity-providers.service.js";
 import { ImportsService } from "./features/imports/imports.service.js";
 import { IntegrationsService } from "./features/integrations/integrations.service.js";
+import { MarketplaceService } from "./features/marketplace/marketplace.service.js";
 import { ResourcesService } from "./features/resources/resources.service.js";
 import { SetupService } from "./features/setup/setup.service.js";
 import { SubmissionsService } from "./features/submissions/submissions.service.js";
@@ -42,6 +43,7 @@ export interface Services {
   setup: SetupService;
   identityProviders: IdentityProvidersService;
   integrations: IntegrationsService;
+  marketplace: MarketplaceService;
   connections: ConnectionsService;
   imports: ImportsService;
 }
@@ -89,6 +91,7 @@ export function buildServices(deps: ServiceDependencies): Services {
     setup: new SetupService(deps.db, deps.logger),
     identityProviders: new IdentityProvidersService(deps.db, deps.logger, keys),
     integrations,
+    marketplace: new MarketplaceService(deps.db, deps.logger),
     connections,
     imports: new ImportsService(deps.logger, integrations, connections),
   };
